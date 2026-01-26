@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MedAdvice v3 - Governance Logs</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto p-4">
+        <!-- Header -->
+        <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
+            <h1 class="text-3xl font-bold text-blue-600 mb-2">AI Governance Logs</h1>
+            <p class="text-gray-600">Comprehensive AI Interaction Traceability</p>
+            <div class="mt-4">
+                <a href="/app" class="text-blue-600 hover:underline">← Back to Chat</a> |
+                <a href="/admin-ui" class="text-blue-600 hover:underline">Admin Dashboard</a>
+            </div>
+        </div>
+
+        <!-- Session Lookup -->
+        <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+            <h2 class="text-xl font-bold mb-4">Session Lookup</h2>
+            <div class="flex space-x-2">
+                <input
+                    type="text"
+                    id="sessionIdInput"
+                    placeholder="Enter session ID..."
+                    class="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                    onclick="loadSessionGovernance()"
+                    class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                    Load Session
+                </button>
+            </div>
+        </div>
+
+        <!-- Session Details -->
+        <div id="sessionDetails" class="hidden">
+            <!-- Session Overview -->
+            <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+                <h2 class="text-xl font-bold mb-4">Session Overview</h2>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                        <p class="text-sm text-gray-500">Session ID</p>
+                        <p id="detailSessionId" class="font-mono text-sm"></p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500">Created At</p>
+                        <p id="detailCreatedAt" class="text-sm"></p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500">Final Severity</p>
+                        <p id="detailSeverity" class="text-sm font-semibold"></p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500">Escalated</p>
+                        <p id="detailEscalated" class="text-sm font-semibold"></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Conversation History -->
+            <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+                <h2 class="text-xl font-bold mb-4">Conversation History</h2>
+                <div id="conversationHistory" class="space-y-3">
+                </div>
+            </div>
+
+            <!-- Governance Logs -->
+            <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+                <h2 class="text-xl font-bold mb-4">AI Governance Logs</h2>
+                <div id="governanceLogs" class="space-y-4">
+                </div>
+            </div>
+
+            <!-- Escalations -->
+            <div id="escalationsSection" class="bg-white shadow-lg rounded-lg p-6 mb-6 hidden">
+                <h2 class="text-xl font-bold mb-4 text-orange-600">Escalations</h2>
+                <div id="escalationsList" class="space-y-4">
+                </div>
+            </div>
+
+            <!-- Audit Logs -->
+            <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+                <h2 class="text-xl font-bold mb-4">Audit Trail</h2>
+                <div id="auditLogs" class="space-y-2">
+                </div>
+            </div>
+        </div>
+
+        <!-- No Session Selected -->
+        <div id="noSession" class="bg-white shadow-lg rounded-lg p-12 text-center text-gray-500">
+            <svg class="mx-auto h-12 w-12 text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <p class="text-lg mb-2">No session selected</p>
+            <p class="text-sm">Enter a session ID above to view governance logs</p>
+        </div>
+    </div>
+
+    <script>
+        // Check URL params for session
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const sessionId = urlParams.get('session');
+            if (sessionId) {
+                document.getElementById('sessionIdInput').value = sessionId;
+                loadSessionGovernance();
+            }
+        });
+
+        async function loadSessionGovernance() {
+            const sessionId = document.getElementById('sessionIdInput').value.trim();
+            if (!sessionId) {
+                alert('Please enter a session ID');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/admin/governance/session/${sessionId}`);
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        alert('Session not found');
+                        return;
+                    }
+                    throw new Error('Failed to load session');
+                }
+
+                const data = await response.json();
+                displaySessionData(data);
+
+            } catch (error) {
+                console.error('Error loading session:', error);
+                alert('Failed to load session data');
+            }
+        }
+
+        function displaySessionData(data) {
+            // Hide no session message
+            document.getElementById('noSession').classList.add('hidden');
+            document.getElementById('sessionDetails').classList.remove('hidden');
+
+            // Update overview
+            document.getElementById('detailSessionId').textContent = data.session_id;
+            document.getElementById('detailCreatedAt').textContent = new Date(data.created_at).toLocaleString();
+            document.getElementById('detailSeverity').textContent = data.final_severity || 'N/A';
+            document.getElementById('detailSeverity').className = `text-sm font-semibold ${getSeverityColor(data.final_severity)}`;
+            document.getElementById('detailEscalated').textContent = data.escalated ? 'Yes' : 'No';
+            document.getElementById('detailEscalated').className = `text-sm font-semibold ${data.escalated ? 'text-red-600' : 'text-green-600'}`;
+
+            // Display conversation
+            displayConversation(data.messages);
+
+            // Display governance logs
+            displayGovernanceLogs(data.governance_logs);
+
+            // Display escalations
+            if (data.escalations && data.escalations.length > 0) {
+                document.getElementById('escalationsSection').classList.remove('hidden');
+                displayEscalations(data.escalations);
+            }
+
+            // Display audit logs
+            displayAuditLogs(data.audit_logs);
+        }
+
+        function displayConversation(messages) {
+            const container = document.getElementById('conversationHistory');
+            if (!messages || messages.length === 0) {
+                container.innerHTML = '<p class="text-gray-500">No messages</p>';
+                return;
+            }
+
+            container.innerHTML = messages.map(msg => {
+                const roleClass = msg.role === 'user' ? 'bg-blue-50 border-l-4 border-blue-500' : 'bg-gray-50 border-l-4 border-gray-400';
+                return `
+                    <div class="${roleClass} p-3 rounded">
+                        <p class="text-xs text-gray-500 mb-1">${msg.role.toUpperCase()} - ${new Date(msg.timestamp).toLocaleString()}</p>
+                        <p class="text-sm">${msg.content}</p>
+                        ${msg.type ? `<span class="inline-block mt-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded">${msg.type}</span>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function displayGovernanceLogs(logs) {
+            const container = document.getElementById('governanceLogs');
+            if (!logs || logs.length === 0) {
+                container.innerHTML = '<p class="text-gray-500">No governance logs</p>';
+                return;
+            }
+
+            container.innerHTML = logs.map(log => {
+                const flags = [];
+                if (log.pii_detected) flags.push({ text: 'PII Detected', class: 'bg-red-100 text-red-800', types: log.pii_types });
+                if (log.safety_violated) flags.push({ text: 'Safety Violation', class: 'bg-orange-100 text-orange-800', types: log.safety_categories });
+                if (log.guardrail_triggered) flags.push({ text: 'Guardrail Triggered', class: 'bg-yellow-100 text-yellow-800', types: log.guardrail_ids });
+
+                return `
+                    <div class="border border-gray-200 rounded p-4">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <p class="font-semibold">${log.operation_name}</p>
+                                <p class="text-xs text-gray-500">Request ID: ${log.request_id}</p>
+                            </div>
+                            <p class="text-xs text-gray-500">${new Date(log.timestamp).toLocaleString()}</p>
+                        </div>
+
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3 text-sm">
+                            <div>
+                                <p class="text-gray-500 text-xs">Total Tokens</p>
+                                <p class="font-semibold">${log.usage_total_tokens || '-'}</p>
+                            </div>
+                            <div>
+                                <p class="text-gray-500 text-xs">PII Detected</p>
+                                <p class="font-semibold ${log.pii_detected ? 'text-red-600' : 'text-green-600'}">${log.pii_detected ? 'Yes' : 'No'}</p>
+                            </div>
+                            <div>
+                                <p class="text-gray-500 text-xs">Safety</p>
+                                <p class="font-semibold ${log.safety_violated ? 'text-red-600' : 'text-green-600'}">${log.safety_violated ? 'Violated' : 'OK'}</p>
+                            </div>
+                            <div>
+                                <p class="text-gray-500 text-xs">Guardrail</p>
+                                <p class="font-semibold ${log.guardrail_triggered ? 'text-yellow-600' : 'text-green-600'}">${log.guardrail_triggered ? 'Triggered' : 'OK'}</p>
+                            </div>
+                        </div>
+
+                        ${flags.length > 0 ? `
+                            <div class="space-y-2">
+                                ${flags.map(flag => `
+                                    <div class="${flag.class} px-3 py-2 rounded">
+                                        <p class="font-semibold text-sm">${flag.text}</p>
+                                        ${flag.types ? `<p class="text-xs mt-1">${JSON.stringify(flag.types)}</p>` : ''}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function displayEscalations(escalations) {
+            const container = document.getElementById('escalationsList');
+
+            container.innerHTML = escalations.map(esc => {
+                const statusColors = {
+                    'pending': 'bg-yellow-100 text-yellow-800',
+                    'reviewed': 'bg-blue-100 text-blue-800',
+                    'resolved': 'bg-green-100 text-green-800'
+                };
+
+                return `
+                    <div class="border-2 border-orange-300 rounded p-4 bg-orange-50">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <p class="font-semibold text-orange-800">Escalation</p>
+                                <p class="text-xs text-gray-600">ID: ${esc.escalation_id}</p>
+                            </div>
+                            <span class="px-3 py-1 rounded text-sm font-semibold ${statusColors[esc.review_status] || ''}">${esc.review_status}</span>
+                        </div>
+
+                        <div class="mb-3">
+                            <p class="text-sm text-gray-600">Timestamp</p>
+                            <p class="font-semibold">${new Date(esc.timestamp).toLocaleString()}</p>
+                        </div>
+
+                        <div class="mb-3">
+                            <p class="text-sm text-gray-600">Severity</p>
+                            <p class="font-semibold ${getSeverityColor(esc.severity)}">${esc.severity}</p>
+                        </div>
+
+                        <div class="mb-3">
+                            <p class="text-sm text-gray-600">Reason</p>
+                            <p>${esc.reason}</p>
+                        </div>
+
+                        <div class="mb-3">
+                            <p class="text-sm text-gray-600">Symptoms</p>
+                            <div class="flex flex-wrap gap-1 mt-1">
+                                ${esc.symptoms.map(s => `<span class="px-2 py-1 bg-white rounded text-xs">${s}</span>`).join('')}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function displayAuditLogs(logs) {
+            const container = document.getElementById('auditLogs');
+            if (!logs || logs.length === 0) {
+                container.innerHTML = '<p class="text-gray-500">No audit logs</p>';
+                return;
+            }
+
+            container.innerHTML = logs.map(log => `
+                <div class="flex justify-between items-center p-2 bg-gray-50 rounded text-sm">
+                    <div class="flex-1">
+                        <span class="font-semibold">${log.action}</span>
+                        <span class="text-gray-500">by ${log.actor}</span>
+                    </div>
+                    <span class="text-xs text-gray-500">${new Date(log.timestamp).toLocaleString()}</span>
+                </div>
+            `).join('');
+        }
+
+        function getSeverityColor(severity) {
+            const colors = {
+                'LOW': 'text-green-600',
+                'MEDIUM': 'text-yellow-600',
+                'HIGH': 'text-orange-600',
+                'EMERGENCY': 'text-red-600'
+            };
+            return colors[severity] || 'text-gray-600';
+        }
+    </script>
+</body>
+</html>

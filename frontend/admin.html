@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MedAdvice v3 - Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto p-4">
+        <!-- Header -->
+        <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
+            <h1 class="text-3xl font-bold text-blue-600 mb-2">MedAdvice v3 - Admin Dashboard</h1>
+            <p class="text-gray-600">System Metrics & Management</p>
+            <div class="mt-4">
+                <a href="/app" class="text-blue-600 hover:underline">← Back to Chat</a> |
+                <a href="/governance-ui" class="text-blue-600 hover:underline">Governance Logs</a>
+            </div>
+        </div>
+
+        <!-- Metrics Overview -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-gray-500 text-sm font-semibold">Total Interactions</h3>
+                <p id="totalInteractions" class="text-3xl font-bold text-blue-600">-</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-gray-500 text-sm font-semibold">Escalations</h3>
+                <p id="escalationCount" class="text-3xl font-bold text-orange-600">-</p>
+                <p id="escalationRate" class="text-xs text-gray-500">-</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-gray-500 text-sm font-semibold">Avg Latency</h3>
+                <p id="avgLatency" class="text-3xl font-bold text-green-600">-</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-gray-500 text-sm font-semibold">Total Tokens</h3>
+                <p id="totalTokens" class="text-3xl font-bold text-purple-600">-</p>
+            </div>
+        </div>
+
+        <!-- Safety Metrics -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-lg font-bold mb-4">PII Detection</h3>
+                <p class="text-4xl font-bold text-red-600" id="piiCount">-</p>
+                <p class="text-sm text-gray-500 mt-2">Instances detected</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-lg font-bold mb-4">Guardrail Triggers</h3>
+                <p class="text-4xl font-bold text-yellow-600" id="guardrailCount">-</p>
+                <p class="text-sm text-gray-500 mt-2">Total triggers</p>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-lg font-bold mb-4">Severity Distribution</h3>
+                <canvas id="severityChart"></canvas>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-lg font-bold mb-4">Token Usage</h3>
+                <canvas id="tokenChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Escalation Queue -->
+        <div class="bg-white shadow-lg rounded-lg p-6 mb-6">
+            <h2 class="text-2xl font-bold mb-4">Escalation Queue</h2>
+            <div class="mb-4">
+                <label class="mr-4">
+                    <input type="radio" name="escalationFilter" value="all" checked onchange="loadEscalations()"> All
+                </label>
+                <label class="mr-4">
+                    <input type="radio" name="escalationFilter" value="pending" onchange="loadEscalations()"> Pending
+                </label>
+                <label class="mr-4">
+                    <input type="radio" name="escalationFilter" value="reviewed" onchange="loadEscalations()"> Reviewed
+                </label>
+                <label>
+                    <input type="radio" name="escalationFilter" value="resolved" onchange="loadEscalations()"> Resolved
+                </label>
+            </div>
+            <div id="escalationQueue" class="overflow-x-auto">
+                <table class="min-w-full">
+                    <thead class="bg-gray-100">
+                        <tr>
+                            <th class="px-4 py-2 text-left">Timestamp</th>
+                            <th class="px-4 py-2 text-left">Session ID</th>
+                            <th class="px-4 py-2 text-left">Severity</th>
+                            <th class="px-4 py-2 text-left">Reason</th>
+                            <th class="px-4 py-2 text-left">Status</th>
+                            <th class="px-4 py-2 text-left">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="escalationTableBody">
+                        <tr>
+                            <td colspan="6" class="text-center py-4 text-gray-500">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Recent Interactions -->
+        <div class="bg-white shadow-lg rounded-lg p-6">
+            <h2 class="text-2xl font-bold mb-4">Recent Interactions</h2>
+            <div id="recentInteractions" class="overflow-x-auto">
+                <table class="min-w-full">
+                    <thead class="bg-gray-100">
+                        <tr>
+                            <th class="px-4 py-2 text-left">Timestamp</th>
+                            <th class="px-4 py-2 text-left">Session ID</th>
+                            <th class="px-4 py-2 text-left">Operation</th>
+                            <th class="px-4 py-2 text-left">Tokens</th>
+                            <th class="px-4 py-2 text-left">Flags</th>
+                            <th class="px-4 py-2 text-left">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="interactionsTableBody">
+                        <tr>
+                            <td colspan="6" class="text-center py-4 text-gray-500">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/admin.js"></script>
+</body>
+</html>

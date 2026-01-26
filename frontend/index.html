@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MedAdvice v3 - Medical Guidance</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .message-user {
+            background-color: #3b82f6;
+            color: white;
+        }
+        .message-assistant {
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+        .message-clarifying {
+            background-color: white;
+            border: 2px solid #fbbf24;
+            color: #1f2937;
+        }
+        .message-recommendation {
+            background-color: #d1fae5;
+            border-left: 4px solid #10b981;
+            color: #1f2937;
+        }
+        .message-warning {
+            background-color: #fee2e2;
+            border-left: 4px solid #ef4444;
+            color: #7f1d1d;
+        }
+        .message-escalation {
+            background-color: #fef3c7;
+            border: 2px solid #f59e0b;
+            color: #78350f;
+        }
+        .spinner {
+            border: 3px solid #f3f4f6;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .chat-container {
+            height: 400px;
+            overflow-y: auto;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 50;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <!-- Disclaimer Modal -->
+    <div id="disclaimerModal" class="modal active">
+        <div class="bg-white p-8 rounded-lg shadow-xl max-w-2xl mx-4">
+            <h2 class="text-2xl font-bold mb-4 text-red-600">⚠️ IMPORTANT MEDICAL DISCLAIMER</h2>
+            <div class="mb-6 max-h-96 overflow-y-auto">
+                <p class="mb-4 font-semibold">This service provides general health information and guidance only. It is NOT a substitute for professional medical advice, diagnosis, or treatment.</p>
+
+                <div class="mb-4">
+                    <h3 class="font-semibold mb-2">Key Points:</h3>
+                    <ul class="list-disc list-inside space-y-2 text-sm">
+                        <li>This is NOT emergency medical care. If you are experiencing a medical emergency, call 911 or go to the nearest emergency room immediately.</li>
+                        <li>The information provided is for educational purposes only and should not be used to diagnose or treat any health condition.</li>
+                        <li>Always seek the advice of your physician or other qualified health provider with any questions you may have regarding a medical condition.</li>
+                        <li>Never disregard professional medical advice or delay in seeking it because of something you have read here.</li>
+                        <li>This service does NOT provide prescription medication advice or pediatric dosing.</li>
+                        <li>If you are pregnant, elderly, or have chronic health conditions, consult with a healthcare provider before following any recommendations.</li>
+                    </ul>
+                </div>
+
+                <div class="bg-yellow-50 p-4 rounded mb-4">
+                    <p class="font-semibold mb-2">By continuing, you acknowledge that:</p>
+                    <ol class="list-decimal list-inside space-y-1 text-sm">
+                        <li>You understand this is not professional medical care</li>
+                        <li>You will seek emergency care for urgent symptoms</li>
+                        <li>You will consult a healthcare provider for proper diagnosis and treatment</li>
+                        <li>You understand the limitations of this service</li>
+                    </ol>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-4">
+                <button onclick="declineDisclaimer()" class="px-6 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400">
+                    Decline
+                </button>
+                <button onclick="acceptDisclaimer()" class="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+                    I Accept & Continue
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App -->
+    <div id="mainApp" class="hidden">
+        <div class="container mx-auto p-4">
+            <!-- Auto-Prompt Control Bar -->
+            <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="autoPromptToggle" class="sr-only peer" onchange="toggleAutoPrompt()">
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                        <div>
+                            <span class="text-sm font-semibold text-indigo-700">Auto-Generate Sessions</span>
+                            <p class="text-xs text-indigo-500">Automatically creates realistic consultation sessions (1 per minute)</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-3">
+                        <div id="autoPromptStats" class="text-xs text-indigo-600 hidden">
+                            Sessions: <span id="autoPromptCount">0</span>
+                        </div>
+                        <div id="autoPromptStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
+                            OFF
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Header -->
+            <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <h1 class="text-3xl font-bold text-blue-600 mb-2">MedAdvice v3</h1>
+                        <p class="text-gray-600">General Medical Guidance with AI Governance</p>
+                        <p class="text-xs text-gray-400 mt-2">Session ID: <span id="sessionId" class="font-mono"></span></p>
+                    </div>
+                    <button
+                        id="newSessionBtn"
+                        onclick="startNewSession()"
+                        class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                        title="Start a new consultation session"
+                    >
+                        🔄 New Session
+                    </button>
+                </div>
+                
+                <!-- PII/PHI Toggle Control -->
+                <div class="border-t pt-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="piiToggle" class="sr-only peer" onchange="togglePII()">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                            </label>
+                            <div>
+                                <span class="text-sm font-semibold text-gray-700">Include Synthetic PII/PHI in Responses</span>
+                                <p class="text-xs text-gray-500">ON = Always include | OFF = Random at 25% rate</p>
+                            </div>
+                        </div>
+                        <div id="piiStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
+                            RANDOM (25%)
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Emergency Banner -->
+            <div class="bg-red-100 border-l-4 border-red-500 p-4 mb-4 rounded">
+                <p class="font-bold text-red-700">⚠️ EMERGENCY?</p>
+                <p class="text-red-600">If this is a medical emergency, call 911 or go to your nearest emergency room immediately.</p>
+            </div>
+
+            <!-- Chat Container -->
+            <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
+                <div id="chatContainer" class="chat-container mb-4 space-y-4">
+                    <div class="text-center text-gray-500 py-8">
+                        <p>👋 Welcome! How can I help you today?</p>
+                        <p class="text-sm mt-2">Please describe your symptoms or health concern.</p>
+                    </div>
+                </div>
+
+                <!-- Input Area -->
+                <div class="flex space-x-2">
+                    <input
+                        type="text"
+                        id="messageInput"
+                        placeholder="Describe your symptoms or concern..."
+                        class="flex-1 p-4 text-lg border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        onkeypress="handleKeyPress(event)"
+                    />
+                    <button
+                        onclick="sendMessage()"
+                        id="sendButton"
+                        class="px-8 py-4 text-lg bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                    >
+                        Send
+                    </button>
+                </div>
+
+                <div id="loadingIndicator" class="hidden mt-4 flex items-center justify-center space-x-2">
+                    <div class="spinner"></div>
+                    <span class="text-gray-600">Processing your message...</span>
+                </div>
+            </div>
+
+            <!-- Info Footer -->
+            <div class="text-center text-gray-500 text-sm">
+                <p>All conversations are logged for quality assurance and safety monitoring.</p>
+                <p class="mt-2">
+                    <a href="/admin-ui" class="text-blue-600 hover:underline" target="_blank">Admin Dashboard</a> |
+                    <a href="/governance-ui" class="text-blue-600 hover:underline" target="_blank">Governance Logs</a>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/chat.js"></script>
+</body>
+</html>
