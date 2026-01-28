@@ -32,6 +32,9 @@ class GovernanceLogger:
         **kwargs
     ):
         """Log AI request"""
+        # Extract user_prompt before passing to create_governance_log
+        user_prompt = kwargs.pop("user_prompt", None)
+        
         log_data = create_governance_log(
             operation_name=operation_name,
             request_model=settings.anthropic_model,
@@ -43,6 +46,10 @@ class GovernanceLogger:
             **(request_params or {}),
             **kwargs
         )
+        
+        # Add user_prompt field if provided (for Splunk field extraction compatibility)
+        if user_prompt is not None:
+            log_data["user_prompt"] = user_prompt
 
         self._write_log(log_data, "governance")
 

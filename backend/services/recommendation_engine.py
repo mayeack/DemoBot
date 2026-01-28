@@ -201,7 +201,7 @@ Do NOT use combined values like "MEDIUM-HIGH" or "LOW-MEDIUM". Choose the single
         trace_id = str(uuid.uuid4())
         start_time = time.time()
 
-        # Log incoming request
+        # Log incoming request with prompt details (consolidated to avoid Splunk event merging)
         governance_logger.log_request(
             session_id=session_id,
             request_id=request_id,
@@ -212,7 +212,9 @@ Do NOT use combined values like "MEDIUM-HIGH" or "LOW-MEDIUM". Choose the single
                 "request_temperature": 0.7
             },
             trace_id=trace_id,
-            client_address=client_address
+            client_address=client_address,
+            system_instructions=self.SYSTEM_PROMPT,
+            user_prompt=user_message
         )
 
         try:
@@ -283,6 +285,8 @@ Do NOT use combined values like "MEDIUM-HIGH" or "LOW-MEDIUM". Choose the single
         """Generate medical recommendation using Claude"""
 
         # Build message history for Claude
+        # Note: conversation_history already includes the current user_message
+        # (appended in chat.py before calling process_message)
         messages = []
         for msg in conversation_history:
             if msg.get("role") in ["user", "assistant"]:
@@ -291,18 +295,8 @@ Do NOT use combined values like "MEDIUM-HIGH" or "LOW-MEDIUM". Choose the single
                     "content": msg["content"]
                 })
 
-        messages.append({
-            "role": "user",
-            "content": user_message
-        })
-
-        # Log prompt
-        governance_logger.log_prompt(
-            session_id=session_id,
-            request_id=request_id,
-            system_prompt=self.SYSTEM_PROMPT,
-            user_prompt=user_message
-        )
+        # Note: Prompt logging is now consolidated into log_request() in process_message()
+        # to avoid Splunk merging events that occur within the same second
 
         # Call Claude API with retry logic for transient errors
         max_retries = 3
