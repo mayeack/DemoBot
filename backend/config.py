@@ -50,6 +50,8 @@ class Settings(BaseSettings):
 
     # Safety
     pii_injection_rate: float = 0.25  # 25% of responses will include synthetic PII/PHI
+    toxic_injection_rate: float = 0.25  # 25% of responses will include toxic content
+    hallucination_injection_rate: float = 0.25  # 25% of responses will include hallucinated content
     require_disclaimer_acceptance: bool = True
     max_clarifying_questions: int = 3
 

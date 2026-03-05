@@ -175,9 +175,11 @@ class AutoPrompterService:
             
             # Randomly decide if PII injection should be forced
             force_pii = random.choice([True, False, None])
+            force_toxic = random.choice([True, False, None])
+            force_hallucination = random.choice([True, False, None])
             
             # Send initial message
-            await self._send_message(client, session_id, scenario["initial"], force_pii)
+            await self._send_message(client, session_id, scenario["initial"], force_pii, force_toxic, force_hallucination)
             
             # Small delay between messages (simulate typing)
             await asyncio.sleep(random.uniform(1.0, 3.0))
@@ -186,18 +188,20 @@ class AutoPrompterService:
             for followup in scenario["followups"]:
                 if not self._running:
                     break
-                await self._send_message(client, session_id, followup, force_pii)
+                await self._send_message(client, session_id, followup, force_pii, force_toxic, force_hallucination)
                 await asyncio.sleep(random.uniform(1.0, 3.0))
             
             logger.info(f"Auto-prompter: Session {session_id} conversation completed")
     
-    async def _send_message(self, client: httpx.AsyncClient, session_id: str, message: str, force_pii: Optional[bool]):
+    async def _send_message(self, client: httpx.AsyncClient, session_id: str, message: str, force_pii: Optional[bool], force_toxic: Optional[bool], force_hallucination: Optional[bool]):
         """Send a single message to the chat API"""
         payload = {
             "session_id": session_id,
             "message": message,
             "disclaimer_accepted": True,
-            "force_pii_injection": force_pii
+            "force_pii_injection": force_pii,
+            "force_toxic_injection": force_toxic,
+            "force_hallucination_injection": force_hallucination
         }
         
         response = await client.post(

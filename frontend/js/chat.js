@@ -1,6 +1,8 @@
 let sessionId = null;
 let disclaimerAccepted = false;
 let piiEnabled = false;
+let toxicEnabled = false;
+let hallucinationEnabled = false;
 let autoPromptEnabled = false;
 let autoPromptStatusInterval = null;
 
@@ -10,11 +12,15 @@ document.addEventListener('DOMContentLoaded', function() {
     const savedSessionId = localStorage.getItem('medadvice_session_id');
     const savedDisclaimerAccepted = localStorage.getItem('medadvice_disclaimer_accepted');
     const savedPiiEnabled = localStorage.getItem('medadvice_pii_enabled');
+    const savedToxicEnabled = localStorage.getItem('medadvice_toxic_enabled');
+    const savedHallucinationEnabled = localStorage.getItem('medadvice_hallucination_enabled');
 
     if (savedSessionId && savedDisclaimerAccepted === 'true') {
         sessionId = savedSessionId;
         disclaimerAccepted = true;
         piiEnabled = savedPiiEnabled === 'true';
+        toxicEnabled = savedToxicEnabled === 'true';
+        hallucinationEnabled = savedHallucinationEnabled === 'true';
         showMainApp();
         
         // Set toggle state
@@ -22,6 +28,18 @@ document.addEventListener('DOMContentLoaded', function() {
         if (toggle) {
             toggle.checked = piiEnabled;
             updatePIIStatus();
+        }
+        
+        const toxicToggle = document.getElementById('toxicToggle');
+        if (toxicToggle) {
+            toxicToggle.checked = toxicEnabled;
+            updateToxicStatus();
+        }
+        
+        const hallucinationToggle = document.getElementById('hallucinationToggle');
+        if (hallucinationToggle) {
+            hallucinationToggle.checked = hallucinationEnabled;
+            updateHallucinationStatus();
         }
         
         // Check auto-prompt status on load
@@ -118,7 +136,9 @@ async function sendMessage() {
                 session_id: sessionId,
                 message: message,
                 disclaimer_accepted: disclaimerAccepted,
-                force_pii_injection: piiEnabled  // Add PII toggle state
+                force_pii_injection: piiEnabled,
+                force_toxic_injection: toxicEnabled,
+                force_hallucination_injection: hallucinationEnabled
             })
         });
 
@@ -333,6 +353,48 @@ function updatePIIStatus() {
     if (piiEnabled) {
         statusElement.textContent = 'ALWAYS ON';
         statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-600';
+    } else {
+        statusElement.textContent = 'RANDOM (25%)';
+        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
+    }
+}
+
+// Toggle toxic content injection
+function toggleToxic() {
+    const toggle = document.getElementById('toxicToggle');
+    toxicEnabled = toggle.checked;
+    localStorage.setItem('medadvice_toxic_enabled', toxicEnabled);
+    updateToxicStatus();
+    
+    console.log('Toxic injection', toxicEnabled ? 'enabled' : 'disabled');
+}
+
+function updateToxicStatus() {
+    const statusElement = document.getElementById('toxicStatus');
+    if (toxicEnabled) {
+        statusElement.textContent = 'ALWAYS ON';
+        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-600';
+    } else {
+        statusElement.textContent = 'RANDOM (25%)';
+        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
+    }
+}
+
+// Toggle hallucination injection
+function toggleHallucination() {
+    const toggle = document.getElementById('hallucinationToggle');
+    hallucinationEnabled = toggle.checked;
+    localStorage.setItem('medadvice_hallucination_enabled', hallucinationEnabled);
+    updateHallucinationStatus();
+    
+    console.log('Hallucination injection', hallucinationEnabled ? 'enabled' : 'disabled');
+}
+
+function updateHallucinationStatus() {
+    const statusElement = document.getElementById('hallucinationStatus');
+    if (hallucinationEnabled) {
+        statusElement.textContent = 'ALWAYS ON';
+        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-600';
     } else {
         statusElement.textContent = 'RANDOM (25%)';
         statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';

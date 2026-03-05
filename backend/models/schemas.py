@@ -33,6 +33,8 @@ class ChatRequest(BaseModel):
     message: str
     disclaimer_accepted: bool = False
     force_pii_injection: Optional[bool] = None  # Override PII injection rate
+    force_toxic_injection: Optional[bool] = None  # Override toxic response injection rate
+    force_hallucination_injection: Optional[bool] = None  # Override hallucination injection rate
 
 class ChatResponse(BaseModel):
     session_id: str

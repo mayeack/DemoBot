@@ -76,7 +76,8 @@ class AIGovernanceLog(Base):
     pii_detected = Column(Boolean, default=False, index=True)
     pii_types = Column(JSON, nullable=True)
     policy_blocked = Column(Boolean, default=False)
-
+    toxic_detected = Column(Boolean, default=False, index=True)
+    toxic_types = Column(JSON, nullable=True)
     # Evaluation / TEVV
     evaluation_name = Column(String, nullable=True)
     evaluation_score_value = Column(Float, nullable=True)
@@ -102,7 +103,7 @@ class AIGovernanceLog(Base):
     __table_args__ = (
         Index('idx_operation_timestamp', 'operation_name', 'timestamp'),
         Index('idx_session_timestamp', 'session_id', 'timestamp'),
-        Index('idx_safety_flags', 'safety_violated', 'pii_detected', 'guardrail_triggered'),
+        Index('idx_safety_flags', 'safety_violated', 'pii_detected', 'guardrail_triggered', 'toxic_detected'),
     )
 
 class EscalationQueue(Base):

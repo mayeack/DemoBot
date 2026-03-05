@@ -64,6 +64,14 @@ def create_governance_log(
         "guardrail_ids": kwargs.get("guardrail_ids"),
         "policy_blocked": kwargs.get("policy_blocked", False),
 
+        # PII detection
+        "pii_detected": kwargs.get("pii_detected", False),
+        "pii_types": kwargs.get("pii_types"),
+
+        # Toxic content detection
+        "toxic_detected": kwargs.get("toxic_detected", False),
+        "toxic_types": kwargs.get("toxic_types"),
+
         # Evaluation / TEVV
         "evaluation_name": kwargs.get("evaluation_name"),
         "evaluation_score_value": kwargs.get("evaluation_score_value"),

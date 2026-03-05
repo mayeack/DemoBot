@@ -99,7 +99,9 @@ async def send_message(
         user_message=chat_request.message,
         conversation_history=session["messages"],
         client_address=request.client.host,
-        force_pii_injection=chat_request.force_pii_injection
+        force_pii_injection=chat_request.force_pii_injection,
+        force_toxic_injection=chat_request.force_toxic_injection,
+        force_hallucination_injection=chat_request.force_hallucination_injection
     )
 
     # Add assistant message to session

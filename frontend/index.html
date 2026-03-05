@@ -172,6 +172,44 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Toxic Response Toggle Control -->
+                <div class="border-t pt-4 mt-2">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="toxicToggle" class="sr-only peer" onchange="toggleToxic()">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                            </label>
+                            <div>
+                                <span class="text-sm font-semibold text-gray-700">Include Toxic Content in Responses</span>
+                                <p class="text-xs text-gray-500">ON = Always include | OFF = Random at 25% rate</p>
+                            </div>
+                        </div>
+                        <div id="toxicStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
+                            RANDOM (25%)
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hallucination Toggle Control -->
+                <div class="border-t pt-4 mt-2">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="hallucinationToggle" class="sr-only peer" onchange="toggleHallucination()">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                            </label>
+                            <div>
+                                <span class="text-sm font-semibold text-gray-700">Include Hallucinated Content in Responses</span>
+                                <p class="text-xs text-gray-500">ON = Always include | OFF = Random at 25% rate</p>
+                            </div>
+                        </div>
+                        <div id="hallucinationStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
+                            RANDOM (25%)
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Emergency Banner -->
@@ -224,6 +262,6 @@
         </div>
     </div>
 
-    <script src="/static/js/chat.js"></script>
+    <script src="/static/js/chat.js?v=3"></script>
 </body>
 </html>
