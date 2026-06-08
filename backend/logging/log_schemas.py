@@ -2,6 +2,8 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 import uuid
 
+from backend.config import settings
+
 def create_governance_log(
     operation_name: str,
     request_model: str,
@@ -19,7 +21,7 @@ def create_governance_log(
         "event_id": str(uuid.uuid4()),
         # Core operation / model identity
         "operation_name": operation_name,
-        "provider_name": kwargs.get("provider_name", "anthropic"),
+        "provider_name": kwargs.get("provider_name", settings.ai_provider),
         "request_model": request_model,
         "response_model": kwargs.get("response_model"),
         "response_id": kwargs.get("response_id"),

@@ -1,9 +1,10 @@
 """
 AI Client Abstraction Layer for MedAdvice v4
 
-Supports dual-environment deployment:
+Supports multi-provider deployment:
 - Anthropic: Direct API access for local development
 - Bedrock: AWS Bedrock for production deployment
+- OpenAI-compatible APIs: OpenAI, DeepSeek, and compatible endpoints
 
 Usage:
     from backend.services.ai_client import get_ai_client
@@ -165,6 +166,81 @@ class AnthropicClient(AIClient):
                 raise AIClientError(f"Anthropic API error: {e}") from e
         
         raise AIClientError(f"Anthropic API error after {max_retries} retries: {last_error}")
+
+
+class OpenAIClient(AIClient):
+    """Client for OpenAI-compatible API access"""
+
+    def __init__(self, api_key: str, model: str, base_url: str):
+        if not api_key:
+            raise AIClientError("OpenAI-compatible API key is required")
+
+        from openai import OpenAI
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.model = model
+        self.base_url = base_url
+        logger.info(f"Initialized OpenAI-compatible client with model: {model} and base URL: {base_url}")
+
+    @property
+    def provider_name(self) -> str:
+        return "openai"
+
+    def create_message(
+        self,
+        messages: List[Dict[str, str]],
+        system: str,
+        max_tokens: int = 2048,
+        temperature: float = 0.7
+    ) -> AIClientResponse:
+        """Create a message using an OpenAI-compatible chat completions API with retry logic"""
+        from openai import APIStatusError
+
+        max_retries = 3
+        retry_delay = 1.0
+        last_error = None
+
+        openai_messages = []
+        if system:
+            openai_messages.append({"role": "system", "content": system})
+        openai_messages.extend(messages)
+
+        for attempt in range(max_retries):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=openai_messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
+
+                usage = response.usage
+                input_tokens = usage.prompt_tokens if usage else 0
+                output_tokens = usage.completion_tokens if usage else 0
+                choice = response.choices[0]
+
+                return AIClientResponse(
+                    id=response.id,
+                    content=choice.message.content or "",
+                    model=response.model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    stop_reason=choice.finish_reason or "stop"
+                )
+
+            except APIStatusError as e:
+                last_error = e
+                if e.status_code in (529, 503, 500):
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delay * (2 ** attempt) + random.uniform(0, 1)
+                        logger.warning(
+                            f"OpenAI-compatible API error {e.status_code}, "
+                            f"retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})"
+                        )
+                        time.sleep(wait_time)
+                        continue
+                raise AIClientError(f"OpenAI-compatible API error: {e}") from e
+
+        raise AIClientError(f"OpenAI-compatible API error after {max_retries} retries: {last_error}")
 
 
 class BedrockClient(AIClient):
@@ -420,7 +496,7 @@ def get_ai_client(settings) -> AIClient:
         settings: Settings object with ai_provider and related configuration
         
     Returns:
-        AIClient instance (AnthropicClient or BedrockClient)
+        AIClient instance (AnthropicClient, BedrockClient, or OpenAIClient)
         
     Raises:
         AIClientError: If provider is unknown or configuration is invalid
@@ -433,6 +509,13 @@ def get_ai_client(settings) -> AIClient:
             region=settings.aws_region,
             model_id=settings.bedrock_model_id
         )
+    elif provider == "openai":
+        logger.info(f"Creating OpenAI-compatible client for base URL: {settings.openai_base_url}")
+        return OpenAIClient(
+            api_key=settings.openai_api_key,
+            model=settings.openai_model,
+            base_url=settings.openai_base_url
+        )
     elif provider == "anthropic":
         logger.info("Creating Anthropic client")
         return AnthropicClient(
@@ -442,5 +525,5 @@ def get_ai_client(settings) -> AIClient:
     else:
         raise AIClientError(
             f"Unknown AI provider: {provider}. "
-            f"Valid options are 'anthropic' or 'bedrock'"
+            f"Valid options are 'anthropic', 'bedrock', or 'openai'"
         )

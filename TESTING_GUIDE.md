@@ -8,7 +8,7 @@ This guide provides comprehensive testing scenarios to validate all features of 
 
 ### Prerequisites
 1. Application running on `http://localhost:8001`
-2. Valid Anthropic API key configured
+2. Valid configured AI provider credentials
 3. Database initialized
 4. Browser with developer tools
 
@@ -305,7 +305,7 @@ curl http://localhost:8001/health
 
 **Required Fields to Verify:**
 - ✓ operation_name
-- ✓ provider_name (anthropic)
+- ✓ provider_name (configured provider)
 - ✓ request_model
 - ✓ response_model
 - ✓ session_id
@@ -433,7 +433,7 @@ SELECT COUNT(*) FROM escalation_queue WHERE review_status='pending';
 
 **Expected:**
 - Total time: 1-5 seconds
-- Majority is Claude API call
+- Majority is configured AI provider call
 - Database queries: <50ms
 - File logging: <10ms
 
@@ -463,7 +463,7 @@ ab -n 10 -c 2 -p post_data.json -T application/json \
 
 **Expected:**
 - Accurate token counts
-- Matches Claude API response
+- Matches selected provider response
 - Properly logged in all destinations
 
 ### 9. Error Handling Tests

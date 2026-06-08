@@ -1,6 +1,6 @@
 # MedAdvice v3
 
-A macOS-compatible medical guidance web application built with Python, FastAPI, and Claude AI. Provides general medical guidance with strict safety guardrails and comprehensive AI governance logging.
+A macOS-compatible medical guidance web application built with Python, FastAPI, and configurable AI providers. Provides general medical guidance with strict safety guardrails and comprehensive AI governance logging.
 
 ## Features
 
@@ -42,7 +42,7 @@ Comprehensive logging following OpenTelemetry semantic conventions:
 - **Python 3.11+**
 - **FastAPI**: REST API framework
 - **LangChain**: AI orchestration
-- **Anthropic Claude**: `claude-sonnet-4-5-20250929` model
+- **Configurable AI Providers**: Anthropic, AWS Bedrock, or OpenAI-compatible APIs
 - **SQLAlchemy**: ORM for database management
 - **SQLite**: Embedded database
 
@@ -62,7 +62,7 @@ Comprehensive logging following OpenTelemetry semantic conventions:
 ### Prerequisites
 - Python 3.11 or higher
 - macOS (primary target, but works on Linux/Windows)
-- Anthropic API key
+- Credentials for your configured AI provider
 
 ### Setup
 
@@ -85,7 +85,7 @@ pip install -r requirements.txt
 4. **Configure environment**
 ```bash
 cp .env.example .env
-# Edit .env and add your ANTHROPIC_API_KEY
+# Edit .env and add credentials for your configured AI provider
 ```
 
 5. **Initialize database**
@@ -160,9 +160,20 @@ All governance logs are also stored in SQLite tables with indexes for:
 Edit `.env` file to customize:
 
 ```env
-# API Configuration
+# AI Provider Configuration
+AI_PROVIDER=anthropic
 ANTHROPIC_API_KEY=your_key_here
 ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
+
+# OpenAI-compatible example:
+# AI_PROVIDER=openai
+# OPENAI_API_KEY=your_key_here
+# OPENAI_MODEL=gpt-4o
+# OPENAI_BASE_URL=https://api.openai.com/v1
+#
+# DeepSeek example:
+# OPENAI_MODEL=deepseek-chat
+# OPENAI_BASE_URL=https://api.deepseek.com
 
 # Server
 PORT=8001
@@ -360,11 +371,12 @@ pip install -r requirements.txt --force-reinstall
 
 ### API Key Issues
 ```bash
-# Verify API key is set
+# Verify API key is set for your selected provider
 echo $ANTHROPIC_API_KEY
+echo $OPENAI_API_KEY
 
 # Or check .env file
-cat .env | grep ANTHROPIC_API_KEY
+cat .env | grep -E 'AI_PROVIDER|ANTHROPIC_API_KEY|OPENAI_API_KEY'
 ```
 
 ## License

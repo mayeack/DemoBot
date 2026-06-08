@@ -34,7 +34,7 @@
 ├───────────────────────────────────────────────────────────────┤
 │  ┌──────────────────────────────────────────────────────┐     │
 │  │         Recommendation Engine                         │     │
-│  │  • Claude API Integration                            │     │
+│  │  • AI Provider Integration                           │     │
 │  │  • Prompt Management                                 │     │
 │  │  • Response Formatting                               │     │
 │  │  • PII Injection (Testing)                           │     │
@@ -90,8 +90,8 @@
 ┌───────────────────────────▼───────────────────────────────────┐
 │                  EXTERNAL SERVICES                             │
 ├───────────────────────────────────────────────────────────────┤
-│                    Anthropic API                               │
-│                claude-sonnet-4-5-20250929                      │
+│        Anthropic API / AWS Bedrock / OpenAI-Compatible APIs    │
+│        Claude, Bedrock-hosted models, OpenAI, DeepSeek, etc.   │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -141,13 +141,13 @@
 **Responsibilities:**
 - Orchestrates AI interactions
 - Manages conversation context
-- Calls Claude API
+- Calls configured AI provider
 - Formats responses
 - Coordinates with other services
 
 **Key Functions:**
 - `process_message()` - Main entry point
-- `_generate_recommendation()` - Claude API call
+- `_generate_recommendation()` - AI provider call
 - `_format_recommendation()` - Response formatting
 
 #### Clarifying Questions Service
@@ -294,8 +294,9 @@
 
 ### 6. External Services
 
-#### Anthropic API
-- Model: `claude-sonnet-4-5-20250929`
+#### AI Provider APIs
+- Providers: Anthropic, AWS Bedrock, or OpenAI-compatible APIs
+- Example models: `claude-sonnet-4-5-20250929`, `anthropic.claude-3-sonnet-20240229-v1:0`, `gpt-4o`, `deepseek-chat`
 - Max tokens: 2048
 - Temperature: 0.7
 - System prompt: Medical guidance rules
@@ -320,11 +321,11 @@
    ↓
 6. Build context from conversation history
    ↓
-7. Call Claude API with system prompt + messages
+7. Call configured AI provider with system prompt + messages
    ↓
 8. Governance Logger logs request (file, DB, console)
    ↓
-9. Claude API returns response
+9. AI provider returns response
    ↓
 10. Parse response (assessment, guidance, severity)
     ↓
@@ -451,7 +452,7 @@ Suggested alerts:
 
 ### Expected Latency
 - Database query: <10ms
-- Claude API call: 1-3s
+- AI provider call: 1-3s
 - Total request: 1-5s
 - File logging: <5ms
 
@@ -474,7 +475,7 @@ Suggested alerts:
 | API Framework | FastAPI | REST API |
 | ORM | SQLAlchemy | Database access |
 | Database | SQLite | Data persistence |
-| AI | Anthropic Claude | LLM responses |
+| AI | Anthropic, Bedrock, OpenAI-compatible APIs | LLM responses |
 | Validation | Pydantic | Data validation |
 | Server | Uvicorn | ASGI server |
 | Python | 3.11+ | Runtime |

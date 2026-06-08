@@ -101,7 +101,7 @@ Total: 30+ source files, 5 documentation files
 |-----------|------------|---------|---------|
 | Language | Python | 3.11+ | Runtime |
 | API Framework | FastAPI | 0.109+ | REST API |
-| AI Model | Claude Sonnet 4.5 | 20250929 | LLM responses |
+| AI Providers | Anthropic, Bedrock, OpenAI-compatible APIs | Configurable | LLM responses |
 | Database | SQLite | 3.x | Data persistence |
 | ORM | SQLAlchemy | 2.0+ | Database abstraction |
 | Validation | Pydantic | 2.5+ | Data validation |
@@ -126,7 +126,7 @@ Total: 30+ source files, 5 documentation files
 ## Core Features
 
 ### 1. Medical Guidance System
-- **Natural language processing** via Claude AI
+- **Natural language processing** via configurable AI providers
 - **Context-aware responses** using conversation history
 - **Severity classification**: LOW, MEDIUM, HIGH, EMERGENCY
 - **General recommendations**: Lifestyle, OTC, when to seek care
@@ -275,7 +275,7 @@ Total: 30+ source files, 5 documentation files
 ### Expected Performance
 | Metric | Value | Notes |
 |--------|-------|-------|
-| Response Time | 1-5s | Mostly Claude API latency |
+| Response Time | 1-5s | Mostly configured AI provider latency |
 | DB Query Time | <50ms | SQLite, indexed queries |
 | Log Write Time | <10ms | Async-capable |
 | Throughput | 100 req/min | Single instance |
@@ -449,7 +449,7 @@ Showcase:
 ```bash
 cd /Users/Shared/medadvice_v3
 cp .env.example .env
-# Edit .env to add your ANTHROPIC_API_KEY
+# Edit .env to add credentials for your configured AI provider
 ./run.sh
 # Open http://localhost:8001/app
 ```
@@ -489,7 +489,7 @@ MedAdvice v3 represents a **production-grade reference implementation** of respo
 
 ---
 
-**Built with**: Python • FastAPI • Claude AI • SQLAlchemy • TailwindCSS
+**Built with**: Python • FastAPI • Configurable AI Providers • SQLAlchemy • TailwindCSS
 **Version**: 3.0.0
 **Date**: January 2026
 **Status**: ✅ Complete & Ready for Review

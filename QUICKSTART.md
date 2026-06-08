@@ -2,7 +2,7 @@
 
 ## Prerequisites
 - Python 3.11 or higher
-- Anthropic API key ([Get one here](https://console.anthropic.com/))
+- Credentials for your configured AI provider
 
 ## Installation (5 minutes)
 
@@ -20,9 +20,20 @@ cp .env.example .env
 nano .env  # or use any text editor
 ```
 
-Add your Anthropic API key:
+Add credentials for your selected AI provider:
 ```env
+AI_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-your-actual-api-key-here
+
+# Or use an OpenAI-compatible provider:
+# AI_PROVIDER=openai
+# OPENAI_API_KEY=your-key-here
+# OPENAI_MODEL=gpt-4o
+# OPENAI_BASE_URL=https://api.openai.com/v1
+#
+# DeepSeek example:
+# OPENAI_MODEL=deepseek-chat
+# OPENAI_BASE_URL=https://api.deepseek.com
 ```
 
 ### Step 3: Run the Application
@@ -116,9 +127,14 @@ All logs are in `logs/` directory:
 ## Common Issues
 
 ### "API key not configured"
-Make sure you've added your Anthropic API key to `.env`:
+Make sure you've added credentials for your configured provider to `.env`:
 ```env
+AI_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-your-key-here
+
+# Or:
+# AI_PROVIDER=openai
+# OPENAI_API_KEY=your-key-here
 ```
 
 ### Port 8001 already in use
@@ -156,7 +172,7 @@ Press `Ctrl+C` in the terminal where the application is running.
 ## Architecture Overview
 
 ```
-User → Chat UI → FastAPI → Claude AI → Response
+User → Chat UI → FastAPI → AI Provider → Response
                      ↓
             Governance Logger
                      ↓

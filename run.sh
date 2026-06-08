@@ -55,9 +55,17 @@ elif [ "$AI_PROVIDER" = "anthropic" ] || [ -z "$AI_PROVIDER" ]; then
         echo "The application will not work without a valid API key"
         echo ""
     fi
+elif [ "$AI_PROVIDER" = "openai" ]; then
+    echo "🔧 AI Provider: OpenAI-compatible API"
+    # Check for OpenAI-compatible API key
+    if ! grep -q "^OPENAI_API_KEY=." .env 2>/dev/null || grep -q "OPENAI_API_KEY=your_" .env 2>/dev/null; then
+        echo "⚠️  WARNING: OPENAI_API_KEY not configured in .env"
+        echo "The application will not work without a valid API key"
+        echo ""
+    fi
 else
     echo "⚠️  WARNING: Unknown AI_PROVIDER: $AI_PROVIDER"
-    echo "Valid options: anthropic, bedrock"
+    echo "Valid options: anthropic, bedrock, openai"
     echo ""
 fi
 

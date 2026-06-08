@@ -20,6 +20,7 @@ psycopg2-binary==2.9.9  # PostgreSQL support for AWS RDS
 # AI Providers (dual-environment support)
 anthropic==0.18.1       # Local development - direct Anthropic API
 boto3>=1.34.0           # AWS production - Bedrock integration
+openai>=1.30.0          # OpenAI-compatible APIs (OpenAI, DeepSeek, etc.)
 
 # Utilities
 aiofiles==23.2.1

@@ -14,9 +14,10 @@ if env_path.exists():
                 os.environ[key.strip()] = value.strip()
 
 class Settings(BaseSettings):
-    # AI Provider Selection (supports dual-environment deployment)
+    # AI Provider Selection (supports multiple providers)
     # "anthropic" = Direct Anthropic API (local development)
     # "bedrock" = AWS Bedrock (production on AWS)
+    # "openai" = OpenAI-compatible APIs (OpenAI, DeepSeek, etc.)
     ai_provider: str = "anthropic"
 
     # Anthropic API Configuration (used when ai_provider="anthropic")
@@ -26,6 +27,11 @@ class Settings(BaseSettings):
     # AWS Bedrock Configuration (used when ai_provider="bedrock")
     aws_region: str = "us-east-1"
     bedrock_model_id: str = "anthropic.claude-3-sonnet-20240229-v1:0"
+
+    # OpenAI-compatible API Configuration (used when ai_provider="openai")
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o"
+    openai_base_url: str = "https://api.openai.com/v1"
 
     # Application
     app_name: str = "MedAdvice v4"

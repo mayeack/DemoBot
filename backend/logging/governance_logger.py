@@ -13,6 +13,17 @@ from backend.database.db import get_db_context
 
 logger = logging.getLogger("governance")
 
+
+def _active_provider_info():
+    """Return (provider_name, model) for the currently configured AI provider."""
+    provider = settings.ai_provider
+    if provider == "bedrock":
+        return provider, settings.bedrock_model_id
+    elif provider == "openai":
+        return provider, settings.openai_model
+    return "anthropic", settings.anthropic_model
+
+
 class GovernanceLogger:
     """Centralized AI governance logging with multi-destination support"""
 
@@ -35,14 +46,16 @@ class GovernanceLogger:
         # Extract user_prompt before passing to create_governance_log
         user_prompt = kwargs.pop("user_prompt", None)
         
+        _provider_name, _model = _active_provider_info()
         log_data = create_governance_log(
             operation_name=operation_name,
-            request_model=settings.anthropic_model,
+            request_model=_model,
             conversation_id=session_id,
             session_id=session_id,
             request_id=request_id,
             input_messages=input_messages,
             token_type="input",
+            provider_name=_provider_name,
             **(request_params or {}),
             **kwargs
         )
@@ -68,9 +81,10 @@ class GovernanceLogger:
         operation_name = kwargs.pop("operation_name", "chat")
         input_messages = kwargs.pop("input_messages", [])
 
+        _provider_name, _model = _active_provider_info()
         log_data = create_governance_log(
             operation_name=operation_name,
-            request_model=settings.anthropic_model,
+            request_model=_model,
             conversation_id=session_id,
             session_id=session_id,
             request_id=request_id,
@@ -78,6 +92,7 @@ class GovernanceLogger:
             input_messages=input_messages,
             output_messages=output_messages,
             token_type="output",
+            provider_name=_provider_name,
             **(usage_data or {}),
             **(performance_data or {}),
             **kwargs
@@ -99,15 +114,17 @@ class GovernanceLogger:
     ):
         """Log prompt details using standardized governance schema"""
         # Use create_governance_log for consistent schema across all event types
+        _provider_name, _model = _active_provider_info()
         log_data = create_governance_log(
             operation_name="prompt",
-            request_model=settings.anthropic_model,
+            request_model=_model,
             conversation_id=session_id,
             session_id=session_id,
             request_id=request_id,
             input_messages=[{"role": "user", "content": user_prompt}],
             system_instructions=system_prompt,
             token_type="prompt",
+            provider_name=_provider_name,
             **kwargs
         )
         # Add prompt-specific field
@@ -126,14 +143,16 @@ class GovernanceLogger:
     ):
         """Log AI decision points using standardized governance schema"""
         # Use create_governance_log for consistent schema across all event types
+        _provider_name, _model = _active_provider_info()
         log_data = create_governance_log(
             operation_name="decision",
-            request_model=settings.anthropic_model,
+            request_model=_model,
             conversation_id=session_id,
             session_id=session_id,
             request_id=request_id,
             input_messages=[],
             token_type="decision",
+            provider_name=_provider_name,
             **kwargs
         )
         # Add decision-specific fields
@@ -155,14 +174,16 @@ class GovernanceLogger:
     ):
         """Log errors using standardized governance schema"""
         # Use create_governance_log for consistent schema across all event types
+        _provider_name, _model = _active_provider_info()
         log_data = create_governance_log(
             operation_name="error",
-            request_model=settings.anthropic_model,
+            request_model=_model,
             conversation_id=session_id,
             session_id=session_id,
             request_id=request_id,
             input_messages=[],
             token_type="error",
+            provider_name=_provider_name,
             error_type=error_type,
             **kwargs
         )
