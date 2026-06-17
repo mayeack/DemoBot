@@ -30,14 +30,28 @@
 └─────────────────┼──────────────────────────────────────────────┘
                   │
 ┌─────────────────▼─────────────────────────────────────────────┐
-│                    SERVICE LAYER                               │
+│              AGENTIC ORCHESTRATION LAYER (LangGraph)           │
+├───────────────────────────────────────────────────────────────┤
+│   START ─▶ router (supervisor) ─▶ {theme}_subgraph ─▶ END      │
+│                                                                 │
+│   Per-theme decomposed agent pipeline:                          │
+│   policy ▶ prompt_defense ▶ intake ▶ domain(theme) ▶ safety     │
+│         ▶ injection ▶ compliance ▶ response_defense ▶ governance│
+│   (any node may short-circuit to END: policy/AIDefense block,   │
+│    clarifying question, generation error)                       │
+│                                                                 │
+│   Themes: medadvice · taxadvice · benefitsadvice · legaladvice  │
+│           · financeadvice · telecomchatbot                      │
+└───────────────────────────────┬───────────────────────────────┘
+                                 │ nodes delegate to ▼
+┌─────────────────▼─────────────────────────────────────────────┐
+│              SERVICE / CONTENT LIBRARY                         │
 ├───────────────────────────────────────────────────────────────┤
 │  ┌──────────────────────────────────────────────────────┐     │
-│  │         Recommendation Engine                         │     │
-│  │  • AI Provider Integration                           │     │
-│  │  • Prompt Management                                 │     │
-│  │  • Response Formatting                               │     │
-│  │  • PII Injection (Testing)                           │     │
+│  │  RecommendationEngine (content + patterns library)    │     │
+│  │  • Theme prompts  • Response formatting               │     │
+│  │  • PII / toxic / hallucination injection (testing)    │     │
+│  │  • Severity normalization  • AI Defense block copy    │     │
 │  └────────┬─────────────────────────────────────────────┘     │
 │           │                                                     │
 │  ┌────────▼──────────────┐  ┌─────────────────────────┐      │
@@ -46,6 +60,11 @@
 │  │ • Question Selection   │  │  • Emergency Detection  │      │
 │  │ • Context Analysis     │  │  • Vulnerability Check  │      │
 │  │ • Info Extraction      │  │  • Risk Assessment      │      │
+│  └────────────────────────┘  └─────────────────────────┘      │
+│  ┌────────────────────────┐  ┌─────────────────────────┐      │
+│  │ AI Defense Client       │  │ LangChain LLM Factory   │      │
+│  │ (prompt/response guard) │  │ (Anthropic/Bedrock/     │      │
+│  │                         │  │  OpenAI-compatible)     │      │
 │  └────────────────────────┘  └─────────────────────────┘      │
 └───────────────────────────────────────────────────────────────┘
                             │
@@ -135,20 +154,69 @@
 - Request ID injection
 - Performance monitoring
 
-### 3. Service Layer
+### 3. Agentic Orchestration Layer (LangGraph)
+
+The chat turn is served by a supervisor-routed LangGraph workflow
+(`backend/agents/`). It replaces the monolithic `process_message()` pipeline with a
+graph of small, independently observable nodes.
+
+**Topology:**
+```
+START -> router -> {theme}_subgraph -> END
+```
+
+**Per-theme decomposed pipeline** (`build_theme_subgraph`):
+```
+policy -> prompt_defense -> intake -> domain(theme) -> safety
+      -> injection -> compliance -> response_defense -> governance
+```
+
+**Components:**
+- **Supervisor / Router** (`supervisor.py`): sets correlation IDs (`request_id`,
+  `trace_id`), resolves the Application Theme, logs the input event, and routes to
+  the matching theme subgraph via a conditional edge.
+- **Shared state** (`state.py`): `MedAdviceState` `TypedDict` carries the turn's
+  inputs, intermediate agent outputs, LLM usage, safety/injection flags, and the
+  final `result` dict between nodes.
+- **Specialist nodes** (`nodes/`): each node wraps an existing service so the
+  business logic and governance contract are unchanged:
+  - `policy` - internal policy block check
+  - `prompt_defense` / `response_defense` - Cisco AI Defense guardrail
+  - `intake` - clarifying questions
+  - `domain` - theme LLM call (built per theme by `make_domain_agent`)
+  - `safety` - escalation-rule evaluation
+  - `injection` - synthetic PII / toxic / hallucination injection (testing)
+  - `compliance` - final display formatting
+  - `governance` - emits the Splunk governance log events
+- **Themes** (`themes/`): `medadvice` (default), `taxadvice`, `benefitsadvice`,
+  `legaladvice`, `financeadvice`, `telecomchatbot`. Each is a `ThemeConfig` sourcing
+  its prompt/patterns from the content library.
+- **LLM factory** (`llm.py`): builds `ChatAnthropic` / `ChatBedrockConverse` /
+  `ChatOpenAI` from `settings.ai_provider` and normalizes responses (text, usage,
+  metadata) for the governance logger.
+
+Any node may set `terminal` to short-circuit the remaining pipeline straight to
+the subgraph's `END` (policy block, AI Defense block, clarifying question, or
+generation error).
+
+**Feature flag & fallback:** `settings.use_agentic_engine` gates the workflow in
+`routers/chat.py`. If the agentic dependencies are missing or the graph fails to
+build, the request transparently falls back to
+`RecommendationEngine.process_message`. Both paths return an identically-shaped
+result and emit the same governance events.
+
+### 4. Service / Content Library
 
 #### Recommendation Engine
-**Responsibilities:**
-- Orchestrates AI interactions
-- Manages conversation context
-- Calls configured AI provider
-- Formats responses
-- Coordinates with other services
+**Role:** Retained as the content/patterns library and the legacy fallback engine.
+The agentic nodes delegate to it for theme prompts, response formatting, synthetic
+injection patterns, severity normalization, and AI Defense block copy, keeping a
+single source of truth.
 
 **Key Functions:**
-- `process_message()` - Main entry point
-- `_generate_recommendation()` - AI provider call
-- `_format_recommendation()` - Response formatting
+- `process_message()` - Legacy single-call entry point (fallback path)
+- `_generate_recommendation()` - AI provider call (fallback path)
+- `_format_recommendation()` - Response formatting (reused by `compliance` node)
 
 #### Clarifying Questions Service
 **Responsibilities:**
@@ -179,7 +247,7 @@
 - Low AI confidence
 - User request
 
-### 4. Governance Layer
+### 5. Governance Layer
 
 #### Governance Logger
 **Responsibilities:**
@@ -227,7 +295,7 @@
 - **Database Handler**: Structured storage
 - **Console Handler**: Real-time monitoring
 
-### 5. Data Layer
+### 6. Data Layer
 
 #### Database Schema
 
@@ -292,7 +360,7 @@
 - ip_address
 ```
 
-### 6. External Services
+### 7. External Services
 
 #### AI Provider APIs
 - Providers: Anthropic, AWS Bedrock, or OpenAI-compatible APIs
@@ -304,7 +372,7 @@
 
 ## Data Flow
 
-### Normal Query Flow
+### Normal Query Flow (Agentic)
 
 ```
 1. User enters message
@@ -313,34 +381,34 @@
    ↓
 3. Request Logging Middleware logs request
    ↓
-4. Chat Router validates input
+4. Chat Router validates input and dispatches the turn
+   (settings.use_agentic_engine → LangGraph workflow; else legacy engine)
    ↓
-5. Recommendation Engine checks if clarifying questions needed
-   ├─ Yes → Return clarifying question
-   └─ No → Continue
+5. Workflow span opens; router sets request_id/trace_id, resolves theme,
+   logs the input event, and routes to the {theme}_subgraph
    ↓
-6. Build context from conversation history
+6. policy            → internal policy block? ── yes → END (blocked)
    ↓
-7. Call configured AI provider with system prompt + messages
+7. prompt_defense    → AI Defense flags prompt? ── yes → END (blocked)
    ↓
-8. Governance Logger logs request (file, DB, console)
+8. intake            → clarifying question needed? ── yes → END (question)
    ↓
-9. AI provider returns response
+9. domain(theme)     → LLM call (Agent + LLM spans); parse assessment,
+                       guidance, severity, token usage
    ↓
-10. Parse response (assessment, guidance, severity)
-    ↓
-11. Escalation Rules check if escalation needed
-    ├─ Yes → Log escalation, flag case
-    └─ No → Continue
-    ↓
-12. Random PII injection (5% chance) for testing
-    ↓
-13. Governance Logger logs response with all metrics
-    ↓
-14. Update conversation in database
-    ↓
-15. Return response to frontend
-    ↓
+10. safety           → Escalation Rules evaluate; flag case if needed
+   ↓
+11. injection        → synthetic PII / toxic / hallucination (testing)
+   ↓
+12. compliance       → format final display text
+   ↓
+13. response_defense → AI Defense flags response? ── yes → END (blocked)
+   ↓
+14. governance       → log response (+ escalation) to file/DB/console,
+                       reusing request_id/trace_id for log↔trace correlation
+   ↓
+15. Update conversation in database; return result to frontend
+   ↓
 16. Frontend displays message with color coding
 ```
 
@@ -433,6 +501,20 @@ Load Balancer
 - Error rate
 - Response time percentiles
 
+### Agentic Tracing (OpenTelemetry GenAI)
+Code-based GenAI instrumentation lives in `backend/telemetry/otel.py` and is
+enabled with `settings.otel_enabled`. Per chat turn it emits:
+- **Workflow span** (named by `settings.agentic_workflow_name`)
+- **Agent span** per specialist node (carries `agent_name`)
+- **LLM span** per model call (token usage + response metadata)
+
+Spans follow the OTel GenAI semantic conventions (`gen_ai.*`) and export over OTLP
+using the standard `OTEL_*` environment variables, targeting Splunk AI Agent
+Monitoring. The `request_id` / `trace_id` are shared with the governance logs so
+traces and governance events correlate. The layer degrades gracefully: it falls
+back to plain OTel spans when `opentelemetry-util-genai` is unavailable, and prints
+spans to the console when no endpoint is configured under `DEBUG`.
+
 ### Log Aggregation
 For production:
 - Splunk/ELK stack for log aggregation
@@ -473,6 +555,8 @@ Suggested alerts:
 | CSS Framework | TailwindCSS | Styling |
 | Charts | Chart.js | Visualization |
 | API Framework | FastAPI | REST API |
+| Orchestration | LangChain + LangGraph | Multi-agent workflow |
+| Observability | OpenTelemetry GenAI | Workflow/Agent/LLM tracing |
 | ORM | SQLAlchemy | Database access |
 | Database | SQLite | Data persistence |
 | AI | Anthropic, Bedrock, OpenAI-compatible APIs | LLM responses |

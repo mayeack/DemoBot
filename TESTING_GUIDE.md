@@ -242,10 +242,10 @@ curl http://localhost:8001/health
 3. When PII appears, verify detection
 
 **Expected Result:**
-- PII appears in ~5% of responses
+- PII appears in ~5% of responses (or force it with `force_pii_injection: true`)
 - Governance log shows:
   - `pii_detected: true`
-  - `pii_types: ["name", "dob", "ssn", "email", etc.]`
+  - `pii_types: ["name", "dob", "mrn", "email", etc.]`
 - Visible in admin dashboard
 - Logged in database
 
@@ -253,9 +253,13 @@ curl http://localhost:8001/health
 ```json
 {
   "pii_detected": true,
-  "pii_types": ["name", "dob", "ssn", "email", "phone", "address", "mrn"]
+  "pii_types": ["name", "dob", "mrn", "email", "phone", "address", "insurance_policy"]
 }
 ```
+
+> See the **Appendix: Synthetic Injection Reference** at the end of this guide for
+> the full list of PII types, integration patterns, and toxic/hallucination
+> injection details.
 
 ### 5. Severity Classification Tests
 
@@ -685,3 +689,70 @@ All tests should:
 - ✓ Provide clear user feedback
 
 Happy Testing! 🧪
+
+---
+
+## Appendix: Synthetic Injection Reference
+
+For governance testing, the system can weave **synthetic** PII/PHI, toxic content,
+and hallucinations into AI responses so you can validate that the governance
+pipeline (and Splunk) detects and logs them. All injected data is synthetic and not
+linked to real individuals.
+
+Source of truth: `backend/services/recommendation_engine.py` (the agentic
+`injection` node delegates to it). Per-turn toggles `force_pii_injection`,
+`force_toxic_injection`, and `force_hallucination_injection` are accepted on
+`POST /api/chat/message` to make a category fire deterministically.
+
+### Natural PII/PHI Integration
+
+PII/PHI is woven into the guidance text as a natural part of the conversation
+(follow-ups, insurance/contact info, prescriptions, care coordination, portal
+access, home health, lab results) rather than appended with obvious delimiters,
+using realistic synthetic values (e.g. `2847 Windstone Drive, Phoenix, AZ 85032`,
+`(602) 847-2934`, `MRN-847392`, `Aetna PPO, Policy: GRP-8473920`).
+
+- **Rate:** `settings.pii_injection_rate` (default `0.05` = 5%); set `0.0` to disable.
+- **Selection:** 1–2 integration patterns per response; higher severity includes
+  more contact information.
+- **Logging:** every exposure sets `pii_detected: true` and records the specific
+  `pii_types` for governance tracking / the Splunk `TA-gen_ai_cim` add-on.
+
+**PII types tracked:** `name`, `dob`, `mrn`, `email`, `phone`, `address`,
+`insurance_provider`, `insurance_policy`, `insurance_group`, `rx_number`,
+`pharmacy`, `provider_name`, `appointment_date`, `appointment_time`.
+
+```json
+{
+  "pii_detected": true,
+  "pii_types": ["name", "dob", "mrn", "email", "phone"],
+  "session_id": "...",
+  "timestamp": "..."
+}
+```
+
+### Toxic Content & Hallucination Injection
+
+The same injection node can inject synthetic toxic content and hallucinated facts
+(per-theme patterns) to exercise guardrail and evaluation logging. These are flagged
+in governance output analogously to PII:
+
+- Toxic: sets the toxic flag and records `toxic_types`.
+- Hallucination: sets the hallucination flag and records `hallucination_types`.
+
+Force them per request with `force_toxic_injection: true` /
+`force_hallucination_injection: true`, and verify the flags appear in
+`logs/ai_governance.json` and the admin dashboard.
+
+### Quick Configuration
+
+```python
+# backend/config.py
+pii_injection_rate: float = 0.05   # 5% default; 0.0 disables; 0.20 for heavy testing
+```
+
+### Monitoring
+
+Check `logs/ai_governance.json` for `pii_detected: true` (and the toxic/
+hallucination flags) entries, or filter by the corresponding fields in the admin
+dashboard and Splunk.

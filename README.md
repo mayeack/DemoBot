@@ -1,6 +1,8 @@
 # MedAdvice v3
 
-A macOS-compatible medical guidance web application built with Python, FastAPI, and configurable AI providers. Provides general medical guidance with strict safety guardrails and comprehensive AI governance logging.
+A macOS-compatible advice web application built with Python, FastAPI, and configurable AI providers. It serves six configurable **Application Themes** (medical, tax, benefits, legal, finance, and a telecom support bot) through a **LangChain + LangGraph multi-agent architecture**, with strict safety guardrails, comprehensive AI governance logging, and code-based **OpenTelemetry GenAI** instrumentation for agentic observability in Splunk.
+
+> **Architecture note:** As of the agentic rebuild, chat turns are served by a supervisor-routed LangGraph workflow (`backend/agents/`). The original hand-rolled `RecommendationEngine` is retained as a content/patterns library (theme prompts, synthetic injection, formatting) and as a transparent fallback. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 
 ## Features
 
@@ -41,10 +43,35 @@ Comprehensive logging following OpenTelemetry semantic conventions:
 ### Backend Stack
 - **Python 3.11+**
 - **FastAPI**: REST API framework
-- **LangChain**: AI orchestration
+- **LangChain + LangGraph**: multi-agent orchestration (supervisor + per-theme decomposed subgraphs)
+- **OpenTelemetry GenAI**: code-based Workflow / Agent / LLM span instrumentation exported over OTLP
 - **Configurable AI Providers**: Anthropic, AWS Bedrock, or OpenAI-compatible APIs
 - **SQLAlchemy**: ORM for database management
 - **SQLite**: Embedded database
+
+### Agentic Architecture
+Each chat turn flows through a supervisor-routed LangGraph workflow:
+
+```
+START -> router -> {theme}_subgraph -> END
+```
+
+The supervisor (`router`) resolves the Application Theme and routes to that theme's
+decomposed agent pipeline:
+
+```
+policy -> prompt_defense -> intake -> domain(theme) -> safety
+      -> injection -> compliance -> response_defense -> governance
+```
+
+Any node can short-circuit to the end of the pipeline (policy block, AI Defense
+block, clarifying question, or generation error). Specialist nodes
+(`backend/agents/nodes/`) wrap the existing services so business logic and the
+Splunk governance-log contract are preserved unchanged.
+
+**Application Themes** (`backend/agents/themes/`): `medadvice` (default),
+`taxadvice`, `benefitsadvice`, `legaladvice`, `financeadvice`, `telecomchatbot`.
+Adding a theme is a new module plus a registry entry.
 
 ### Frontend Stack
 - **HTML5 + TailwindCSS**: Responsive UI
@@ -193,6 +220,16 @@ MAX_CLARIFYING_QUESTIONS=3
 
 # Session
 SESSION_TIMEOUT_MINUTES=30
+
+# Agentic orchestration (LangChain + LangGraph)
+USE_AGENTIC_ENGINE=True              # False = legacy RecommendationEngine path
+AGENTIC_WORKFLOW_NAME=medadvice_multi_agent
+
+# Agentic observability (OpenTelemetry GenAI)
+OTEL_ENABLED=False                   # master switch for code-based GenAI tracing
+OTEL_SERVICE_NAME=medadvice-v3
+# Export endpoint/headers/protocol use the standard OTEL_* env vars, e.g.:
+# OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 ```
 
 ## Safety Features
@@ -242,21 +279,53 @@ Every AI interaction logs:
 - Confidence scores
 - Escalation triggers
 
+## Agentic Observability (OpenTelemetry)
+
+When `OTEL_ENABLED=True`, the workflow emits code-based GenAI spans following the
+OpenTelemetry GenAI semantic conventions (`gen_ai.*`):
+
+- **Workflow span** per chat turn (named by `AGENTIC_WORKFLOW_NAME`)
+- **Agent span** per specialist node (carries the active `agent_name`)
+- **LLM span** per model call, with token usage and response metadata
+
+Spans are exported over OTLP using the standard `OTEL_*` environment variables and
+are designed for Splunk AI Agent Monitoring. The `request_id` / `trace_id` used in
+spans are the same IDs written to the governance logs, so traces and governance
+events correlate. The telemetry layer (`backend/telemetry/otel.py`) degrades
+gracefully: if the optional `opentelemetry-util-genai` package is absent it falls
+back to plain OTel spans carrying the same `gen_ai.*` attributes, and if no
+endpoint is configured under `DEBUG`, spans print to the console.
+
 ## Development
 
 ### Project Structure
 ```
 medadvice_v3/
 ├── backend/
-│   ├── main.py              # FastAPI application
+│   ├── main.py              # FastAPI application (initializes OTel + DB)
 │   ├── config.py            # Configuration management
+│   ├── agents/              # LangGraph multi-agent orchestration
+│   │   ├── graph.py         # Supervisor + per-theme subgraph assembly
+│   │   ├── supervisor.py    # Router node + theme routing
+│   │   ├── state.py         # MedAdviceState shared-state model
+│   │   ├── llm.py           # LangChain chat-model factory + normalization
+│   │   ├── themes/          # Per-theme configs (medadvice, taxadvice, ...)
+│   │   └── nodes/           # Specialist nodes (policy, defense, intake,
+│   │       │                #   domain_agent, safety, injection,
+│   │       │                #   compliance, governance, shared)
+│   ├── telemetry/
+│   │   └── otel.py          # OpenTelemetry GenAI init + span helpers
 │   ├── routers/
-│   │   ├── chat.py          # Chat endpoints
+│   │   ├── chat.py          # Chat endpoints (agentic dispatch + fallback)
 │   │   └── admin.py         # Admin endpoints
-│   ├── services/
+│   ├── services/            # Content/business library (reused by nodes)
 │   │   ├── recommendation_engine.py
+│   │   ├── ai_client.py     # Legacy provider abstraction (fallback path)
+│   │   ├── ai_defense.py    # Cisco AI Defense guardrail client
 │   │   ├── clarifying_questions.py
-│   │   └── escalation_rules.py
+│   │   ├── escalation_rules.py
+│   │   ├── auto_prompter.py
+│   │   └── enduser_pool.py
 │   ├── models/
 │   │   ├── schemas.py       # Pydantic models
 │   │   └── db_models.py     # SQLAlchemy models
@@ -278,6 +347,8 @@ medadvice_v3/
 ├── logs/                    # Log files (auto-created)
 ├── requirements.txt
 ├── .env.example
+├── ARCHITECTURE.md
+├── TESTING_GUIDE.md
 └── README.md
 ```
 
@@ -406,6 +477,13 @@ For issues or questions:
 
 ## Version History
 
+**v3.1.0** (2026-06)
+- Rebuilt orchestration on LangChain + LangGraph as a supervisor-routed multi-agent system
+- Per-theme decomposed agent subgraphs for all six Application Themes
+- Code-based OpenTelemetry GenAI instrumentation (Workflow / Agent / LLM spans) for Splunk AI Agent Monitoring
+- Feature-flagged with transparent fallback to the legacy engine; governance-log contract preserved
+- Documentation consolidated
+
 **v3.0.0** (2026-01-15)
 - Initial release
 - Comprehensive AI governance logging
@@ -418,8 +496,8 @@ For issues or questions:
 
 ## Additional Documentation
 
-- **[PII Integration Guide](PII_INTEGRATION.md)** - Detailed documentation on natural PII/PHI integration feature
-- **[Quick Reference](QUICK_REFERENCE_PII.md)** - Quick guide for developers on PII integration
-- **[Implementation Summary](IMPLEMENTATION_SUMMARY.md)** - Technical implementation details and changes
-- **[Testing Guide](TESTING_GUIDE.md)** - Comprehensive testing procedures
-- **[Architecture](ARCHITECTURE.md)** - System architecture documentation
+- **[Architecture](ARCHITECTURE.md)** - System architecture (LangGraph multi-agent design, governance, OTel)
+- **[Testing Guide](TESTING_GUIDE.md)** - Comprehensive testing procedures, including the synthetic PII/PHI injection reference
+- **[Quickstart](QUICKSTART.md)** - Fast setup and run instructions
+- **[System Policies](SYSTEM_POLICIES.md)** - Internal policy / guardrail reference
+- **[Project Summary](PROJECT_SUMMARY.md)** - High-level project overview
