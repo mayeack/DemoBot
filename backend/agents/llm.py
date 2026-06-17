@@ -223,3 +223,94 @@ def invoke_chat(
         output_tokens=usage["output_tokens"],
         stop_reason=meta["stop_reason"],
     )
+
+
+# ---------------------------------------------------------------------------
+# Named agents (LangGraph create_react_agent) for Splunk AI Agent Monitoring.
+# ---------------------------------------------------------------------------
+# The Splunk LangChain instrumentation surfaces each create_react_agent as a
+# named agent-invocation span. We build a *tool-less* react agent per agent name
+# (one model call, no tool loop) so the existing single-call JSON/governance
+# contract is preserved; the per-request system prompt is supplied as a
+# SystemMessage in the input so the cached agent stays prompt-agnostic.
+_AGENT_CACHE: Dict[str, Any] = {}
+
+
+def get_react_agent(settings, *, name: str, max_tokens: int = 2048, temperature: float = 0.7):
+    """Return a cached, tool-less LangGraph react agent for the given name."""
+    cache_key = f"{(settings.ai_provider or 'anthropic').lower()}:{name}:{max_tokens}:{temperature}"
+    cached = _AGENT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        from langgraph.prebuilt import create_react_agent
+    except ImportError as exc:  # pragma: no cover - optional dep
+        raise ChatModelError(f"langgraph is not installed: {exc}") from exc
+
+    model = get_chat_model(settings, max_tokens=max_tokens, temperature=temperature)
+    # tools=[] -> the agent answers directly (a single model call, no tool loop),
+    # so token usage / response id stay 1:1 with the legacy contract. name=... is
+    # what Splunk AI Agent Monitoring shows as the agent.
+    agent = create_react_agent(model, tools=[], name=name)
+    _AGENT_CACHE[cache_key] = agent
+    logger.info("Built react agent '%s' for provider: %s", name, settings.ai_provider)
+    return agent
+
+
+def invoke_agent(
+    settings,
+    *,
+    agent_name: str,
+    system: str,
+    messages: List[Dict[str, Any]],
+    max_tokens: int = 2048,
+    temperature: float = 0.7,
+    fallback_model: Optional[str] = None,
+) -> NormalizedLLMResponse:
+    """Invoke a named react agent and normalize the response.
+
+    Behaviourally equivalent to :func:`invoke_chat` (one model call, same
+    ``NormalizedLLMResponse``) but routed through a named ``create_react_agent``
+    so it registers as an agent in Splunk AI Agent Monitoring. The system prompt
+    is passed as a ``SystemMessage`` so the cached agent need not bake it in.
+    """
+    from langchain_core.messages import AIMessage
+
+    agent = get_react_agent(
+        settings, name=agent_name, max_tokens=max_tokens, temperature=temperature
+    )
+    lc_messages = _to_langchain_messages(system, messages)
+    try:
+        result = agent.invoke({"messages": lc_messages})
+    except Exception as exc:  # noqa: BLE001 - normalize all errors
+        raise ChatModelError(f"Agent '{agent_name}' invocation failed: {exc}") from exc
+
+    out_messages = result.get("messages", []) if isinstance(result, dict) else []
+    ai_messages = [m for m in out_messages if isinstance(m, AIMessage)]
+    if not ai_messages:
+        raise ChatModelError(f"Agent '{agent_name}' returned no AI message")
+    final = ai_messages[-1]
+
+    # One model call when tool-less, but sum defensively in case of future tools.
+    input_tokens = output_tokens = 0
+    for msg in ai_messages:
+        usage = _extract_usage(msg)
+        input_tokens += usage["input_tokens"]
+        output_tokens += usage["output_tokens"]
+
+    fallback = fallback_model or (
+        settings.anthropic_model
+        if settings.ai_provider == "anthropic"
+        else settings.bedrock_model_id
+        if settings.ai_provider == "bedrock"
+        else settings.openai_model
+    )
+    meta = _extract_metadata(final, fallback)
+    return NormalizedLLMResponse(
+        id=meta["id"],
+        content=_extract_text(final),
+        model=meta["model"],
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        stop_reason=meta["stop_reason"],
+    )

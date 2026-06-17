@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 venv/
+venv.py39.bak/
 env/
 ENV/
 build/
@@ -54,6 +55,9 @@ logs/*.json.*
 
 # Claude Code (local, per-developer settings)
 .claude/settings.local.json
+
+# Local OpenTelemetry Collector binary (downloaded by run-collector.sh, ~95MB)
+/bin/
 
 # macOS
 .DS_Store

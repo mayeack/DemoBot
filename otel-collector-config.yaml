@@ -1,0 +1,42 @@
+# Local OpenTelemetry Collector — forwards the app's OTLP telemetry to
+# Splunk Observability Cloud.
+#   metrics -> signalfx exporter. send_otlp_histograms:true is required so the
+#              GenAI histograms AI Agent Monitoring relies on (e.g.
+#              gen_ai.evaluation.score, token-usage histograms) are ingested.
+#   traces  -> Splunk APM via the OTLP/HTTP trace ingest endpoint.
+# Realm + token come from the container environment (SPLUNK_REALM /
+# SPLUNK_ACCESS_TOKEN), injected by run-collector.sh from .env.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+exporters:
+  signalfx:
+    access_token: "${env:SPLUNK_ACCESS_TOKEN}"
+    realm: "${env:SPLUNK_REALM}"
+    send_otlp_histograms: true
+  otlphttp/traces:
+    traces_endpoint: "https://ingest.${env:SPLUNK_REALM}.signalfx.com/v2/trace/otlp"
+    headers:
+      X-SF-Token: "${env:SPLUNK_ACCESS_TOKEN}"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/traces]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [signalfx]
+  telemetry:
+    logs:
+      level: info

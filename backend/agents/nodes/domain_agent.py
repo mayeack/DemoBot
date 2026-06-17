@@ -21,7 +21,7 @@ import re
 import time
 from typing import Any, Callable, Dict
 
-from backend.agents.llm import ChatModelError, invoke_chat
+from backend.agents.llm import ChatModelError, invoke_agent
 from backend.agents.nodes.shared import build_llm_messages, content_engine
 from backend.config import settings
 from backend.logging.governance_logger import governance_logger
@@ -65,8 +65,9 @@ def make_domain_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str, Any]
                 with otel.llm_span(
                     request_model=_request_model(provider), provider=provider
                 ) as llm_sp:
-                    response = invoke_chat(
+                    response = invoke_agent(
                         settings,
+                        agent_name=theme_config.agent_name,
                         system=system_prompt,
                         messages=messages,
                         max_tokens=2048,

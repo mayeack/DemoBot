@@ -84,5 +84,18 @@ echo ""
 echo "Press Ctrl+C to stop the server"
 echo ""
 
-# Run the application
-python -m backend.main
+# Run the application.
+# If Splunk telemetry is configured (OTEL_EXPORTER_OTLP_ENDPOINT in .env), export
+# the OTEL_* vars into the environment and launch under the OpenTelemetry
+# auto-instrumentation wrapper, so LangChain + FastAPI spans and GenAI metrics
+# export over OTLP to the local collector (start it with ./run-collector.sh).
+# Otherwise run the app plainly.
+if grep -q '^OTEL_EXPORTER_OTLP_ENDPOINT=.' .env 2>/dev/null; then
+    while IFS='=' read -r _k _v; do
+        case "$_k" in OTEL_*) export "$_k=$_v" ;; esac
+    done < <(grep -E '^OTEL_' .env)
+    echo "📡 Telemetry ON -> OTLP $OTEL_EXPORTER_OTLP_ENDPOINT (service=$OTEL_SERVICE_NAME)"
+    exec opentelemetry-instrument python -m backend.main
+else
+    exec python -m backend.main
+fi

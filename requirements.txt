@@ -10,7 +10,7 @@
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-dotenv==1.0.0
-pydantic==2.5.3
+pydantic==2.13.4
 pydantic-settings==2.1.0
 
 # Database
@@ -18,7 +18,7 @@ sqlalchemy==2.0.25
 psycopg2-binary==2.9.9  # PostgreSQL support for AWS RDS
 
 # AI Providers (dual-environment support)
-anthropic==0.18.1       # Local development - direct Anthropic API
+anthropic==0.109.2       # Local development - direct Anthropic API
 boto3>=1.34.0           # AWS production - Bedrock integration
 openai>=1.30.0          # OpenAI-compatible APIs (OpenAI, DeepSeek, etc.)
 
@@ -44,16 +44,17 @@ langchain-openai>=0.2.8        # ChatOpenAI (OpenAI-compatible APIs)
 # =============================================================================
 # Agentic observability (OpenTelemetry GenAI -> Splunk Observability Cloud)
 # =============================================================================
-# Code-based GenAI instrumentation: Workflow / AgentInvocation / LLMInvocation
-# spans exported over OTLP. Splunk requires OTel core >= 1.38.0.
+# Splunk distribution of OpenTelemetry + zero-code LangChain/LangGraph GenAI
+# instrumentation. The app is launched under `opentelemetry-instrument` so traces
+# and GenAI metrics export over OTLP to a local Splunk OTel Collector, which
+# forwards to Splunk Observability Cloud via the signalfx exporter
+# (send_otlp_histograms: true). These pins track the OTel 1.38.0 / 0.59b0 line
+# that splunk-opentelemetry 2.8.0 requires.
 opentelemetry-sdk>=1.38.0
 opentelemetry-exporter-otlp>=1.38.0
 opentelemetry-semantic-conventions>=0.59b0
-# Optional richer GenAI emission (Workflow/AgentInvocation/LLMInvocation data
-# types + TelemetryHandler). Not on all package indexes; the telemetry layer in
-# backend/telemetry/otel.py falls back to plain OTel spans carrying gen_ai.*
-# semantic-convention attributes when it is absent. Install if available:
-#   pip install opentelemetry-util-genai
-# Optional cross-check via zero-code LangChain auto-instrumentation:
-#   pip install splunk-otel-instrumentation-langchain
-#   opentelemetry-instrument python -m backend.main
+splunk-opentelemetry==2.8.0
+splunk-otel-instrumentation-langchain==0.1.14
+splunk-otel-genai-emitters-splunk==0.1.8
+splunk-otel-util-genai==0.1.14
+opentelemetry-instrumentation-fastapi==0.59b0
