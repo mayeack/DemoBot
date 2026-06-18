@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Dict, Any
+import asyncio
 import logging
 import uuid
 import json
@@ -15,6 +16,7 @@ from backend.services.recommendation_engine import RecommendationEngine
 from backend.services.auto_prompter import auto_prompter
 from backend.services.enduser_pool import pick_enduser_id
 from backend.logging.governance_logger import governance_logger
+from backend.incident_mode import incident_mode
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,16 @@ async def send_message(
     db: Session = Depends(get_db)
 ):
     """Send a message and get a response"""
+
+    # Demo-incident fault injection: inflate latency and/or fail with 5xx so the
+    # medadvice-v3 APM service breaches its latency / error-rate detectors, giving
+    # the AI Troubleshooting Agent an alert to analyze. See backend/incident_mode.py.
+    if incident_mode.is_active():
+        delay = incident_mode.delay_seconds()
+        if delay:
+            await asyncio.sleep(delay)
+        if incident_mode.should_error():
+            raise HTTPException(status_code=500, detail="Simulated demo incident on medadvice-v3")
 
     # Get or create session
     session_id = chat_request.session_id

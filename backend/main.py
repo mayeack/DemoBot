@@ -10,7 +10,7 @@ from backend.database.db import init_db
 from backend.logging.log_handlers import setup_logging
 from backend.middleware.request_logging import RequestLoggingMiddleware
 from backend.middleware.access_key import AccessKeyMiddleware
-from backend.routers import chat, admin, auth, settings as settings_routes
+from backend.routers import chat, admin, auth, settings as settings_routes, incident
 from backend.telemetry import otel
 
 # Setup logging
@@ -50,6 +50,7 @@ app.include_router(chat.router)
 app.include_router(admin.router)
 app.include_router(auth.router)
 app.include_router(settings_routes.router)
+app.include_router(incident.router)
 
 # Initialize database on startup
 @app.on_event("startup")
