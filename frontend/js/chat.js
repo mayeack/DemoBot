@@ -37,6 +37,8 @@ const THEMES = {
         ],
         bannerTitle: 'EMERGENCY?',
         bannerText: 'If this is a medical emergency, call 911 or go to your nearest emergency room immediately.',
+        showBanner: true,
+        piiLabel: 'Include Synthetic PII/PHI in Responses',
         errorFallback: 'Sorry, I encountered an error. Please try again or seek immediate medical care if urgent.',
         primary: '#2563eb',
         primaryHover: '#1d4ed8',
@@ -258,11 +260,20 @@ function applyTheme(themeKey) {
             .map((a, i) => `<li>${a}</li>`).join('');
     }
 
-    // Emergency banner
+    // Emergency banner — shown only for themes that opt in (MedAdvice). The
+    // "call 911 / emergency room" warning is a medical-safety concept and is
+    // hidden for non-medical themes.
+    const emergencyBanner = document.getElementById('emergencyBanner');
+    if (emergencyBanner) emergencyBanner.style.display = theme.showBanner ? '' : 'none';
     const bannerTitle = document.getElementById('bannerTitle');
     if (bannerTitle) bannerTitle.textContent = theme.bannerTitle;
     const bannerText = document.getElementById('bannerText');
     if (bannerText) bannerText.textContent = theme.bannerText;
+
+    // PII/PHI toggle label — "PHI" (protected health information) applies only
+    // to MedAdvice; other themes show just "PII".
+    const piiLabel = document.getElementById('piiLabel');
+    if (piiLabel) piiLabel.textContent = theme.piiLabel || 'Include Synthetic PII in Responses';
 
     // Input placeholder
     const messageInput = document.getElementById('messageInput');

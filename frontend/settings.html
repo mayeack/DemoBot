@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Governance — Settings</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto p-4 max-w-5xl">
+        <!-- Header -->
+        <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
+            <h1 class="text-3xl font-bold text-blue-600 mb-2">Settings</h1>
+            <p class="text-gray-600">Local logging &amp; Splunk HEC integrations</p>
+            <div class="mt-4 text-sm">
+                <a href="/app" class="text-blue-600 hover:underline">← Back to Chat</a> |
+                <a href="/admin-ui" class="text-blue-600 hover:underline">Admin Dashboard</a> |
+                <a href="/governance-ui" class="text-blue-600 hover:underline">Governance Logs</a>
+            </div>
+        </div>
+
+        <!-- Local logging -->
+        <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
+            <h2 class="text-xl font-semibold text-gray-800 mb-1">Local log files</h2>
+            <p class="text-sm text-gray-500 mb-4">Directory where governance JSON logs
+                (<code>ai_governance.json</code>, <code>escalations.json</code>, …) are written.
+                Relative paths are resolved against the project root.</p>
+            <div class="flex items-end gap-3">
+                <div class="flex-1">
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Log directory</label>
+                    <input id="logsDir" type="text" placeholder="logs"
+                           class="w-full p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm">
+                </div>
+                <button id="saveLogsBtn" onclick="saveLogsDir()"
+                        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
+            </div>
+            <p id="logsStatus" class="text-sm mt-2"></p>
+        </div>
+
+        <!-- Splunk HEC -->
+        <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
+            <div class="flex items-center justify-between mb-1">
+                <h2 class="text-xl font-semibold text-gray-800">Splunk HEC integrations</h2>
+                <button id="addDestBtn" onclick="addDestination()"
+                        class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm">+ Add destination</button>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">Forward every governance / audit / escalation / error event
+                to one or more Splunk HTTP Event Collectors. Each destination has its own queue and retries,
+                so a slow or down indexer never affects the others or local logging.</p>
+            <div id="destinations" class="space-y-4">
+                <p class="text-gray-400 text-sm">Loading…</p>
+            </div>
+        </div>
+
+        <p class="text-center text-gray-400 text-xs mt-6">
+            Tokens are stored locally and never returned by the API — only their last 4 digits are shown.
+        </p>
+    </div>
+
+    <script src="/static/js/settings.js"></script>
+</body>
+</html>

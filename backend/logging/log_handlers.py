@@ -4,7 +4,13 @@ from pathlib import Path
 from typing import Dict, Any
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
-from backend.config import settings, LOGS_DIR
+from backend.config import settings, LOGS_DIR, BASE_DIR
+
+
+def _resolve_logs_dir(d) -> Path:
+    """Resolve a configured log directory; relative paths hang off BASE_DIR."""
+    p = Path(d)
+    return p if p.is_absolute() else (BASE_DIR / p)
 
 class JSONFormatter(logging.Formatter):
     """Custom JSON formatter for structured logging"""
@@ -25,8 +31,13 @@ class JSONFormatter(logging.Formatter):
 class GovernanceFileHandler:
     """Handler for writing governance logs to files"""
 
-    def __init__(self):
-        self.logs_dir = LOGS_DIR
+    def __init__(self, logs_dir=LOGS_DIR):
+        self.logs_dir = _resolve_logs_dir(logs_dir)
+        self._ensure_log_files()
+
+    def repoint(self, new_dir):
+        """Point subsequent governance writes at a new directory (runtime)."""
+        self.logs_dir = _resolve_logs_dir(new_dir)
         self._ensure_log_files()
 
     def _ensure_log_files(self):

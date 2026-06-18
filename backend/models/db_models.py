@@ -146,3 +146,13 @@ class AuditLog(Base):
         Index('idx_action_timestamp', 'action', 'timestamp'),
         Index('idx_actor_timestamp', 'actor', 'timestamp'),
     )
+
+class AppSettings(Base):
+    """Single-row table (id=1) holding runtime-mutable app settings: the local
+    log directory and the Splunk HEC destinations. Edited via the Settings page
+    / /api/settings. JSON blob mirrors ThreatGenerator's active-config store."""
+    __tablename__ = "app_settings"
+
+    id = Column(Integer, primary_key=True)  # always 1
+    data = Column(JSON, nullable=False, default=dict)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

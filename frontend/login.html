@@ -61,7 +61,7 @@
       <span class="logo" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v18M3 12h18" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
       </span>
-      <span><b>MedAdvice</b><small>Medical guidance</small></span>
+      <span><b id="brandName">MedAdvice</b><small id="brandTagline">Medical guidance</small></span>
     </div>
 
     <h1>Enter your access code</h1>
@@ -85,6 +85,20 @@
   </form>
 
   <script>
+    // Brand the login to the last-used theme (persisted by the chat UI in localStorage).
+    const BRAND = {
+      medadvice:      ['MedAdvice', 'Medical guidance'],
+      taxadvice:      ['TaxAdvice', 'Tax guidance'],
+      benefitsadvice: ['BenefitsAdvice', 'Benefits guidance'],
+      legaladvice:    ['LegalAdvice', 'Legal guidance'],
+      financeadvice:  ['FinanceAdvice', 'Personal finance'],
+      telecomchatbot: ['Verizon Support', 'Wireless & Internet Support'],
+    };
+    const [brand, tagline] = BRAND[localStorage.getItem('medadvice_theme')] || BRAND.medadvice;
+    document.getElementById('brandName').textContent = brand;
+    document.getElementById('brandTagline').textContent = tagline;
+    document.title = 'Sign in · ' + brand;
+
     const q = new URLSearchParams(location.search);
     if (q.get('error')) document.getElementById('err').classList.add('show');
     const nx = q.get('next');

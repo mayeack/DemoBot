@@ -10,7 +10,7 @@ from backend.database.db import init_db
 from backend.logging.log_handlers import setup_logging
 from backend.middleware.request_logging import RequestLoggingMiddleware
 from backend.middleware.access_key import AccessKeyMiddleware
-from backend.routers import chat, admin, auth
+from backend.routers import chat, admin, auth, settings as settings_routes
 from backend.telemetry import otel
 
 # Setup logging
@@ -49,6 +49,7 @@ app.add_middleware(RequestLoggingMiddleware)
 app.include_router(chat.router)
 app.include_router(admin.router)
 app.include_router(auth.router)
+app.include_router(settings_routes.router)
 
 # Initialize database on startup
 @app.on_event("startup")
@@ -63,10 +64,29 @@ async def startup_event():
         logger.error(f"Failed to initialize database: {e}")
         raise
 
+    # Load persisted app settings: apply the configured log directory and start
+    # the Splunk HEC forwarders (no-op until destinations are added).
+    try:
+        from backend import settings_store
+        from backend.logging.governance_logger import governance_logger
+        from backend.hec.runtime import hec_runtime
+        app_cfg = settings_store.load()
+        governance_logger.set_logs_directory(app_cfg.get("logs_directory", "logs"))
+        hec_runtime.configure(settings_store.all_configs())
+        await hec_runtime.start()
+        logger.info("Settings loaded; HEC forwarders started")
+    except Exception as e:
+        logger.error(f"Failed to initialize settings/HEC: {e}")
+
     logger.info(f"Application started on {settings.host}:{settings.port}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    try:
+        from backend.hec.runtime import hec_runtime
+        await hec_runtime.stop()
+    except Exception:
+        logger.debug("HEC shutdown error", exc_info=True)
     logger.info(f"Shutting down {settings.app_name}")
 
 # Health check endpoint
@@ -122,6 +142,13 @@ try:
             if gov_file.exists():
                 return gov_file.read_text()
             return "<h1>Governance UI not found</h1>"
+
+        @app.get("/settings-ui", response_class=HTMLResponse)
+        async def serve_settings():
+            settings_file = frontend_dir / "settings.html"
+            if settings_file.exists():
+                return settings_file.read_text()
+            return "<h1>Settings UI not found</h1>"
 except Exception as e:
     logger.warning(f"Could not mount frontend: {e}")
 

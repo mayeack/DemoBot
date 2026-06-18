@@ -10,6 +10,7 @@ from backend.logging.log_handlers import GovernanceFileHandler
 from backend.logging.log_schemas import create_governance_log, create_escalation_log, create_audit_log
 from backend.models.db_models import AIGovernanceLog, EscalationQueue, AuditLog
 from backend.database.db import get_db_context
+from backend.hec.runtime import hec_runtime
 
 logger = logging.getLogger("governance")
 
@@ -32,6 +33,13 @@ class GovernanceLogger:
         self.console_logging = settings.log_to_console
         self.file_logging = settings.log_to_file
         self.db_logging = settings.log_to_database
+
+    def set_logs_directory(self, path: str):
+        """Re-point governance file logging at a new directory (runtime)."""
+        try:
+            self.file_handler.repoint(path)
+        except Exception:
+            logger.exception("failed to repoint governance logs to %s", path)
 
     def log_request(
         self,
@@ -272,6 +280,13 @@ class GovernanceLogger:
                 self.file_handler.write_audit_log(log_data)
             elif log_type == "error":
                 self.file_handler.write_error_log(log_data)
+
+        # Fan out to any configured Splunk HEC destinations. Non-blocking
+        # enqueue; never breaks local logging if HEC is down/misconfigured.
+        try:
+            hec_runtime.submit(log_type, log_data)
+        except Exception:
+            logger.debug("hec submit failed", exc_info=True)
 
     def _write_to_database(self, log_data: Dict[str, Any]):
         """Write governance log to database"""
