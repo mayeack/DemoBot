@@ -1,6 +1,6 @@
 ---
 name: launch-medadvice
-description: Launch / run / start / serve the MedAdvice app — either locally on http://localhost:8001 or publicly via a Cloudflare tunnel behind the access key. Use when asked to run, start, serve, boot, or expose this application, or to confirm it's serving.
+description: Launch / run / start / serve the MedAdvice app AND its required services (the OpenTelemetry collector that forwards telemetry to Splunk) — locally on http://localhost:8001 or publicly via a Cloudflare tunnel behind the access key. Use when asked to run, start, serve, boot, or expose this application, or to confirm it's serving.
 ---
 
 # Launch MedAdvice
@@ -19,6 +19,20 @@ There are **two launch modes** — pick based on what the user asked for:
 
 Both modes run the *same* server (Mode B just adds a tunnel in front). The
 access-key gate (below) applies identically to both.
+
+**Launching the app means bringing up ALL its services, not just the web server:**
+1. the **OTel collector** (`./run-collector.sh`) — forwards telemetry to Splunk
+   Observability Cloud. **Easy to forget, and the #1 incident:** without it the app
+   runs fine but NO telemetry reaches O11y (exports fail silently), and it dies
+   when the laptop sleeps.
+2. the **app** (`./run.sh`).
+3. (Mode B only) the **public tunnel** (`./tunnel.sh`).
+
+One command brings up collector + app: **`./start-all.sh`** (add `--tunnel` for
+the tunnel). When launching as the agent, start `./run-collector.sh` and
+`./run.sh` as separate background tasks (plus `./tunnel.sh` for Mode B). After
+launch, confirm the whole pipeline with
+`./tests/observability/verify_observability.sh`.
 
 ## Prerequisites (both modes)
 
@@ -46,13 +60,15 @@ Enforced by `backend/middleware/access_key.py`. Two ways to authenticate:
 ## Mode A — Local (localhost)
 
 ```bash
-./run.sh                       # foreground; Ctrl+C stops it
-# or, to keep your shell free, run it in the background and tail the log:
-#   ./run.sh > /tmp/medadvice.log 2>&1 &
+./start-all.sh                 # OTel collector + app (both backgrounded)
+# equivalently, separately (collector FIRST so the app's first exports land):
+#   ./run-collector.sh &
+#   ./run.sh
 ```
 
 Wait for `Application startup complete`, then open **http://localhost:8001/app**
-and log in with the access code.
+and log in with the access code. The collector must be running too, or telemetry
+silently won't reach Splunk.
 
 Other URLs: `/admin-ui`, `/governance-ui`, `/docs`.
 
@@ -67,11 +83,8 @@ access key for protection, so **make sure `ACCESS_KEY` is set** before sharing.
 ```bash
 brew install cloudflared        # one-time prerequisite
 
-# terminal 1 — the app (as in Mode A)
-./run.sh
-
-# terminal 2 — the public tunnel
-./tunnel.sh                     # = cloudflared tunnel --url http://localhost:8001
+./start-all.sh --tunnel         # OTel collector + app + public tunnel
+# equivalently, separately: ./run-collector.sh &  ./run.sh &  ./tunnel.sh
 ```
 
 `tunnel.sh` prints a `https://<random>.trycloudflare.com` URL — **a new one each

@@ -183,6 +183,23 @@ def _extract_metadata(ai_message, fallback_model: str) -> Dict[str, str]:
     return {"id": str(response_id), "model": str(model), "stop_reason": str(stop_reason)}
 
 
+def _record_tokens(settings, model: str, input_tokens: int, output_tokens: int) -> None:
+    """Emit gen_ai.client.token.usage from accurate app data. The Splunk LangChain
+    auto-instrumentation misses token usage on the create_react_agent path, so we
+    record the standard GenAI token histogram ourselves with the correct model."""
+    try:
+        from backend.telemetry import otel
+
+        otel.record_genai_tokens(
+            model=model,
+            provider=(settings.ai_provider or "anthropic"),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+    except Exception:  # noqa: BLE001 - telemetry must never break a chat turn
+        pass
+
+
 def invoke_chat(
     settings,
     *,
@@ -214,6 +231,7 @@ def invoke_chat(
     )
     usage = _extract_usage(ai_message)
     meta = _extract_metadata(ai_message, fallback)
+    _record_tokens(settings, meta["model"], usage["input_tokens"], usage["output_tokens"])
 
     return NormalizedLLMResponse(
         id=meta["id"],
@@ -276,36 +294,56 @@ def invoke_agent(
     """
     from langchain_core.messages import AIMessage
 
+    from backend.telemetry import otel
+
     agent = get_react_agent(
         settings, name=agent_name, max_tokens=max_tokens, temperature=temperature
     )
     lc_messages = _to_langchain_messages(system, messages)
-    try:
-        result = agent.invoke({"messages": lc_messages})
-    except Exception as exc:  # noqa: BLE001 - normalize all errors
-        raise ChatModelError(f"Agent '{agent_name}' invocation failed: {exc}") from exc
-
-    out_messages = result.get("messages", []) if isinstance(result, dict) else []
-    ai_messages = [m for m in out_messages if isinstance(m, AIMessage)]
-    if not ai_messages:
-        raise ChatModelError(f"Agent '{agent_name}' returned no AI message")
-    final = ai_messages[-1]
-
-    # One model call when tool-less, but sum defensively in case of future tools.
-    input_tokens = output_tokens = 0
-    for msg in ai_messages:
-        usage = _extract_usage(msg)
-        input_tokens += usage["input_tokens"]
-        output_tokens += usage["output_tokens"]
-
+    provider = (settings.ai_provider or "anthropic").lower()
     fallback = fallback_model or (
         settings.anthropic_model
-        if settings.ai_provider == "anthropic"
+        if provider == "anthropic"
         else settings.bedrock_model_id
-        if settings.ai_provider == "bedrock"
+        if provider == "bedrock"
         else settings.openai_model
     )
-    meta = _extract_metadata(final, fallback)
+
+    # Wrap the agent call in a GenAI invoke_agent span (gen_ai.agent.name) so
+    # Splunk AI Agent Monitoring registers the named agent — the auto-
+    # instrumentation emits no agent span for create_react_agent.
+    with otel.genai_agent_span(
+        agent_name=agent_name, request_model=fallback, provider=provider
+    ) as span:
+        try:
+            result = agent.invoke({"messages": lc_messages})
+        except Exception as exc:  # noqa: BLE001 - normalize all errors
+            raise ChatModelError(f"Agent '{agent_name}' invocation failed: {exc}") from exc
+
+        out_messages = result.get("messages", []) if isinstance(result, dict) else []
+        ai_messages = [m for m in out_messages if isinstance(m, AIMessage)]
+        if not ai_messages:
+            raise ChatModelError(f"Agent '{agent_name}' returned no AI message")
+        final = ai_messages[-1]
+
+        # One model call when tool-less, but sum defensively in case of future tools.
+        input_tokens = output_tokens = 0
+        for msg in ai_messages:
+            usage = _extract_usage(msg)
+            input_tokens += usage["input_tokens"]
+            output_tokens += usage["output_tokens"]
+
+        meta = _extract_metadata(final, fallback)
+        otel.record_llm_result(
+            span,
+            response_id=meta["id"],
+            response_model=meta["model"],
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            finish_reason=meta["stop_reason"],
+        )
+
+    _record_tokens(settings, meta["model"], input_tokens, output_tokens)
     return NormalizedLLMResponse(
         id=meta["id"],
         content=_extract_text(final),

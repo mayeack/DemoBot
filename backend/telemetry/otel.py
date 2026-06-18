@@ -237,3 +237,98 @@ def record_llm_result(
             "gen_ai.response.finish_reasons": finish_reason,
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# GenAI token-usage metric.
+#
+# The Splunk LangChain auto-instrumentation does not surface token usage (or the
+# request model) through the create_react_agent + LangChain-1.x path, so AI Agent
+# Monitoring's token panels stay empty and gen_ai.client.operation.duration shows
+# model="unknown_model". We emit the standard ``gen_ai.client.token.usage``
+# histogram ourselves from the app's accurate NormalizedLLMResponse data, using
+# the GLOBAL meter that ``opentelemetry-instrument`` configures (so it exports via
+# the same OTLP -> collector -> Splunk path). No-op when the app runs without
+# instrumentation (the global meter is then a no-op). This is independent of
+# settings.otel_enabled / the custom TracerProvider above.
+# ---------------------------------------------------------------------------
+_TOKEN_HISTOGRAM: Any = None
+
+
+def _token_histogram():
+    global _TOKEN_HISTOGRAM
+    if _TOKEN_HISTOGRAM is None:
+        try:
+            from opentelemetry import metrics
+
+            meter = metrics.get_meter("medadvice.genai")
+            _TOKEN_HISTOGRAM = meter.create_histogram(
+                "gen_ai.client.token.usage",
+                unit="token",
+                description="Number of input/output tokens used per GenAI request",
+            )
+        except Exception:  # noqa: BLE001 - degrade to no-op
+            _TOKEN_HISTOGRAM = False
+    return _TOKEN_HISTOGRAM or None
+
+
+def record_genai_tokens(
+    *,
+    model: str,
+    provider: str,
+    operation: str = OP_CHAT,
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
+) -> None:
+    """Emit ``gen_ai.client.token.usage`` for one model call (input + output series),
+    carrying the correct request model and provider as dimensions."""
+    hist = _token_histogram()
+    if hist is None:
+        return
+    base = {
+        "gen_ai.operation.name": operation,
+        "gen_ai.request.model": model or "unknown_model",
+        "gen_ai.provider.name": provider,
+        "gen_ai.system": provider,
+    }
+    try:
+        if input_tokens:
+            hist.record(int(input_tokens), {**base, "gen_ai.token.type": "input"})
+        if output_tokens:
+            hist.record(int(output_tokens), {**base, "gen_ai.token.type": "output"})
+    except Exception:  # noqa: BLE001
+        logger.debug("failed to record gen_ai token usage", exc_info=True)
+
+
+@contextlib.contextmanager
+def genai_agent_span(*, agent_name: str, request_model: str, provider: str):
+    """Emit a GenAI ``invoke_agent`` span (with gen_ai.agent.name) around an agent
+    call, via the GLOBAL tracer that opentelemetry-instrument configures.
+
+    The Splunk LangChain auto-instrumentation does not emit an agent-invocation
+    span for create_react_agent (only `chat` + `invoke_workflow`), so Splunk AI
+    Agent Monitoring's "AI agents" view shows no agents. This makes the named
+    agent first-class. The request model is set correctly here (the auto chat
+    span has gen_ai.request.model=unknown_model). No-op (yields None) when the
+    app runs without instrumentation. Pair with record_llm_result() to attach the
+    response model + token usage on exit."""
+    try:
+        from opentelemetry import trace
+
+        tracer = trace.get_tracer("medadvice.genai")
+    except Exception:  # noqa: BLE001
+        yield None
+        return
+    with tracer.start_as_current_span(f"invoke_agent {agent_name}") as span:
+        for key, value in (
+            ("gen_ai.operation.name", OP_AGENT),
+            ("gen_ai.agent.name", agent_name),
+            ("gen_ai.request.model", request_model or "unknown_model"),
+            ("gen_ai.provider.name", provider),
+            ("gen_ai.system", provider),
+        ):
+            try:
+                span.set_attribute(key, value)
+            except Exception:  # noqa: BLE001
+                pass
+        yield span
