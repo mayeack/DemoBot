@@ -185,14 +185,14 @@ const THEMES = {
     telecomchatbot: {
         key: 'telecomchatbot',
         label: 'TelecomChatbot',
-        pageTitle: 'Verizon Support - Wireless & Internet Help',
-        appTitle: 'Verizon Support',
+        pageTitle: 'Telecom Support - Wireless & Internet Help',
+        appTitle: 'Telecom Support',
         subtitle: 'Wireless & Internet Support',
         placeholder: "Tell us what's going on with your service...",
         welcomeGreeting: 'Hi! How can I help with your service today?',
         welcomeSubtext: "Tell me what's going on with your phone, data, or home internet and we'll troubleshoot it together.",
         disclaimerHeading: 'SUPPORT CHAT NOTICE',
-        disclaimerIntro: 'This is a synthetic support assistant for general wireless and internet troubleshooting. It is NOT affiliated with Verizon, and it cannot view, verify, or change any real account, billing, or device.',
+        disclaimerIntro: 'This is a synthetic support assistant for general wireless and internet troubleshooting. It is NOT affiliated with Telecom, and it cannot view, verify, or change any real account, billing, or device.',
         disclaimerPoints: [
             'This is a demonstration assistant. Any account numbers, phone numbers, plans, or billing details shown are entirely fictitious.',
             'This chat cannot make real changes to your account, plan, or billing. Contact your carrier directly for account actions.',
@@ -202,7 +202,7 @@ const THEMES = {
             'If you have a life-threatening emergency and your line is down, call 911 from any available phone.'
         ],
         disclaimerAcknowledge: [
-            'You understand this is a synthetic assistant not affiliated with Verizon',
+            'You understand this is a synthetic assistant not affiliated with Telecom',
             'You will not share real passwords, PINs, or security codes',
             'You will contact your carrier directly for real account or billing changes',
             'You understand the limitations of this service'

@@ -167,7 +167,7 @@ IMPORTANT: The "severity" field must be EXACTLY one of these four values: LOW, M
 Do NOT use combined values like "MEDIUM-HIGH" or "LOW-MEDIUM". Choose the single most appropriate level.
 Use EMERGENCY for situations like imminent foreclosure, bankruptcy filing deadlines, or fraud/identity theft.""",
 
-        "telecomchatbot": """You are a friendly Verizon-style customer support assistant helping customers troubleshoot common wireless and home internet problems.
+        "telecomchatbot": """You are a friendly Telecom-style customer support assistant helping customers troubleshoot common wireless and home internet problems.
 
 CONVERSATIONAL STYLE:
 1. Be warm, patient, and conversational -- like a helpful support agent in a chat window
@@ -184,7 +184,7 @@ WHAT YOU HELP WITH:
 - General billing and plan questions
 
 CRITICAL RULES:
-1. You are a synthetic demo assistant and are NOT affiliated with Verizon; you cannot view, verify, or change any real account, plan, billing, or device
+1. You are a synthetic demo assistant and are NOT affiliated with Telecom; you cannot view, verify, or change any real account, plan, billing, or device
 2. NEVER ask for or accept real passwords, account PINs, full card numbers, or one-time security codes
 3. For real account, billing, plan, or activation changes, direct the customer to contact their carrier directly or visit a store
 4. Suggest checking the carrier's official status page/app for area outages rather than guessing
@@ -314,7 +314,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         "account_profiles": [
             {
                 "name": "Jennifer Martinez",
-                "account_number": "VZW-482917365",
+                "account_number": "TELCO-482917365",
                 "mtn": "(602) 847-2934",
                 "plan": "Unlimited Plus",
                 "imei": "35-209847-128374-6",
@@ -324,7 +324,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             },
             {
                 "name": "Michael Chen",
-                "account_number": "VZW-293847102",
+                "account_number": "TELCO-293847102",
                 "mtn": "(415) 293-8472",
                 "plan": "Unlimited Ultimate",
                 "imei": "35-847201-938472-1",
@@ -334,7 +334,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             },
             {
                 "name": "Sarah Williams",
-                "account_number": "VZW-571829043",
+                "account_number": "TELCO-571829043",
                 "mtn": "(206) 571-8293",
                 "plan": "Welcome Unlimited",
                 "imei": "35-118293-572910-8",
@@ -344,7 +344,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             },
             {
                 "name": "Robert Thompson",
-                "account_number": "VZW-648201957",
+                "account_number": "TELCO-648201957",
                 "mtn": "(713) 648-2018",
                 "plan": "5G Home Internet + Unlimited Plus",
                 "imei": "35-482019-648201-3",
@@ -354,7 +354,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             },
             {
                 "name": "Emily Rodriguez",
-                "account_number": "VZW-392847106",
+                "account_number": "TELCO-392847106",
                 "mtn": "(305) 392-8471",
                 "plan": "Unlimited Plus",
                 "imei": "35-738291-039284-7",
@@ -1131,7 +1131,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
                 "customers who skip these steps see a 73% higher rate of permanent line damage.",
                 "A 2024 study published in the Journal of Wireless Engineering (Doyle et al.) "
                 "confirms that toggling airplane mode 12 times fully recalibrates the cell radio.",
-                "Per Verizon Internal Network Bulletin #VZ-2025-883, your specific tower is rated "
+                "Per Telecom Internal Network Bulletin #TC-2025-883, your specific tower is rated "
                 "for exactly 4 simultaneous devices before service is throttled by design.",
                 "The IEEE 802.11-2025 standard explicitly states that home routers must be replaced "
                 "every 90 days to maintain certified speeds -- it's not optional.",
@@ -1512,7 +1512,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             "invented_medications": [
                 "You should download SignalBoost Pro, our official free app that uses your phone's "
                 "gyroscope to physically realign the antenna for up to 5 extra bars of service.",
-                "Try the Verizon NetTurbo+ activation code *#TURBO# -- it unlocks a hidden priority "
+                "Try the Telecom NetTurbo+ activation code *#TURBO# -- it unlocks a hidden priority "
                 "data lane that doubles your speed instantly on any plan.",
                 "There's a free tool called WiFiAmplify Cloud that re-routes your home internet "
                 "through a nearby fiber node, eliminating buffering with no hardware needed.",
