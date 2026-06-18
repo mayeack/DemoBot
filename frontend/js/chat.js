@@ -861,6 +861,87 @@ function stopAutoPromptStatusPolling() {
     }
 }
 
+// ---- Trigger Demo Incident (APM fault injection for the Troubleshooting Agent) ----
+let incidentStatusInterval = null;
+
+async function toggleIncident() {
+    const toggle = document.getElementById('incidentToggle');
+    const on = toggle.checked;
+    try {
+        let resp;
+        if (on) {
+            const latency_ms = parseInt(document.getElementById('incidentLatency').value, 10) || 0;
+            const error_rate = (parseFloat(document.getElementById('incidentErrorRate').value) || 0) / 100;
+            const duration_s = parseInt(document.getElementById('incidentDuration').value, 10) || 600;
+            resp = await fetch('/api/incident/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ latency_ms, error_rate, duration_s, drive_traffic: true })
+            });
+        } else {
+            resp = await fetch('/api/incident/stop', { method: 'POST' });
+        }
+        if (!resp.ok) throw new Error('incident toggle failed');
+        const data = await resp.json();
+        updateIncidentStatus(data);
+        if (data.active) startIncidentStatusPolling(); else stopIncidentStatusPolling();
+    } catch (e) {
+        console.error('Error toggling incident:', e);
+        toggle.checked = !on;
+        alert('Failed to toggle demo incident. Please try again.');
+    }
+}
+
+function updateIncidentStatus(data) {
+    const status = document.getElementById('incidentStatus');
+    const remaining = document.getElementById('incidentRemaining');
+    const toggle = document.getElementById('incidentToggle');
+    if (!status) return;
+    if (data && data.active) {
+        status.textContent = 'ACTIVE';
+        status.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-700 animate-pulse';
+        if (toggle) toggle.checked = true;
+        if (remaining && data.remaining_s != null) {
+            remaining.textContent = data.remaining_s + 's left';
+            remaining.classList.remove('hidden');
+        }
+    } else {
+        status.textContent = 'OFF';
+        status.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
+        if (toggle) toggle.checked = false;
+        if (remaining) remaining.classList.add('hidden');
+    }
+}
+
+function startIncidentStatusPolling() {
+    if (incidentStatusInterval) clearInterval(incidentStatusInterval);
+    incidentStatusInterval = setInterval(async () => {
+        try {
+            const r = await fetch('/api/incident/status');
+            if (r.ok) {
+                const data = await r.json();
+                updateIncidentStatus(data);
+                if (!data.active) stopIncidentStatusPolling();
+            }
+        } catch (e) { console.error('Error polling incident status:', e); }
+    }, 5000);
+}
+
+function stopIncidentStatusPolling() {
+    if (incidentStatusInterval) { clearInterval(incidentStatusInterval); incidentStatusInterval = null; }
+}
+
+// ---- Left settings drawer (pull-out) expand/contract ----
+function toggleDrawer() {
+    const drawer = document.getElementById('settingsDrawer');
+    if (!drawer) return;
+    const collapsed = drawer.classList.toggle('-translate-x-96'); // true once collapsed
+    const arrow = document.getElementById('drawerArrow');
+    if (arrow) arrow.classList.toggle('rotate-180', !collapsed);
+    const btn = document.getElementById('drawerToggle');
+    if (btn) btn.setAttribute('aria-expanded', String(!collapsed));
+}
+
 function toggleSettings() {
     const panel = document.getElementById('settingsPanel');
     const arrow = document.getElementById('settingsArrow');

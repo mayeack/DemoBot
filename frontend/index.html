@@ -117,116 +117,78 @@
 
     <!-- Main App -->
     <div id="mainApp" class="hidden">
-        <div class="container mx-auto p-4">
-            <!-- Theme Selector -->
-            <div class="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4 flex items-center justify-between">
-                <div class="flex items-center space-x-3">
-                    <label for="themeSelect" class="text-sm font-semibold text-gray-600">Application Theme:</label>
-                    <select id="themeSelect" onchange="onThemeChange()" class="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-gray-400">
-                        <option value="medadvice">MedAdvice</option>
-                        <option value="taxadvice">TaxAdvice</option>
-                        <option value="benefitsadvice">BenefitsAdvice</option>
-                        <option value="legaladvice">LegalAdvice</option>
-                        <option value="financeadvice">FinanceAdvice</option>
-                        <option value="telecomchatbot">TelecomChatbot</option>
-                    </select>
+        <!-- Settings pull-out drawer (left) — all toggles live here -->
+        <div id="settingsDrawer" class="fixed top-0 left-0 h-full z-40 flex items-center -translate-x-96 transition-transform duration-300">
+            <div class="h-full w-96 max-w-[85vw] bg-white border-r border-gray-200 shadow-xl overflow-y-auto p-4 space-y-3">
+                <div class="flex items-center justify-between pb-2 border-b border-gray-200">
+                    <span class="text-base font-bold text-gray-700">Settings</span>
+                    <span class="text-xs text-gray-400">Governance &amp; demo controls</span>
                 </div>
-                <span class="text-xs text-gray-400">Cosmetic + AI prompt theme</span>
-            </div>
 
-            <!-- Settings (collapsible) -->
-            <div class="bg-white border border-gray-200 rounded-lg shadow-sm mb-4">
-                <button type="button" onclick="toggleSettings()" aria-expanded="false" aria-controls="settingsPanel" class="w-full flex items-center justify-between p-4 focus:outline-none focus:ring-2 focus:ring-gray-300 rounded-lg">
-                    <span class="text-sm font-semibold text-gray-700">Settings</span>
-                    <svg id="settingsArrow" class="w-5 h-5 text-gray-500 transform -rotate-90 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                    </svg>
-                </button>
-                <div id="settingsPanel" class="hidden px-4 pb-4 space-y-4">
-                    <!-- Auto-Prompt Control Bar -->
-                    <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center space-x-3">
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" id="autoPromptToggle" class="sr-only peer" onchange="toggleAutoPrompt()">
-                                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                                </label>
-                                <div>
-                                    <span class="text-sm font-semibold text-indigo-700">Auto-Generate Sessions</span>
-                                    <p class="text-xs text-indigo-500">Automatically creates realistic consultation sessions (1 per minute)</p>
-                                </div>
-                            </div>
-                            <div class="flex items-center space-x-3">
-                                <div id="autoPromptStats" class="text-xs text-indigo-600 hidden">
-                                    Sessions: <span id="autoPromptCount">0</span>
-                                </div>
-                                <div id="autoPromptStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
-                                    OFF
-                                </div>
+                <!-- Auto-Generate Sessions -->
+                <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="autoPromptToggle" class="sr-only peer" onchange="toggleAutoPrompt()">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                            </label>
+                            <div>
+                                <span class="text-sm font-semibold text-indigo-700">Auto-Generate Sessions</span>
+                                <p class="text-xs text-indigo-500">Automatically creates realistic consultation sessions (1 per minute)</p>
                             </div>
                         </div>
-                    </div>
-
-                    <!-- Cisco AI Defense Policy Review Control Bar -->
-                    <div class="bg-sky-50 border border-sky-200 rounded-lg p-4">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center space-x-3">
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" id="aiDefenseToggle" class="sr-only peer" onchange="toggleAIDefense()">
-                                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-sky-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-600"></div>
-                                </label>
-                                <div>
-                                    <span class="text-sm font-semibold text-sky-700">Cisco AI Defense Policy Review</span>
-                                    <p class="text-xs text-sky-500">Sends each prompt to the AI Defense Inspection API; unsafe prompts are blocked before reaching the assistant</p>
-                                </div>
+                        <div class="flex items-center space-x-3">
+                            <div id="autoPromptStats" class="text-xs text-indigo-600 hidden">
+                                Sessions: <span id="autoPromptCount">0</span>
                             </div>
-                            <div id="aiDefenseStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
+                            <div id="autoPromptStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
                                 OFF
                             </div>
                         </div>
                     </div>
+                </div>
 
-                    <!-- Internal Policy Engine Control Bar (built-in, separate from Cisco AI Defense) -->
-                    <div class="bg-slate-50 border border-slate-200 rounded-lg p-4">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center space-x-3">
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" id="internalPolicyToggle" class="sr-only peer" onchange="toggleInternalPolicy()" checked>
-                                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-slate-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-slate-700"></div>
-                                </label>
-                                <div>
-                                    <span class="text-sm font-semibold text-slate-700">Internal Policy Engine</span>
-                                    <p class="text-xs text-slate-500">Our built-in pre-AI safety guardrail (e.g. self-harm crisis block) — separate from Cisco AI Defense</p>
-                                </div>
+                <!-- Cisco AI Defense Policy Review -->
+                <div class="bg-sky-50 border border-sky-200 rounded-lg p-3">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="aiDefenseToggle" class="sr-only peer" onchange="toggleAIDefense()">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-sky-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-600"></div>
+                            </label>
+                            <div>
+                                <span class="text-sm font-semibold text-sky-700">Cisco AI Defense Policy Review</span>
+                                <p class="text-xs text-sky-500">Sends each prompt to the AI Defense Inspection API; unsafe prompts are blocked before reaching the assistant</p>
                             </div>
-                            <div id="internalPolicyStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-slate-200 text-slate-700">
-                                ON
-                            </div>
+                        </div>
+                        <div id="aiDefenseStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
+                            OFF
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Header -->
-            <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
-                <div class="flex justify-between items-start mb-4">
-                    <div>
-                        <h1 id="appTitle" class="text-3xl font-bold text-blue-600 mb-2">MedAdvice v3</h1>
-                        <p id="appSubtitle" class="text-gray-600">General Medical Guidance with AI Governance</p>
-                        <p class="text-xs text-gray-400 mt-2">Session ID: <span id="sessionId" class="font-mono"></span></p>
+                <!-- Internal Policy Engine (built-in, separate from Cisco AI Defense) -->
+                <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="internalPolicyToggle" class="sr-only peer" onchange="toggleInternalPolicy()" checked>
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-slate-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-slate-700"></div>
+                            </label>
+                            <div>
+                                <span class="text-sm font-semibold text-slate-700">Internal Policy Engine</span>
+                                <p class="text-xs text-slate-500">Our built-in pre-AI safety guardrail (e.g. self-harm crisis block) — separate from Cisco AI Defense</p>
+                            </div>
+                        </div>
+                        <div id="internalPolicyStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-slate-200 text-slate-700">
+                            ON
+                        </div>
                     </div>
-                    <button
-                        id="newSessionBtn"
-                        onclick="startNewSession()"
-                        class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                        title="Start a new consultation session"
-                    >
-                        New Session
-                    </button>
                 </div>
-                
-                <!-- PII/PHI Toggle Control -->
-                <div class="border-t pt-4">
+
+                <!-- Include Synthetic PII/PHI in Responses -->
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-3">
                             <label class="relative inline-flex items-center cursor-pointer">
@@ -244,8 +206,8 @@
                     </div>
                 </div>
 
-                <!-- Toxic Response Toggle Control -->
-                <div class="border-t pt-4 mt-2">
+                <!-- Include Toxic Content in Responses -->
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-3">
                             <label class="relative inline-flex items-center cursor-pointer">
@@ -263,8 +225,8 @@
                     </div>
                 </div>
 
-                <!-- Hallucination Toggle Control -->
-                <div class="border-t pt-4 mt-2">
+                <!-- Include Hallucinated Content in Responses -->
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-3">
                             <label class="relative inline-flex items-center cursor-pointer">
@@ -280,6 +242,83 @@
                             RANDOM (25%)
                         </div>
                     </div>
+                </div>
+
+                <!-- Trigger Demo Incident (APM fault injection for the Troubleshooting Agent demo) -->
+                <div class="bg-red-50 border border-red-200 rounded-lg p-3">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="incidentToggle" class="sr-only peer" onchange="toggleIncident()">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-red-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                            </label>
+                            <div>
+                                <span class="text-sm font-semibold text-red-700">Trigger Demo Incident</span>
+                                <p class="text-xs text-red-500">Injects APM latency + errors and drives load so Splunk APM alerts fire for the AI Troubleshooting Agent. Auto-stops after the duration.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <div id="incidentRemaining" class="text-xs text-red-600 hidden"></div>
+                            <div id="incidentStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">OFF</div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 mt-3">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">Latency (ms)</label>
+                            <input id="incidentLatency" type="number" min="0" max="120000" value="20000" class="w-full p-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-red-400">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">Error rate (%)</label>
+                            <input id="incidentErrorRate" type="number" min="0" max="100" value="50" class="w-full p-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-red-400">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">Duration (s)</label>
+                            <input id="incidentDuration" type="number" min="10" max="3600" value="600" class="w-full p-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-red-400">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Expand/contract tab -->
+            <button id="drawerToggle" type="button" onclick="toggleDrawer()" aria-expanded="false" aria-controls="settingsDrawer" title="Settings"
+                class="bg-white border border-l-0 border-gray-200 rounded-r-lg shadow-md py-3 px-1.5 text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                <svg id="drawerArrow" class="w-5 h-5 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                </svg>
+            </button>
+        </div>
+
+        <div class="container mx-auto p-4">
+            <!-- Theme Selector -->
+            <div class="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4 flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <label for="themeSelect" class="text-sm font-semibold text-gray-600">Application Theme:</label>
+                    <select id="themeSelect" onchange="onThemeChange()" class="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-gray-400">
+                        <option value="medadvice">MedAdvice</option>
+                        <option value="taxadvice">TaxAdvice</option>
+                        <option value="benefitsadvice">BenefitsAdvice</option>
+                        <option value="legaladvice">LegalAdvice</option>
+                        <option value="financeadvice">FinanceAdvice</option>
+                        <option value="telecomchatbot">TelecomChatbot</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Header -->
+            <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <h1 id="appTitle" class="text-3xl font-bold text-blue-600 mb-2">MedAdvice v3</h1>
+                        <p id="appSubtitle" class="text-gray-600">General Medical Guidance with AI Governance</p>
+                        <p class="text-xs text-gray-400 mt-2">Session ID: <span id="sessionId" class="font-mono"></span></p>
+                    </div>
+                    <button
+                        id="newSessionBtn"
+                        onclick="startNewSession()"
+                        class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                        title="Start a new consultation session"
+                    >
+                        New Session
+                    </button>
                 </div>
             </div>
 
@@ -334,6 +373,6 @@
         </div>
     </div>
 
-    <script src="/static/js/chat.js?v=6"></script>
+    <script src="/static/js/chat.js?v=8"></script>
 </body>
 </html>
