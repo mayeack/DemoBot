@@ -240,95 +240,113 @@ def record_llm_result(
 
 
 # ---------------------------------------------------------------------------
-# GenAI token-usage metric.
+# GenAI emission via the opentelemetry-util-genai TelemetryHandler.
 #
-# The Splunk LangChain auto-instrumentation does not surface token usage (or the
-# request model) through the create_react_agent + LangChain-1.x path, so AI Agent
-# Monitoring's token panels stay empty and gen_ai.client.operation.duration shows
-# model="unknown_model". We emit the standard ``gen_ai.client.token.usage``
-# histogram ourselves from the app's accurate NormalizedLLMResponse data, using
-# the GLOBAL meter that ``opentelemetry-instrument`` configures (so it exports via
-# the same OTLP -> collector -> Splunk path). No-op when the app runs without
-# instrumentation (the global meter is then a no-op). This is independent of
-# settings.otel_enabled / the custom TracerProvider above.
+# The Splunk LangChain auto-instrumentation (a) does not emit an AgentInvocation
+# for create_react_agent, so Splunk's "AI agents" view shows nothing, and (b)
+# reports gen_ai.request.model as "unknown" on the create_react_agent +
+# LangChain-1.x path, so server-side cost (price x tokens) can't be computed. We
+# emit the GenAI entities ourselves from the app's accurate data via the shared
+# TelemetryHandler, which routes through the active span_metric/splunk emitters ->
+# proper Agent + LLM entities with the real model + token usage. No-op (yields
+# None) when opentelemetry-util-genai is unavailable. The buggy auto langchain
+# instrumentation is disabled in run.sh so these are the single source of truth.
 # ---------------------------------------------------------------------------
-_TOKEN_HISTOGRAM: Any = None
 
 
-def _token_histogram():
-    global _TOKEN_HISTOGRAM
-    if _TOKEN_HISTOGRAM is None:
-        try:
-            from opentelemetry import metrics
-
-            meter = metrics.get_meter("medadvice.genai")
-            _TOKEN_HISTOGRAM = meter.create_histogram(
-                "gen_ai.client.token.usage",
-                unit="token",
-                description="Number of input/output tokens used per GenAI request",
-            )
-        except Exception:  # noqa: BLE001 - degrade to no-op
-            _TOKEN_HISTOGRAM = False
-    return _TOKEN_HISTOGRAM or None
-
-
-def record_genai_tokens(
-    *,
-    model: str,
-    provider: str,
-    operation: str = OP_CHAT,
-    input_tokens: Optional[int] = None,
-    output_tokens: Optional[int] = None,
-) -> None:
-    """Emit ``gen_ai.client.token.usage`` for one model call (input + output series),
-    carrying the correct request model and provider as dimensions."""
-    hist = _token_histogram()
-    if hist is None:
-        return
-    base = {
-        "gen_ai.operation.name": operation,
-        "gen_ai.request.model": model or "unknown_model",
-        "gen_ai.provider.name": provider,
-        "gen_ai.system": provider,
-    }
+def _get_handler():
     try:
-        if input_tokens:
-            hist.record(int(input_tokens), {**base, "gen_ai.token.type": "input"})
-        if output_tokens:
-            hist.record(int(output_tokens), {**base, "gen_ai.token.type": "output"})
+        from opentelemetry.util.genai.handler import get_telemetry_handler
+
+        return get_telemetry_handler()
+    except Exception:  # noqa: BLE001 - optional dependency / not configured
+        return None
+
+
+def _genai_error(exc: Exception):
+    try:
+        from opentelemetry.util.genai.types import Error
+
+        return Error(message=str(exc), type=type(exc))
     except Exception:  # noqa: BLE001
-        logger.debug("failed to record gen_ai token usage", exc_info=True)
+        return None
 
 
 @contextlib.contextmanager
-def genai_agent_span(*, agent_name: str, request_model: str, provider: str):
-    """Emit a GenAI ``invoke_agent`` span (with gen_ai.agent.name) around an agent
-    call, via the GLOBAL tracer that opentelemetry-instrument configures.
-
-    The Splunk LangChain auto-instrumentation does not emit an agent-invocation
-    span for create_react_agent (only `chat` + `invoke_workflow`), so Splunk AI
-    Agent Monitoring's "AI agents" view shows no agents. This makes the named
-    agent first-class. The request model is set correctly here (the auto chat
-    span has gen_ai.request.model=unknown_model). No-op (yields None) when the
-    app runs without instrumentation. Pair with record_llm_result() to attach the
-    response model + token usage on exit."""
-    try:
-        from opentelemetry import trace
-
-        tracer = trace.get_tracer("medadvice.genai")
-    except Exception:  # noqa: BLE001
+def genai_llm_invocation(*, request_model: str, provider: str, operation: str = OP_CHAT):
+    """Emit a GenAI LLMInvocation via the util-genai handler, carrying the real
+    request model + token usage (so the model is no longer "unknown" and Splunk
+    can price it). Yields the LLMInvocation — set ``input_tokens`` /
+    ``output_tokens`` / ``response_model_name`` / ``response_id`` on it inside the
+    block — or None when the handler is unavailable."""
+    handler = _get_handler()
+    if handler is None:
         yield None
         return
-    with tracer.start_as_current_span(f"invoke_agent {agent_name}") as span:
-        for key, value in (
-            ("gen_ai.operation.name", OP_AGENT),
-            ("gen_ai.agent.name", agent_name),
-            ("gen_ai.request.model", request_model or "unknown_model"),
-            ("gen_ai.provider.name", provider),
-            ("gen_ai.system", provider),
+    from opentelemetry.util.genai.types import LLMInvocation
+
+    inv = LLMInvocation(
+        request_model=request_model, operation=operation,
+        provider=provider, system=provider,
+    )
+    handler.start_llm(inv)
+    try:
+        yield inv
+    except Exception as exc:  # noqa: BLE001 - mark span errored, then re-raise
+        err = _genai_error(exc)
+        try:
+            handler.fail_llm(inv, err) if err else handler.stop_llm(inv)
+        except Exception:  # noqa: BLE001
+            pass
+        raise
+    else:
+        try:
+            handler.stop_llm(inv)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+@contextlib.contextmanager
+def genai_agent_invocation(
+    *, agent_name: str, request_model: str, provider: str, agent_type: Optional[str] = None
+):
+    """Emit a GenAI AgentInvocation (so the named agent appears in Splunk's "AI
+    agents" view) wrapping a nested LLMInvocation, via the util-genai handler. The
+    handler automatically inherits the agent name/id onto the LLM and nests its
+    span under the agent. Yields the nested LLMInvocation — set token usage /
+    response on it inside the block — or None when the handler is unavailable."""
+    handler = _get_handler()
+    if handler is None:
+        yield None
+        return
+    from opentelemetry.util.genai.types import AgentInvocation, LLMInvocation
+
+    agent = AgentInvocation(
+        name=agent_name, model=request_model, agent_type=agent_type,
+        provider=provider, system=provider,
+    )
+    inv = LLMInvocation(
+        request_model=request_model, operation=OP_CHAT,
+        provider=provider, system=provider,
+    )
+    handler.start_agent(agent)
+    handler.start_llm(inv)
+    try:
+        yield inv
+    except Exception as exc:  # noqa: BLE001 - mark spans errored, then re-raise
+        err = _genai_error(exc)
+        for fail, stop, obj in (
+            (handler.fail_llm, handler.stop_llm, inv),
+            (handler.fail_agent, handler.stop_agent, agent),
         ):
             try:
-                span.set_attribute(key, value)
+                fail(obj, err) if err else stop(obj)
             except Exception:  # noqa: BLE001
                 pass
-        yield span
+        raise
+    else:
+        try:
+            handler.stop_llm(inv)
+            handler.stop_agent(agent)
+        except Exception:  # noqa: BLE001
+            pass

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from backend import settings_store
 from backend.hec.runtime import hec_runtime
+from backend.model_emitter import MODEL_CHOICES, model_emitter
 
 router = APIRouter(prefix="/api", tags=["settings"])
 
@@ -66,6 +67,34 @@ async def get_settings():
 async def update_settings(body: LogsSettings):
     path = settings_store.set_logs_directory(body.logs_directory)
     return {"logs_directory": path}
+
+
+# ---------------------------------------------------------------------------
+# Demo model-name emission override
+# ---------------------------------------------------------------------------
+class EmitModelSettings(BaseModel):
+    enabled: bool = False
+    model_name: str = Field(default="", max_length=120)
+    random: bool = False
+
+
+@router.get("/settings/emit-model")
+async def get_emit_model():
+    return model_emitter.status()
+
+
+@router.put("/settings/emit-model")
+async def update_emit_model(body: EmitModelSettings):
+    name = (body.model_name or "").strip()
+    if name and name not in MODEL_CHOICES:
+        raise HTTPException(status_code=422, detail=f"unknown model_name: {name}")
+    if body.enabled and not body.random and not name:
+        raise HTTPException(
+            status_code=422,
+            detail="Select a model to emit (or enable Emit Random Model Name).",
+        )
+    settings_store.set_emit_model(body.enabled, name, body.random)
+    return model_emitter.status()
 
 
 # ---------------------------------------------------------------------------

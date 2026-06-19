@@ -183,23 +183,6 @@ def _extract_metadata(ai_message, fallback_model: str) -> Dict[str, str]:
     return {"id": str(response_id), "model": str(model), "stop_reason": str(stop_reason)}
 
 
-def _record_tokens(settings, model: str, input_tokens: int, output_tokens: int) -> None:
-    """Emit gen_ai.client.token.usage from accurate app data. The Splunk LangChain
-    auto-instrumentation misses token usage on the create_react_agent path, so we
-    record the standard GenAI token histogram ourselves with the correct model."""
-    try:
-        from backend.telemetry import otel
-
-        otel.record_genai_tokens(
-            model=model,
-            provider=(settings.ai_provider or "anthropic"),
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-        )
-    except Exception:  # noqa: BLE001 - telemetry must never break a chat turn
-        pass
-
-
 def invoke_chat(
     settings,
     *,
@@ -214,29 +197,43 @@ def invoke_chat(
     Raises :class:`ChatModelError` on any failure so callers can map it onto the
     existing error-handling / governance error event.
     """
+    from backend.telemetry import otel
+    from backend.model_emitter import model_emitter
+
     model = get_chat_model(settings, max_tokens=max_tokens, temperature=temperature)
     lc_messages = _to_langchain_messages(system, messages)
-
-    try:
-        ai_message = model.invoke(lc_messages)
-    except Exception as exc:  # noqa: BLE001 - normalize all provider errors
-        raise ChatModelError(f"Chat model invocation failed: {exc}") from exc
-
+    provider = (settings.ai_provider or "anthropic").lower()
     fallback = fallback_model or (
         settings.anthropic_model
-        if settings.ai_provider == "anthropic"
+        if provider == "anthropic"
         else settings.bedrock_model_id
-        if settings.ai_provider == "bedrock"
+        if provider == "bedrock"
         else settings.openai_model
     )
-    usage = _extract_usage(ai_message)
-    meta = _extract_metadata(ai_message, fallback)
-    _record_tokens(settings, meta["model"], usage["input_tokens"], usage["output_tokens"])
+    # Demo override: report a static/random model name instead of the real one
+    # (backend/model_emitter.py). The actual model call below is unchanged.
+    emit_model = model_emitter.pick() if model_emitter.is_active() else None
+
+    # Emit a GenAI LLMInvocation with the real model + token usage so Splunk no
+    # longer sees model="unknown" and can price the call (server-side cost).
+    with otel.genai_llm_invocation(request_model=(emit_model or fallback), provider=provider) as llm_inv:
+        try:
+            ai_message = model.invoke(lc_messages)
+        except Exception as exc:  # noqa: BLE001 - normalize all provider errors
+            raise ChatModelError(f"Chat model invocation failed: {exc}") from exc
+        usage = _extract_usage(ai_message)
+        meta = _extract_metadata(ai_message, fallback)
+        reported_model = emit_model or meta["model"]
+        if llm_inv is not None:
+            llm_inv.input_tokens = usage["input_tokens"]
+            llm_inv.output_tokens = usage["output_tokens"]
+            llm_inv.response_model_name = reported_model
+            llm_inv.response_id = meta["id"]
 
     return NormalizedLLMResponse(
         id=meta["id"],
         content=_extract_text(ai_message),
-        model=meta["model"],
+        model=reported_model,
         input_tokens=usage["input_tokens"],
         output_tokens=usage["output_tokens"],
         stop_reason=meta["stop_reason"],
@@ -308,13 +305,17 @@ def invoke_agent(
         if provider == "bedrock"
         else settings.openai_model
     )
+    # Demo override: report a static/random model name instead of the real one
+    # (backend/model_emitter.py). The actual agent call below is unchanged.
+    from backend.model_emitter import model_emitter
+    emit_model = model_emitter.pick() if model_emitter.is_active() else None
 
-    # Wrap the agent call in a GenAI invoke_agent span (gen_ai.agent.name) so
-    # Splunk AI Agent Monitoring registers the named agent — the auto-
-    # instrumentation emits no agent span for create_react_agent.
-    with otel.genai_agent_span(
-        agent_name=agent_name, request_model=fallback, provider=provider
-    ) as span:
+    # Emit a GenAI AgentInvocation (so the named agent appears in Splunk's "AI
+    # agents" view) wrapping a nested LLMInvocation with the real model + token
+    # usage — the auto-instrumentation emits no agent span for create_react_agent.
+    with otel.genai_agent_invocation(
+        agent_name=agent_name, request_model=(emit_model or fallback), provider=provider
+    ) as llm_inv:
         try:
             result = agent.invoke({"messages": lc_messages})
         except Exception as exc:  # noqa: BLE001 - normalize all errors
@@ -334,20 +335,17 @@ def invoke_agent(
             output_tokens += usage["output_tokens"]
 
         meta = _extract_metadata(final, fallback)
-        otel.record_llm_result(
-            span,
-            response_id=meta["id"],
-            response_model=meta["model"],
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            finish_reason=meta["stop_reason"],
-        )
+        reported_model = emit_model or meta["model"]
+        if llm_inv is not None:
+            llm_inv.input_tokens = input_tokens
+            llm_inv.output_tokens = output_tokens
+            llm_inv.response_model_name = reported_model
+            llm_inv.response_id = meta["id"]
 
-    _record_tokens(settings, meta["model"], input_tokens, output_tokens)
     return NormalizedLLMResponse(
         id=meta["id"],
         content=_extract_text(final),
-        model=meta["model"],
+        model=reported_model,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         stop_reason=meta["stop_reason"],

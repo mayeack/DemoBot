@@ -44,6 +44,45 @@ function setLogsStatus(msg, ok) {
   el.className = 'text-sm mt-2 ' + (ok ? 'text-green-600' : 'text-red-600');
 }
 
+// -------------------------------------------------------------- emit model
+async function loadEmitModel() {
+  try {
+    const d = await api('GET', '/api/settings/emit-model');
+    const sel = document.getElementById('emitModelName');
+    sel.innerHTML = (d.choices || []).map(m => `<option value="${attr(m)}">${esc(m)}</option>`).join('');
+    if (d.model_name) sel.value = d.model_name;
+    document.getElementById('emitEnabled').checked = !!d.enabled;
+    document.getElementById('emitRandom').checked = !!d.random;
+    onEmitToggle();
+  } catch (e) { setEmitStatus('Failed to load: ' + e.message, false); }
+}
+function onEmitToggle() {
+  const on = document.getElementById('emitEnabled').checked;
+  const rnd = document.getElementById('emitRandom').checked;
+  document.getElementById('emitFields').classList.toggle('hidden', !on);
+  const sel = document.getElementById('emitModelName');
+  sel.disabled = rnd;                        // random ignores the explicit selection
+  sel.classList.toggle('opacity-50', rnd);
+}
+async function saveEmitModel() {
+  const body = {
+    enabled: document.getElementById('emitEnabled').checked,
+    model_name: document.getElementById('emitModelName').value,
+    random: document.getElementById('emitRandom').checked,
+  };
+  try {
+    const d = await api('PUT', '/api/settings/emit-model', body);
+    setEmitStatus(d.enabled
+      ? `Saved — emitting "${d.random ? 'random model' : d.model_name}" in telemetry + logs (real model still called).`
+      : 'Saved — emitting the real model name.', true);
+  } catch (e) { setEmitStatus('Error: ' + e.message, false); }
+}
+function setEmitStatus(msg, ok) {
+  const el = document.getElementById('emitStatus');
+  el.textContent = msg;
+  el.className = 'text-sm ' + (ok ? 'text-green-600' : 'text-red-600');
+}
+
 // ------------------------------------------------------------ destinations
 async function loadDestinations() {
   try {
@@ -216,6 +255,7 @@ async function loadStats() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadLogsDir();
+  await loadEmitModel();
   await loadDestinations();
   await loadStats();
   setInterval(() => { if (!document.hidden) loadStats(); }, 2500);

@@ -84,6 +84,12 @@ echo ""
 echo "Press Ctrl+C to stop the server"
 echo ""
 
+# Galileo (LLM observability) — export GALILEO_* from .env so the app's SDK path
+# (backend/galileo_integration.py) sees the key/project/log-stream. No-op if absent.
+while IFS='=' read -r _k _v; do
+    case "$_k" in GALILEO_*) export "$_k=$_v" ;; esac
+done < <(grep -E '^GALILEO_' .env 2>/dev/null)
+
 # Run the application.
 # If Splunk telemetry is configured (OTEL_EXPORTER_OTLP_ENDPOINT in .env), export
 # the OTEL_* vars into the environment and launch under the OpenTelemetry
@@ -94,6 +100,12 @@ if grep -q '^OTEL_EXPORTER_OTLP_ENDPOINT=.' .env 2>/dev/null; then
     while IFS='=' read -r _k _v; do
         case "$_k" in OTEL_*) export "$_k=$_v" ;; esac
     done < <(grep -E '^OTEL_' .env)
+    # The preview Splunk LangChain instrumentor mis-reports the model as "unknown"
+    # and emits no AgentInvocation for create_react_agent. We emit the GenAI
+    # Agent/LLM entities ourselves with accurate data (backend/telemetry/otel.py),
+    # so disable the auto langchain instrumentor to avoid duplicate/unknown-model
+    # emission. FastAPI instrumentation stays on for APM/HTTP traces.
+    export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=langchain
     echo "📡 Telemetry ON -> OTLP $OTEL_EXPORTER_OTLP_ENDPOINT (service=$OTEL_SERVICE_NAME)"
     exec opentelemetry-instrument python -m backend.main
 else

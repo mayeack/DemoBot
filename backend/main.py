@@ -74,6 +74,9 @@ async def startup_event():
         app_cfg = settings_store.load()
         governance_logger.set_logs_directory(app_cfg.get("logs_directory", "logs"))
         hec_runtime.configure(settings_store.all_configs())
+        from backend.model_emitter import model_emitter
+        _em = settings_store.get_emit_model()
+        model_emitter.configure(_em["enabled"], _em["model_name"], _em["random"])
         await hec_runtime.start()
         logger.info("Settings loaded; HEC forwarders started")
     except Exception as e:

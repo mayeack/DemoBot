@@ -52,16 +52,16 @@ fail1=$(sum 'otelcol_exporter_send_failed_(spans|metric_points)')
 [ "$mets1"  -gt "$mets0"  ] && ok "metric points forwarded ($mets0 -> $mets1)"     || bad "no new metric points ($mets0 -> $mets1)"
 [ "$fail1"  -le "$fail0"  ] && ok "no new export failures (failed total=$fail1)"   || bad "export failures increased ($fail0 -> $fail1) -> check SPLUNK_REALM/SPLUNK_ACCESS_TOKEN/network"
 
-echo "== Tier 3: GenAI metadata in Observability Cloud (model + token usage) =="
+echo "== Tier 3: GenAI metadata in Observability Cloud (model + tokens + agent) =="
 APITOK=$(grep '^SPLUNK_API_TOKEN=' .env 2>/dev/null | cut -d= -f2)
 REALM=$(grep '^SPLUNK_REALM=' .env 2>/dev/null | cut -d= -f2)
 if [ -z "${APITOK:-}" ]; then
   echo "  SKIP  SPLUNK_API_TOKEN not set in .env (an O11y *API* token) -> skipping end-to-end metadata assertion"
 else
   if python3 tests/observability/check_o11y_metadata.py "$REALM" "$APITOK" medadvice-v3 medadvice-local; then
-    ok "gen_ai metadata present in O11y (token.usage with real model + input/output; operation.duration)"
+    ok "gen_ai metadata present in O11y (real model + input/output tokens; named agent in AI agents view; operation.duration)"
   else
-    bad "gen_ai metadata missing/incomplete in O11y (token usage or model not found)"
+    bad "gen_ai metadata missing/incomplete in O11y (token usage, real model, or named agent not found)"
   fi
 fi
 

@@ -15,14 +15,29 @@ from backend.hec.runtime import hec_runtime
 logger = logging.getLogger("governance")
 
 
+def _emit_model(model: str) -> str:
+    """Apply the demo model-name override (backend/model_emitter.py). Defensive:
+    logging must never break a chat turn."""
+    try:
+        from backend.model_emitter import model_emitter
+        return model_emitter.emit(model)
+    except Exception:
+        return model
+
+
 def _active_provider_info():
-    """Return (provider_name, model) for the currently configured AI provider."""
+    """Return (provider_name, model) for the currently configured AI provider.
+
+    The model is passed through the demo model-name override, so governance logs
+    report the emitted (static/random) model when that setting is on."""
     provider = settings.ai_provider
     if provider == "bedrock":
-        return provider, settings.bedrock_model_id
+        name, model = provider, settings.bedrock_model_id
     elif provider == "openai":
-        return provider, settings.openai_model
-    return "anthropic", settings.anthropic_model
+        name, model = provider, settings.openai_model
+    else:
+        name, model = "anthropic", settings.anthropic_model
+    return name, _emit_model(model)
 
 
 class GovernanceLogger:
@@ -287,6 +302,15 @@ class GovernanceLogger:
             hec_runtime.submit(log_type, log_data)
         except Exception:
             logger.debug("hec submit failed", exc_info=True)
+
+        # Fan out completed chat turns to Galileo with governance metadata
+        # (no-op unless GALILEO_API_KEY is set; self-gates to chat response
+        # events; runs on a daemon thread so it never adds request latency).
+        try:
+            from backend import galileo_integration
+            galileo_integration.maybe_log_turn(log_data)
+        except Exception:
+            logger.debug("galileo submit failed", exc_info=True)
 
     def _write_to_database(self, log_data: Dict[str, Any]):
         """Write governance log to database"""

@@ -11,7 +11,7 @@ fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-dotenv==1.0.0
 pydantic==2.13.4
-pydantic-settings==2.1.0
+pydantic-settings==2.14.1   # bumped from 2.1.0 for the galileo SDK (compatible)
 
 # Database
 sqlalchemy==2.0.25
@@ -27,7 +27,7 @@ aiofiles==23.2.1
 python-multipart==0.0.6
 sse-starlette==1.8.2
 websockets==12.0
-httpx==0.26.0
+httpx==0.28.1   # bumped from 0.26.0 for the galileo SDK (compatible)
 
 # =============================================================================
 # Agentic orchestration (LangChain + LangGraph)
@@ -58,3 +58,9 @@ splunk-otel-instrumentation-langchain==0.1.14
 splunk-otel-genai-emitters-splunk==0.1.8
 splunk-otel-util-genai==0.1.14
 opentelemetry-instrumentation-fastapi==0.59b0
+
+# Galileo (LLM observability / evals). Traces fan out from the OTel Collector
+# (otel-collector-config.yaml) AND completed turns are logged via the SDK with
+# governance metadata (backend/galileo_integration.py). Defensive/no-op without
+# GALILEO_API_KEY. Pulls galileo-core + bumps httpx/pydantic-settings (above).
+galileo==2.3.0

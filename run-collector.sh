@@ -9,6 +9,11 @@ cd "$(dirname "$0")"
 
 export SPLUNK_REALM=$(grep '^SPLUNK_REALM=' .env 2>/dev/null | cut -d= -f2- || true)
 export SPLUNK_ACCESS_TOKEN=$(grep '^SPLUNK_ACCESS_TOKEN=' .env 2>/dev/null | cut -d= -f2- || true)
+# Galileo (LLM observability) — optional; the collector fans traces here too.
+# Exported (possibly empty) so the config's ${env:GALILEO_*} always resolve.
+export GALILEO_API_KEY=$(grep '^GALILEO_API_KEY=' .env 2>/dev/null | cut -d= -f2- || true)
+export GALILEO_PROJECT=$(grep '^GALILEO_PROJECT=' .env 2>/dev/null | cut -d= -f2- || true)
+export GALILEO_LOG_STREAM=$(grep '^GALILEO_LOG_STREAM=' .env 2>/dev/null | cut -d= -f2- || true)
 if [ -z "${SPLUNK_REALM:-}" ] || [ -z "${SPLUNK_ACCESS_TOKEN:-}" ]; then
   echo "ERROR: set SPLUNK_REALM and SPLUNK_ACCESS_TOKEN in .env first." >&2
   exit 1
@@ -32,6 +37,7 @@ fi
 exec "$RUNTIME" run --rm --name otel-collector \
   -p 4317:4317 -p 4318:4318 \
   -e SPLUNK_REALM -e SPLUNK_ACCESS_TOKEN \
+  -e GALILEO_API_KEY -e GALILEO_PROJECT -e GALILEO_LOG_STREAM \
   -v "$PWD/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro" \
   docker.io/otel/opentelemetry-collector-contrib:latest \
   --config=/etc/otelcol-contrib/config.yaml

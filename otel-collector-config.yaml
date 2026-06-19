@@ -26,13 +26,22 @@ exporters:
     traces_endpoint: "https://ingest.${env:SPLUNK_REALM}.signalfx.com/v2/trace/otlp"
     headers:
       X-SF-Token: "${env:SPLUNK_ACCESS_TOKEN}"
+  # Galileo (LLM observability). Same gen_ai.* spans fan out here over OTLP/HTTP.
+  # Header KEYS are fixed (Galileo-API-Key/project/logstream); values from env,
+  # injected by run-collector.sh. Galileo auto-maps OpenTelemetry GenAI semconv.
+  otlphttp/galileo:
+    traces_endpoint: "https://api.galileo.ai/otel/traces"
+    headers:
+      Galileo-API-Key: "${env:GALILEO_API_KEY}"
+      project: "${env:GALILEO_PROJECT}"
+      logstream: "${env:GALILEO_LOG_STREAM}"
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlphttp/traces]
+      exporters: [otlphttp/traces, otlphttp/galileo]
     metrics:
       receivers: [otlp]
       processors: [batch]

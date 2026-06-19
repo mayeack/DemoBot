@@ -4,6 +4,9 @@
 Queries the SignalFx metric-timeseries metadata API for the service and checks:
   - gen_ai.client.token.usage exists, with gen_ai.token.type in {input, output}
     and at least one real (non-"unknown_model") gen_ai.request.model dimension
+  - at least one gen_ai.agent.name is present, so the named agent reaches AI Agent
+    Monitoring's "AI agents" view (this regressed when only raw spans were emitted
+    instead of a util-genai AgentInvocation — see backend/telemetry/otel.py)
   - gen_ai.client.operation.duration exists
 
 Retries for a few minutes to absorb ingest/processing lag.
@@ -60,16 +63,19 @@ def main() -> int:
             break
         time.sleep(POLL_EVERY)
 
-    models, ttypes = set(), set()
+    models, ttypes, agents = set(), set(), set()
     for r in tu.get("results", []):
         dim = r.get("dimensions", {})
         if dim.get("gen_ai.request.model"):
             models.add(dim["gen_ai.request.model"])
         if dim.get("gen_ai.token.type"):
             ttypes.add(dim["gen_ai.token.type"])
+        if dim.get("gen_ai.agent.name"):
+            agents.add(dim["gen_ai.agent.name"])
 
     print(f"  gen_ai.client.token.usage MTS: {counts.get('gen_ai.client.token.usage', 0)} "
           f"| token.types={sorted(ttypes)} | models={sorted(models)}")
+    print(f"  gen_ai.agent.name(s): {sorted(agents) or '(none -> AI agents view is empty!)'}")
     print(f"  gen_ai.client.operation.duration MTS: {counts.get('gen_ai.client.operation.duration', 0)}")
 
     ok = (
@@ -77,6 +83,7 @@ def main() -> int:
         and counts.get("gen_ai.client.operation.duration", 0) > 0
         and {"input", "output"} <= ttypes
         and any(m != "unknown_model" for m in models)
+        and len(agents) > 0  # named agent reaches the "AI agents" view (the core fix)
     )
     return 0 if ok else 1
 

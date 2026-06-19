@@ -20,7 +20,11 @@ from backend.models.db_models import AppSettings
 logger = logging.getLogger(__name__)
 
 _ROW_ID = 1
-_DEFAULTS: Dict[str, Any] = {"logs_directory": "logs", "hec_destinations": []}
+_DEFAULTS: Dict[str, Any] = {
+    "logs_directory": "logs",
+    "hec_destinations": [],
+    "emit_model": {"enabled": False, "model_name": "", "random": False},
+}
 _ID_RE = re.compile(r"[^a-z0-9-]+")
 
 
@@ -70,6 +74,37 @@ def set_logs_directory(path: str) -> str:
     except Exception:
         logger.exception("failed to apply logs_directory at runtime")
     return path
+
+
+# ---------------------------------------------------------------------------
+# Demo model-name emission override
+# ---------------------------------------------------------------------------
+def get_emit_model() -> Dict[str, Any]:
+    cfg = load().get("emit_model") or {}
+    return {
+        "enabled": bool(cfg.get("enabled", False)),
+        "model_name": cfg.get("model_name") or "",
+        "random": bool(cfg.get("random", False)),
+    }
+
+
+def set_emit_model(enabled: bool, model_name: str, random_emit: bool) -> Dict[str, Any]:
+    cfg = {
+        "enabled": bool(enabled),
+        "model_name": (model_name or "").strip(),
+        "random": bool(random_emit),
+    }
+    data = load()
+    data["emit_model"] = cfg
+    _persist(data)
+    try:
+        from backend.model_emitter import model_emitter
+        model_emitter.configure(
+            enabled=cfg["enabled"], model_name=cfg["model_name"], random_emit=cfg["random"]
+        )
+    except Exception:
+        logger.exception("failed to apply emit_model at runtime")
+    return cfg
 
 
 # ---------------------------------------------------------------------------

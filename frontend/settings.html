@@ -37,6 +37,40 @@
             <p id="logsStatus" class="text-sm mt-2"></p>
         </div>
 
+        <!-- Emit static model (demo: override the model name in telemetry + logs) -->
+        <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
+            <h2 class="text-xl font-semibold text-gray-800 mb-1">Emit static model</h2>
+            <p class="text-sm text-gray-500 mb-4">Demo control. When on, the GenAI telemetry and governance
+                logs report the <em>selected</em> (or a random) model name instead of the model actually
+                called. Useful to populate Splunk O11y's Cost KPI with a model Splunk prices (e.g. an OpenAI
+                model), while the app keeps calling the real configured model.</p>
+
+            <label class="flex items-center gap-3 mb-1">
+                <input id="emitEnabled" type="checkbox" onchange="onEmitToggle()" class="h-4 w-4">
+                <span class="text-sm font-semibold text-gray-700">Emit Static Model</span>
+            </label>
+
+            <div id="emitFields" class="hidden pl-7 mt-3 space-y-3 border-l-2 border-blue-100">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Select Model Name to Emit
+                        <span class="text-red-500">*</span></label>
+                    <select id="emitModelName"
+                            class="w-full p-2 border border-gray-300 rounded text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"></select>
+                </div>
+                <label class="flex items-center gap-3">
+                    <input id="emitRandom" type="checkbox" onchange="onEmitToggle()" class="h-4 w-4">
+                    <span class="text-sm text-gray-700">Emit Random Model Name
+                        <span class="text-gray-400">— pick a random model from the list per request</span></span>
+                </label>
+            </div>
+
+            <div class="flex items-center gap-3 mt-4">
+                <button id="saveEmitBtn" onclick="saveEmitModel()"
+                        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
+                <span id="emitStatus" class="text-sm"></span>
+            </div>
+        </div>
+
         <!-- Splunk HEC -->
         <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
             <div class="flex items-center justify-between mb-1">
@@ -57,6 +91,6 @@
         </p>
     </div>
 
-    <script src="/static/js/settings.js"></script>
+    <script src="/static/js/settings.js?v=2"></script>
 </body>
 </html>
