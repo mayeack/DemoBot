@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.yeack.medadvice-tunnel</string>
+
+    <!-- Run the named "medadvice" tunnel from the config we wrote
+         (~/.cloudflared/config.yml: hostname, credentials, protocol: http2). -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/cloudflared</string>
+        <string>--config</string>
+        <string>/Users/myeack/.cloudflared/config.yml</string>
+        <string>tunnel</string>
+        <string>run</string>
+        <string>medadvice</string>
+    </array>
+
+    <!-- Start at login, and restart if cloudflared ever exits. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/myeack/.cloudflared/medadvice-tunnel.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/myeack/.cloudflared/medadvice-tunnel.log</string>
+</dict>
+</plist>
