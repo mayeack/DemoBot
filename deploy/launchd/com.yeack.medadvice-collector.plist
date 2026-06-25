@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.yeack.medadvice-collector</string>
+
+    <!-- OTel collector: forwards the app's OTLP telemetry to Splunk O11y + Galileo.
+         run-collector.sh reads SPLUNK_*/GALILEO_* from .env and exec's the native
+         ./bin/otelcol-contrib in the foreground. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Applications/medadvice_v3/run-collector.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Applications/medadvice_v3</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Applications/medadvice_v3/logs/launchd-collector.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Applications/medadvice_v3/logs/launchd-collector.log</string>
+</dict>
+</plist>

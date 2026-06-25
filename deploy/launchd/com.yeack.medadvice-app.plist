@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.yeack.medadvice-app</string>
+
+    <!-- MedAdvice FastAPI app on 0.0.0.0:8001. run.sh activates venv/, exports
+         GALILEO_*/OTEL_* from .env, and exec's the app under the OTel
+         auto-instrumentation wrapper. Relies on relative paths -> WorkingDirectory. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Applications/medadvice_v3/run.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Applications/medadvice_v3</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Applications/medadvice_v3/logs/launchd-app.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Applications/medadvice_v3/logs/launchd-app.log</string>
+</dict>
+</plist>
