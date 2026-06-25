@@ -24,8 +24,21 @@ _DEFAULTS: Dict[str, Any] = {
     "logs_directory": "logs",
     "hec_destinations": [],
     "emit_model": {"enabled": False, "model_name": "", "random": False},
+    # Runtime override of the active LLM provider (empty = use .env/config default).
+    "ai_provider": {"provider": "", "model": ""},
 }
 _ID_RE = re.compile(r"[^a-z0-9-]+")
+
+# Supported LLM providers and the ``settings`` attribute that holds each one's
+# model id. Keep in sync with backend/agents/llm.py::get_chat_model and
+# backend/services/ai_client.py::get_ai_client.
+AI_PROVIDER_CHOICES: List[str] = ["anthropic", "bedrock", "openai", "ollama"]
+_PROVIDER_MODEL_ATTR: Dict[str, str] = {
+    "anthropic": "anthropic_model",
+    "bedrock": "bedrock_model_id",
+    "openai": "openai_model",
+    "ollama": "ollama_model",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +118,62 @@ def set_emit_model(enabled: bool, model_name: str, random_emit: bool) -> Dict[st
     except Exception:
         logger.exception("failed to apply emit_model at runtime")
     return cfg
+
+
+# ---------------------------------------------------------------------------
+# Active LLM provider selection
+# ---------------------------------------------------------------------------
+def get_ai_provider() -> Dict[str, Any]:
+    """Return the LIVE provider/model in effect plus the per-provider model map.
+
+    Reads the runtime ``settings`` singleton (which reflects .env plus any
+    persisted UI override applied at startup), so the UI always shows what is
+    actually being used — not just what is stored."""
+    from backend.config import settings
+
+    provider = (settings.ai_provider or "anthropic").lower()
+    models = {p: (getattr(settings, attr, "") or "") for p, attr in _PROVIDER_MODEL_ATTR.items()}
+    return {
+        "provider": provider,
+        "model": models.get(provider, ""),
+        "choices": list(AI_PROVIDER_CHOICES),
+        "models": models,
+    }
+
+
+def _apply_ai_provider(provider: str, model: str = "") -> None:
+    """Apply the provider/model to the live settings singleton and drop the LLM
+    client caches so the next chat turn picks it up (no restart)."""
+    from backend.config import settings
+
+    settings.ai_provider = provider
+    if model:
+        setattr(settings, _PROVIDER_MODEL_ATTR[provider], model)
+    try:
+        from backend.agents import llm
+        llm.clear_caches()
+    except Exception:
+        logger.exception("failed to clear LLM caches after provider change")
+
+
+def set_ai_provider(provider: str, model: str = "") -> Dict[str, Any]:
+    provider = (provider or "").strip().lower()
+    if provider not in _PROVIDER_MODEL_ATTR:
+        raise ValueError(f"unknown provider: {provider}")
+    model = (model or "").strip()
+    data = load()
+    data["ai_provider"] = {"provider": provider, "model": model}
+    _persist(data)
+    _apply_ai_provider(provider, model)
+    return get_ai_provider()
+
+
+def apply_ai_provider_from_store() -> None:
+    """Startup hook: apply any persisted provider override over the .env default."""
+    cfg = load().get("ai_provider") or {}
+    provider = (cfg.get("provider") or "").strip().lower()
+    if provider in _PROVIDER_MODEL_ATTR:
+        _apply_ai_provider(provider, (cfg.get("model") or "").strip())
 
 
 # ---------------------------------------------------------------------------

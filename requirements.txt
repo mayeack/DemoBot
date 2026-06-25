@@ -40,6 +40,7 @@ langgraph>=0.2.45
 langchain-anthropic>=0.3.0     # ChatAnthropic (local development)
 langchain-aws>=0.2.4           # ChatBedrockConverse (AWS production)
 langchain-openai>=0.2.8        # ChatOpenAI (OpenAI-compatible APIs)
+langchain-ollama>=0.2.0        # ChatOllama (local UNCENSORED model via Ollama daemon)
 
 # =============================================================================
 # Agentic observability (OpenTelemetry GenAI -> Splunk Observability Cloud)

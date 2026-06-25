@@ -42,6 +42,30 @@
             <p id="logsStatus" class="text-sm mt-2"></p>
         </div>
 
+        <!-- AI model provider (which LLM backs the chat) -->
+        <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
+            <h2 class="text-xl font-semibold text-gray-800 mb-1">AI model provider</h2>
+            <p class="text-sm text-gray-500 mb-4">Which LLM backs the chat. Changes take effect immediately for
+                new turns (no restart) and persist across restarts, overriding <code>AI_PROVIDER</code> in
+                <code>.env</code>. <code>ollama</code> runs a local, uncensored model and requires the Ollama
+                daemon running with the model pulled (<code>ollama serve</code> · <code>ollama pull &lt;model&gt;</code>).</p>
+            <div class="flex flex-wrap items-end gap-3">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Provider</label>
+                    <select id="aiProvider" onchange="onProviderChange()"
+                            class="p-2 border border-gray-300 rounded text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"></select>
+                </div>
+                <div class="flex-1 min-w-[16rem]">
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Model</label>
+                    <input id="aiModel" type="text" placeholder="model id"
+                           class="w-full p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-violet-500 font-mono text-sm">
+                </div>
+                <button id="saveProviderBtn" onclick="saveAiProvider()"
+                        class="px-4 py-2 bg-violet-600 text-white rounded hover:bg-violet-700">Save</button>
+            </div>
+            <p id="providerStatus" class="text-sm mt-2"></p>
+        </div>
+
         <!-- Emit static model (demo: override the model name in telemetry + logs) -->
         <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
             <h2 class="text-xl font-semibold text-gray-800 mb-1">Emit static model</h2>
@@ -96,6 +120,6 @@
         </p>
     </div>
 
-    <script src="/static/js/settings.js?v=3"></script>
+    <script src="/static/js/settings.js?v=4"></script>
 </body>
 </html>

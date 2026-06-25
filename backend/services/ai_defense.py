@@ -117,23 +117,26 @@ class AIDefenseClient:
         Defense can evaluate it for leaked PII, toxic content, etc. and return
         a verdict the caller can use to withhold the response.
 
-        NOTE on roles (verified against the live connection): this connection's
-        SCC policy enforces guardrails only on the *prompt* (user) direction.
-        Identical PII/Harassment content carried in an assistant-role message —
-        even within full conversation context — is returned is_safe=True and is
-        NOT flagged. Because this connection already has an SCC policy bound, the
-        Inspection API also rejects an explicit config.enabled_rules override
-        (HTTP 400), so we cannot force response-direction enforcement that way.
-        Therefore the model output is submitted as user-role content (the
-        original prompt is included only as preceding context) to make the
-        response genuinely subject to the PII/Toxicity guardrails. If a
-        connection's policy is configured to enforce the response/output
-        direction, this can be switched back to an assistant-role message.
+        NOTE on roles (verified 2026-06-24 against the live connection): the
+        bound SCC policy now enforces the *response* direction for the content
+        guardrails (PII/PHI/PCI, the Safety rules, Code Detection, …). The
+        Inspection API infers direction from message role — a user-role message
+        is treated as a prompt, an assistant-role message as a response — so the
+        model output is submitted as an assistant-role message (with the
+        original user prompt as preceding context) to inspect it on the genuine
+        response direction. This is what makes response-only guardrails such as
+        Code Detection fire; PII/PHI/PCI and the Safety rules fire on both
+        directions, so they remain caught (verified — no regression to the
+        force-injection governance demo). An empty config is sent because the
+        connection already has the policy bound (an explicit enabled_rules
+        override returns HTTP 400). Earlier this was submitted as user-role to
+        work around a connection that enforced only the prompt direction; that
+        is no longer the case.
         """
         return self._inspect(
             [
                 {"role": "user", "content": user_message},
-                {"role": "user", "content": assistant_message},
+                {"role": "assistant", "content": assistant_message},
             ],
             enduser_id=enduser_id,
             src_app=src_app,

@@ -120,6 +120,22 @@
         </div>
     </div>
 
+    <!-- Prompt Library modal -->
+    <div id="promptLibraryModal" class="modal" onclick="if (event.target === this) closePromptLibrary()">
+        <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[85vh] flex flex-col">
+            <div class="flex items-start justify-between p-6 border-b border-gray-200">
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-800">Prompt Library</h2>
+                    <p class="text-sm text-gray-500 mt-1">Click any prompt to load it into the message box, then press Send.</p>
+                </div>
+                <button onclick="closePromptLibrary()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none" aria-label="Close">&times;</button>
+            </div>
+            <div id="promptLibraryBody" class="p-6 overflow-y-auto space-y-6">
+                <!-- Populated by renderPromptLibrary() in chat.js -->
+            </div>
+        </div>
+    </div>
+
     <!-- Main App -->
     <div id="mainApp" class="hidden">
         <!-- Settings pull-out drawer (left) — all toggles live here -->
@@ -378,6 +394,17 @@
                     </button>
                 </div>
 
+                <!-- Prompt library launcher (beneath the input, same size as Send) -->
+                <div class="mt-2">
+                    <button
+                        onclick="openPromptLibrary()"
+                        id="promptsButton"
+                        class="px-8 py-4 text-lg border-2 border-violet-600 text-violet-600 rounded-lg hover:bg-violet-50"
+                    >
+                        Prompts
+                    </button>
+                </div>
+
                 <div id="loadingIndicator" class="hidden mt-4 flex items-center justify-center space-x-2">
                     <div class="spinner"></div>
                     <span class="text-gray-600">Processing your message...</span>
@@ -396,6 +423,6 @@
         </div>
     </div>
 
-    <script src="/static/js/chat.js?v=9"></script>
+    <script src="/static/js/chat.js?v=12"></script>
 </body>
 </html>

@@ -83,6 +83,33 @@ async def get_emit_model():
     return model_emitter.status()
 
 
+# ---------------------------------------------------------------------------
+# Active LLM provider selection (which model backs the chat)
+# ---------------------------------------------------------------------------
+class AiProviderSettings(BaseModel):
+    provider: str = Field(min_length=1, max_length=40)
+    model: str = Field(default="", max_length=200)
+
+
+@router.get("/settings/ai-provider")
+async def get_ai_provider():
+    return settings_store.get_ai_provider()
+
+
+@router.put("/settings/ai-provider")
+async def update_ai_provider(body: AiProviderSettings):
+    provider = body.provider.strip().lower()
+    if provider not in settings_store.AI_PROVIDER_CHOICES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unknown provider: {provider}. Valid: {', '.join(settings_store.AI_PROVIDER_CHOICES)}",
+        )
+    try:
+        return settings_store.set_ai_provider(provider, body.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
 @router.put("/settings/emit-model")
 async def update_emit_model(body: EmitModelSettings):
     name = (body.model_name or "").strip()

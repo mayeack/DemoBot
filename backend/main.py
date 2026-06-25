@@ -77,6 +77,8 @@ async def startup_event():
         from backend.model_emitter import model_emitter
         _em = settings_store.get_emit_model()
         model_emitter.configure(_em["enabled"], _em["model_name"], _em["random"])
+        # Apply any persisted LLM provider override (Settings UI) over the .env default.
+        settings_store.apply_ai_provider_from_store()
         await hec_runtime.start()
         logger.info("Settings loaded; HEC forwarders started")
     except Exception as e:

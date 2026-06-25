@@ -39,6 +39,19 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o"
     openai_base_url: str = "https://api.openai.com/v1"
 
+    # Ollama Configuration (used when ai_provider="ollama")
+    # Local, UNCENSORED open-source model served by a local `ollama serve` daemon
+    # and called via langchain-ollama's ChatOllama. Workshop intent: an unaligned
+    # model that WILL emit unsafe/toxic/PII output so the external guardrails
+    # (Cisco AI Defense, Splunk, Galileo) demonstrably catch it. ChatOllama
+    # populates usage_metadata natively, so the telemetry/governance token
+    # contract is identical to the cloud providers.
+    ollama_model: str = "dolphin3:8b"
+    ollama_base_url: str = "http://localhost:11434"
+    # Context window passed to Ollama (num_ctx); 8192 fits the theme system prompt
+    # plus the governance input directives with headroom.
+    ollama_num_ctx: int = 8192
+
     # Application
     app_name: str = "MedAdvice v4"
     app_version: str = "4.0.0"

@@ -44,6 +44,40 @@ function setLogsStatus(msg, ok) {
   el.className = 'text-sm mt-2 ' + (ok ? 'text-green-600' : 'text-red-600');
 }
 
+// ------------------------------------------------------------ ai provider
+let _providerModels = {};
+async function loadAiProvider() {
+  try {
+    const d = await api('GET', '/api/settings/ai-provider');
+    _providerModels = d.models || {};
+    const sel = document.getElementById('aiProvider');
+    sel.innerHTML = (d.choices || []).map(p => `<option value="${attr(p)}">${esc(p)}</option>`).join('');
+    sel.value = d.provider;
+    document.getElementById('aiModel').value = d.model || '';
+  } catch (e) { setProviderStatus('Failed to load: ' + e.message, false); }
+}
+function onProviderChange() {
+  // Prefill the model box with the selected provider's configured model.
+  const p = document.getElementById('aiProvider').value;
+  document.getElementById('aiModel').value = _providerModels[p] || '';
+}
+async function saveAiProvider() {
+  const body = {
+    provider: document.getElementById('aiProvider').value,
+    model: document.getElementById('aiModel').value.trim(),
+  };
+  try {
+    const d = await api('PUT', '/api/settings/ai-provider', body);
+    _providerModels = d.models || _providerModels;
+    setProviderStatus(`Saved — chat now uses ${d.provider} · ${d.model || 'default model'}. New turns use it immediately.`, true);
+  } catch (e) { setProviderStatus('Error: ' + e.message, false); }
+}
+function setProviderStatus(msg, ok) {
+  const el = document.getElementById('providerStatus');
+  el.textContent = msg;
+  el.className = 'text-sm mt-2 ' + (ok ? 'text-green-600' : 'text-red-600');
+}
+
 // -------------------------------------------------------------- emit model
 async function loadEmitModel() {
   try {
@@ -255,6 +289,7 @@ async function loadStats() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadLogsDir();
+  await loadAiProvider();
   await loadEmitModel();
   await loadDestinations();
   await loadStats();

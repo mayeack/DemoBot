@@ -516,6 +516,20 @@ def get_ai_client(settings) -> AIClient:
             model=settings.openai_model,
             base_url=settings.openai_base_url
         )
+    elif provider == "ollama":
+        # Legacy-engine path. The agentic engine talks to Ollama natively via
+        # langchain-ollama; here we reuse the OpenAI-compatible client because
+        # Ollama exposes an OpenAI-compatible API at <base_url>/v1. The api_key is
+        # ignored by Ollama but the OpenAI SDK requires a non-empty value. This
+        # also prevents an import-time crash: RecommendationEngine is constructed
+        # at module import (backend/routers/chat.py) and builds this client eagerly.
+        ollama_base = settings.ollama_base_url.rstrip("/") + "/v1"
+        logger.info(f"Creating Ollama (OpenAI-compatible) client for base URL: {ollama_base}")
+        return OpenAIClient(
+            api_key="ollama",
+            model=settings.ollama_model,
+            base_url=ollama_base
+        )
     elif provider == "anthropic":
         logger.info("Creating Anthropic client")
         return AnthropicClient(
@@ -525,5 +539,5 @@ def get_ai_client(settings) -> AIClient:
     else:
         raise AIClientError(
             f"Unknown AI provider: {provider}. "
-            f"Valid options are 'anthropic', 'bedrock', or 'openai'"
+            f"Valid options are 'anthropic', 'bedrock', 'openai', or 'ollama'"
         )

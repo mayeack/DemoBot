@@ -57,6 +57,18 @@ class ChatModelError(Exception):
 _MODEL_CACHE: Dict[str, Any] = {}
 
 
+def clear_caches() -> None:
+    """Drop cached chat models / react agents so a runtime provider/model change
+    (e.g. from the Settings UI) takes effect on the next call.
+
+    The cache keys include the provider + token/temperature params but NOT the
+    model name, so switching the model *within* a provider would otherwise keep
+    serving a stale client. Called by ``settings_store.set_ai_provider``.
+    """
+    _MODEL_CACHE.clear()
+    _AGENT_CACHE.clear()
+
+
 def get_chat_model(settings, *, max_tokens: int = 2048, temperature: float = 0.7):
     """Return a LangChain chat model for the configured provider.
 
@@ -99,10 +111,24 @@ def get_chat_model(settings, *, max_tokens: int = 2048, temperature: float = 0.7
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
+        elif provider == "ollama":
+            from langchain_ollama import ChatOllama
+
+            # Local uncensored model served by `ollama serve`. ChatOllama uses
+            # num_predict (NOT max_tokens) for the output cap and num_ctx for the
+            # context window. usage_metadata is populated natively, so _extract_usage
+            # tier-1 and the otel/governance/Galileo token plumbing work unchanged.
+            model = ChatOllama(
+                model=settings.ollama_model,
+                base_url=settings.ollama_base_url,
+                temperature=temperature,
+                num_predict=max_tokens,
+                num_ctx=settings.ollama_num_ctx,
+            )
         else:
             raise ChatModelError(
                 f"Unknown AI provider: {provider}. "
-                "Valid options are 'anthropic', 'bedrock', or 'openai'."
+                "Valid options are 'anthropic', 'bedrock', 'openai', or 'ollama'."
             )
     except ImportError as exc:  # pragma: no cover - depends on optional deps
         raise ChatModelError(
@@ -178,6 +204,7 @@ def _extract_metadata(ai_message, fallback_model: str) -> Dict[str, str]:
     stop_reason = (
         meta.get("stop_reason")
         or meta.get("finish_reason")
+        or meta.get("done_reason")  # Ollama reports the stop reason here
         or "end_turn"
     )
     return {"id": str(response_id), "model": str(model), "stop_reason": str(stop_reason)}
@@ -209,6 +236,8 @@ def invoke_chat(
         else settings.bedrock_model_id
         if provider == "bedrock"
         else settings.openai_model
+        if provider == "openai"
+        else settings.ollama_model
     )
     # Demo override: report a static/random model name instead of the real one
     # (backend/model_emitter.py). The actual model call below is unchanged.
@@ -310,6 +339,8 @@ def invoke_agent(
         else settings.bedrock_model_id
         if provider == "bedrock"
         else settings.openai_model
+        if provider == "openai"
+        else settings.ollama_model
     )
     # Demo override: report a static/random model name instead of the real one
     # (backend/model_emitter.py). The actual agent call below is unchanged.

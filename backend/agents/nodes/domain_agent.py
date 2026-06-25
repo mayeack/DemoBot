@@ -177,4 +177,6 @@ def _request_model(provider: str) -> str:
         return settings.bedrock_model_id
     if provider == "openai":
         return settings.openai_model
+    if provider == "ollama":
+        return settings.ollama_model
     return settings.anthropic_model

@@ -63,9 +63,30 @@ elif [ "$AI_PROVIDER" = "openai" ]; then
         echo "The application will not work without a valid API key"
         echo ""
     fi
+elif [ "$AI_PROVIDER" = "ollama" ]; then
+    echo "🔧 AI Provider: Ollama (local uncensored model)"
+    # Preflight the local Ollama daemon: warn (don't block) if it's down or the
+    # configured model isn't pulled, so the operator gets an actionable message
+    # instead of a cryptic connection error on the first chat turn.
+    OLLAMA_URL=$(grep "^OLLAMA_BASE_URL=" .env 2>/dev/null | cut -d'=' -f2)
+    OLLAMA_URL=${OLLAMA_URL:-http://localhost:11434}
+    OLLAMA_MODEL=$(grep "^OLLAMA_MODEL=" .env 2>/dev/null | cut -d'=' -f2)
+    OLLAMA_MODEL=${OLLAMA_MODEL:-dolphin3:8b}
+    if ! curl -s -o /dev/null -w '%{http_code}' "$OLLAMA_URL/api/tags" 2>/dev/null | grep -q '^200$'; then
+        echo "⚠️  WARNING: Ollama not reachable at $OLLAMA_URL"
+        echo "    Start it:  ollama serve"
+        echo "    Pull it:   ollama pull $OLLAMA_MODEL"
+        echo ""
+    elif ! curl -s "$OLLAMA_URL/api/tags" 2>/dev/null | grep -q "\"$OLLAMA_MODEL\""; then
+        echo "⚠️  WARNING: model '$OLLAMA_MODEL' not pulled in Ollama"
+        echo "    Pull it:   ollama pull $OLLAMA_MODEL"
+        echo ""
+    else
+        echo "✅ Ollama up at $OLLAMA_URL and model '$OLLAMA_MODEL' present"
+    fi
 else
     echo "⚠️  WARNING: Unknown AI_PROVIDER: $AI_PROVIDER"
-    echo "Valid options: anthropic, bedrock, openai"
+    echo "Valid options: anthropic, bedrock, openai, ollama"
     echo ""
 fi
 
