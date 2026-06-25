@@ -90,7 +90,6 @@ SLM_SCORERS: List[str] = [
 # console while the SLM + code scorers still work. Opt in with include_llm_scorers.
 LLM_BUILTINS: List[str] = [
     "Correctness",
-    "Ground Truth Adherence",
     "Instruction Adherence",
     "Output PII",
 ]
