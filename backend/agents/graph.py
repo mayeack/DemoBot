@@ -6,13 +6,20 @@ Topology:
 
     START -> router -> {theme}_subgraph -> END
 
-Each ``{theme}_subgraph`` is the decomposed agent pipeline:
+Each ``{theme}_subgraph`` is the decomposed multi-agent pipeline:
 
-    policy -> prompt_defense -> intake -> domain(theme) -> safety
-          -> injection -> compliance -> response_defense -> governance
+    policy -> prompt_defense -> intake -> coordinator -> specialists
+          -> synthesizer -> safety -> injection -> compliance
+          -> response_defense -> governance
 
-with conditional short-circuits to END whenever a node sets ``terminal`` (policy
-block, AI Defense block, clarifying question, generation error).
+The multi-agent core is coordinator -> specialists -> synthesizer: the
+coordinator (always) selects 1-N themed specialists for the query, each
+specialist runs as its own themed agent, and the synthesizer fuses their
+findings into the final answer. Every agent emits its own GenAI AgentInvocation
+span, so the turn always produces a multi-agent trace.
+
+There are conditional short-circuits to END whenever a node sets ``terminal``
+(policy block, AI Defense block, clarifying question, agent generation error).
 
 The compiled workflow is tagged with ``workflow_name`` metadata so Splunk AI
 Agent Monitoring promotes it to a recognized workflow.
@@ -29,9 +36,11 @@ from langgraph.graph import END, START, StateGraph
 
 from backend.agents.nodes.clarify import intake_node
 from backend.agents.nodes.compliance import compliance_node
+from backend.agents.nodes.coordinator import make_coordinator_agent
 from backend.agents.nodes.defense import prompt_defense_node, response_defense_node
-from backend.agents.nodes.domain_agent import make_domain_agent
 from backend.agents.nodes.governance import governance_node
+from backend.agents.nodes.specialists import make_specialists_agent
+from backend.agents.nodes.synthesizer import make_synthesizer_agent
 from backend.agents.nodes.injection import injection_node
 from backend.agents.nodes.policy import policy_block_node
 from backend.agents.nodes.safety import safety_node
@@ -58,7 +67,9 @@ def build_theme_subgraph(theme_config):
     g.add_node("policy", policy_block_node)
     g.add_node("prompt_defense", prompt_defense_node)
     g.add_node("intake", intake_node)
-    g.add_node("domain", make_domain_agent(theme_config))
+    g.add_node("coordinator", make_coordinator_agent(theme_config))
+    g.add_node("specialists", make_specialists_agent(theme_config))
+    g.add_node("synthesizer", make_synthesizer_agent(theme_config))
     g.add_node("safety", safety_node)
     g.add_node("injection", injection_node)
     g.add_node("compliance", compliance_node)
@@ -68,8 +79,10 @@ def build_theme_subgraph(theme_config):
     g.add_edge(START, "policy")
     g.add_conditional_edges("policy", _terminal_router, {"end": END, "next": "prompt_defense"})
     g.add_conditional_edges("prompt_defense", _terminal_router, {"end": END, "next": "intake"})
-    g.add_conditional_edges("intake", _terminal_router, {"end": END, "next": "domain"})
-    g.add_conditional_edges("domain", _terminal_router, {"end": END, "next": "safety"})
+    g.add_conditional_edges("intake", _terminal_router, {"end": END, "next": "coordinator"})
+    g.add_conditional_edges("coordinator", _terminal_router, {"end": END, "next": "specialists"})
+    g.add_conditional_edges("specialists", _terminal_router, {"end": END, "next": "synthesizer"})
+    g.add_conditional_edges("synthesizer", _terminal_router, {"end": END, "next": "safety"})
     g.add_edge("safety", "injection")
     g.add_edge("injection", "compliance")
     g.add_edge("compliance", "response_defense")

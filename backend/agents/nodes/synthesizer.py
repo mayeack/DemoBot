@@ -1,40 +1,46 @@
-"""Per-theme domain agent node (the LLM specialist).
+"""Synthesizer agent node (the turn's only user-facing agent).
 
-This is the theme's core agent: it calls the LLM with the theme's system prompt,
-parses the structured recommendation (assessment / guidance / seek_care_if /
-severity / confidence), normalizes severity, and formats the base message.
+The final agent of the multi-agent stage. It fuses the specialist findings into
+the single structured recommendation the downstream nodes expect, and — because
+it is the only user-facing agent — it carries the governance test-content
+directive (so any solicited PII/toxic/hallucination/authority content lands in
+the final answer for the guardrail/eval demo).
 
-Decomposition note: assessment and guidance are produced by this single
-structured call so the governance token/JSON contract stays intact (one model
-call -> one set of usage tokens and one response id). The surrounding specialist
-agents (intake, safety, injection, compliance, defense) form the rest of the
-per-theme decomposition.
+Absorbs the former ``domain_agent`` node: same parsing (``_parse_recommendation``
+/ ``_extract_directive_tail``), same formatting (``content_engine``), and it sets
+the same state fields. Differences from the old domain agent:
+- ``llm_input_tokens`` / ``llm_output_tokens`` are the running SUM across
+  coordinator + specialists + synthesizer (the multi-agent token contract).
+- ``agent_name`` stays ``{theme}_domain_agent`` for Splunk dashboard continuity.
 
-Telemetry: wrapped in an ``AgentInvocation`` span (named per theme) containing an
-``LLMInvocation`` span carrying model + token usage.
+Telemetry: emits a ``{theme}_domain_agent`` AgentInvocation span wrapping its LLM
+call.
 """
 
 from __future__ import annotations
 
 import json
 import re
-import time
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List
 
 from backend.agents.llm import ChatModelError, invoke_agent
+from backend.agents.nodes.agent_common import (
+    handle_agent_error,
+    request_model,
+    trace_entry,
+)
 from backend.agents.nodes.injection import build_input_directives
 from backend.agents.nodes.shared import build_llm_messages, content_engine
+from backend.agents.themes.base import build_synthesizer_prompt
 from backend.config import settings
-from backend.logging.governance_logger import governance_logger
-from backend.models.schemas import MessageType, SeverityLevel
 from backend.telemetry import otel
 
 
 def _parse_recommendation(output_text: str, conversational: bool) -> Dict[str, Any]:
     """Parse the model output into a recommendation dict.
 
-    Mirrors the legacy parsing: extract JSON from a fenced code block if present,
-    otherwise parse the whole string, with theme-aware fallbacks.
+    Extract JSON from a fenced code block if present, otherwise parse the whole
+    string, with theme-aware fallbacks. (Moved verbatim from the domain agent.)
     """
     json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", output_text, re.DOTALL)
     json_text = json_match.group(1) if json_match else output_text
@@ -57,10 +63,9 @@ def _extract_directive_tail(output_text: str) -> str:
     """Return any text the model appended AFTER its structured JSON answer.
 
     Under the governance directive the model emits its normal ```json answer```
-    and then appends a "Synthetic governance test samples" block. The JSON-only
-    parse in ``_parse_recommendation`` would discard that block, so the injection
-    node would never see the model's own governance content and would wrongly fall
-    back. Preserving the tail lets a compliant model response stand on its own.
+    and then appends a "Synthetic governance test samples" block; preserving the
+    tail lets a compliant model response stand on its own. (Moved verbatim from
+    the domain agent.)
     """
     text = output_text or ""
     m = re.search(r"```(?:json)?\s*\{.*?\}\s*```", text, re.DOTALL)
@@ -73,28 +78,44 @@ def _extract_directive_tail(output_text: str) -> str:
     return ""
 
 
-def make_domain_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
-    """Build the domain-agent node for a specific theme."""
+def _format_specialist_findings(specialist_outputs: List[Dict[str, Any]]) -> str:
+    """Concatenate specialist analyses into one labeled block for the synth prompt."""
+    parts: List[str] = []
+    for out in specialist_outputs or []:
+        label = out.get("label") or out.get("key") or "Specialist"
+        analysis = (out.get("analysis") or "").strip()
+        if analysis:
+            parts.append(f"[{label}]\n{analysis}")
+    return "\n\n".join(parts)
 
-    def domain_agent_node(state: Dict[str, Any]) -> Dict[str, Any]:
+
+def make_synthesizer_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
+    """Build the synthesizer node for a specific theme."""
+    base_prompt = build_synthesizer_prompt(theme_config)
+    agent_name = theme_config.agent_name  # {key}_domain_agent
+
+    def synthesizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
         messages = build_llm_messages(state.get("conversation_history", []))
-        system_prompt = state.get("system_prompt") or theme_config.system_prompt
-        # Governance demo: instead of injecting unsafe content into the output,
-        # append a directive to the INPUT asking the model to produce the toggled
-        # content itself. The decision (one roll per turn) is shared with the
-        # post-LLM injection node via ``requested_categories``.
+
+        # Fold specialist findings into the system prompt, then append the
+        # governance directive (one roll per turn — must live on the user-facing
+        # agent so the post-LLM injection node sees the same decision).
+        findings = _format_specialist_findings(state.get("specialist_outputs", []))
         directive_text, requested_categories = build_input_directives(state)
+        system_prompt = base_prompt
+        if findings:
+            system_prompt = f"{system_prompt}\n\nSPECIALIST FINDINGS:\n{findings}"
         system_prompt = system_prompt + directive_text
         provider = settings.ai_provider
 
-        with otel.agent_span(theme_config.agent_name, theme=theme_config.key):
+        with otel.agent_span(agent_name, theme=theme_config.key):
             try:
                 with otel.llm_span(
-                    request_model=_request_model(provider), provider=provider
+                    request_model=request_model(provider), provider=provider
                 ) as llm_sp:
                     response = invoke_agent(
                         settings,
-                        agent_name=theme_config.agent_name,
+                        agent_name=agent_name,
                         system=system_prompt,
                         messages=messages,
                         max_tokens=2048,
@@ -109,7 +130,7 @@ def make_domain_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str, Any]
                         finish_reason=response.stop_reason,
                     )
             except ChatModelError as exc:
-                return _handle_generation_error(state, exc)
+                return handle_agent_error(state, exc)
 
         recommendation = _parse_recommendation(
             response.content, theme_config.conversational
@@ -128,55 +149,26 @@ def make_domain_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str, Any]
             if tail:
                 final_message = f"{final_message}\n\n{tail}"
 
+        trace = list(state.get("agent_trace", []))
+        trace.append(
+            trace_entry(name=agent_name, role="synthesizer", response=response)
+        )
+
         return {
             "messages": messages,
             "requested_categories": requested_categories,
             "recommendation": recommendation,
+            "agent_trace": trace,
             "llm_response_id": response.id,
             "llm_model": response.model,
-            "llm_input_tokens": response.input_tokens,
-            "llm_output_tokens": response.output_tokens,
+            "llm_input_tokens": (state.get("llm_input_tokens", 0) or 0)
+            + (response.input_tokens or 0),
+            "llm_output_tokens": (state.get("llm_output_tokens", 0) or 0)
+            + (response.output_tokens or 0),
             "llm_stop_reason": response.stop_reason,
             "severity": severity,
             "confidence": confidence,
             "final_message": final_message,
         }
 
-    return domain_agent_node
-
-
-def _handle_generation_error(state: Dict[str, Any], exc: Exception) -> Dict[str, Any]:
-    """Log a governance error and short-circuit with the generic safe reply.
-
-    Matches the legacy ``process_message`` exception handler.
-    """
-    governance_logger.log_error(
-        session_id=state["session_id"],
-        request_id=state["request_id"],
-        error_type=type(exc).__name__,
-        error_message=str(exc),
-        stack_trace=None,
-        enduser_id=state.get("enduser_id"),
-    )
-    return {
-        "terminal": True,
-        "result": {
-            "message": (
-                "I apologize, but I encountered an error. Please try again or seek "
-                "immediate medical care if this is urgent."
-            ),
-            "type": MessageType.SAFETY_WARNING,
-            "severity": SeverityLevel.MEDIUM,
-            "escalated": True,
-        },
-    }
-
-
-def _request_model(provider: str) -> str:
-    if provider == "bedrock":
-        return settings.bedrock_model_id
-    if provider == "openai":
-        return settings.openai_model
-    if provider == "ollama":
-        return settings.ollama_model
-    return settings.anthropic_model
+    return synthesizer_node

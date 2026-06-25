@@ -79,5 +79,63 @@ gov = (ROOT / "backend/logging/governance_logger.py").read_text()
 check("governance logger fans completed turns out to Galileo",
       "galileo_integration" in gov and "maybe_log_turn" in gov)
 
+# ---- multi-agent nested emission (agent_trace -> nested Galileo spans) ----
+# Fake the galileo SDK so _emit's span calls are captured without a network call.
+import types  # noqa: E402
+
+_span_calls = []
+
+
+class _FakeGalileoLogger:
+    def start_trace(self, **k): _span_calls.append(("start_trace", k))
+    def add_workflow_span(self, **k): _span_calls.append(("add_workflow_span", k))
+    def add_agent_span(self, **k): _span_calls.append(("add_agent_span", k))
+    def add_llm_span(self, **k): _span_calls.append(("add_llm_span", k))
+    def conclude(self, **k): _span_calls.append(("conclude", k))
+    def flush(self): _span_calls.append(("flush", {})); return ["trace"]
+
+
+_fake_galileo = types.ModuleType("galileo")
+_fake_galileo.GalileoLogger = _FakeGalileoLogger
+sys.modules["galileo"] = _fake_galileo
+
+_trace = [
+    {"name": "medadvice_coordinator", "role": "coordinator", "model": "m",
+     "input_tokens": 10, "output_tokens": 5, "output_text": "plan", "status": "ok"},
+    {"name": "medadvice_triage_specialist", "role": "specialist", "model": "m",
+     "input_tokens": 20, "output_tokens": 8, "output_text": "triage", "status": "ok"},
+    {"name": "medadvice_domain_agent", "role": "synthesizer", "model": "m",
+     "input_tokens": 30, "output_tokens": 40, "output_text": "final", "status": "ok"},
+]
+_log = {
+    "operation_name": "chat", "token_type": "output", "request_id": "rid",
+    "input_messages": [{"role": "user", "content": "headache"}],
+    "output_messages": [{"role": "assistant", "content": "final"}],
+    "response_model": "m", "usage_input_tokens": 60, "usage_output_tokens": 53,
+    "pii_detected": True, "agent_trace": _trace,
+}
+gi._emit(_log)
+_names = [c[0] for c in _span_calls]
+check("multi-agent emit nests one workflow span", _names.count("add_workflow_span") == 1)
+check("multi-agent emit nests one agent span per agent_trace entry",
+      _names.count("add_agent_span") == 3 and _names.count("add_llm_span") == 3)
+check("multi-agent emit balances conclude() (3 agents + workflow + trace = 5)",
+      _names.count("conclude") == 5 and _names[-1] == "flush")
+check("governance metadata (pii_detected) rides on the Galileo spans",
+      _span_calls[0][1].get("metadata", {}).get("pii_detected") is True)
+check("coordinator agent span tagged with the supervisor AgentType",
+      any(c[0] == "add_agent_span"
+          and getattr(c[1].get("agent_type"), "value", None) == "supervisor"
+          for c in _span_calls))
+
+_span_calls.clear()
+gi._emit({**_log, "agent_trace": None})
+_fb = [c[0] for c in _span_calls]
+check("no agent_trace -> falls back to a single LLM span (back-compat)",
+      _fb.count("add_agent_span") == 0 and _fb.count("add_llm_span") == 1
+      and _fb.count("conclude") == 1)
+
+del sys.modules["galileo"]
+
 print(f"RESULT: {'ok' if not _fails else str(_fails) + ' failed'}")
 sys.exit(1 if _fails else 0)

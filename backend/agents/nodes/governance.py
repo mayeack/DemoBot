@@ -85,6 +85,10 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
             theme=state.get("theme"),
             agent_name=state.get("agent_name"),
             workflow_name=workflow_name,
+            # Per-agent transcript (coordinator + specialists + synthesizer) so the
+            # Galileo SDK path can rebuild the multi-agent trace; see
+            # backend/galileo_integration.py and log_schemas.create_governance_log.
+            agent_trace=state.get("agent_trace"),
             trace_id=trace_id,
             client_address=client_address,
             enduser_id=enduser_id,

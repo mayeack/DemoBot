@@ -101,6 +101,11 @@ def create_governance_log(
         # Workflow / agent context (inputs to the executive overlay below).
         "agent_name": kwargs.get("agent_name"),
         "workflow_name": kwargs.get("workflow_name"),
+        # Per-agent transcript for the turn (coordinator + specialists +
+        # synthesizer): list of {name, role, model, input_tokens, output_tokens,
+        # output_text (truncated), status}. Consumed by the Galileo SDK path to
+        # rebuild the multi-agent trace; None on non-chat events (then dropped).
+        "agent_trace": kwargs.get("agent_trace"),
         "theme": kwargs.get("theme"),
         "severity": kwargs.get("severity"),
         "tool_name": kwargs.get("tool_name"),

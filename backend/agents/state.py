@@ -47,7 +47,18 @@ class MedAdviceState(TypedDict, total=False):
     # post-LLM injection fallback agree on a single decision.
     requested_categories: Dict[str, bool]
 
-    # ---- LLM messages + raw model output (domain agent) ----
+    # ---- Multi-agent stage (coordinator -> specialists -> synthesizer) ----
+    # The coordinator picks 1-N specialists per query; the specialists node runs
+    # each as its own themed agent; the synthesizer fuses their findings into the
+    # final answer. ``agent_trace`` is the per-agent transcript (one entry per
+    # coordinator/specialist/synthesizer call) used to rebuild the multi-agent
+    # trace for Galileo. ``llm_*_tokens`` below are the SUM across all agents.
+    selected_specialists: List[str]
+    coordinator_plan: Dict[str, Any]
+    specialist_outputs: List[Dict[str, Any]]
+    agent_trace: List[Dict[str, Any]]
+
+    # ---- LLM messages + raw model output (synthesizer; tokens summed) ----
     messages: List[Dict[str, Any]]
     recommendation: Dict[str, Any]
     llm_response_id: str
