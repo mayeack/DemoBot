@@ -330,6 +330,23 @@ function onThemeChange() {
     }
 }
 
+// ---- Light / Dark color scheme (separate from the vertical "Application Theme") ----
+// Toggled by the Light/Dark control at the bottom of the Settings drawer; the dark
+// styling lives in index.html under `html.dark`. Persisted across reloads.
+function setColorScheme(mode) {
+    const dark = mode === 'dark';
+    document.documentElement.classList.toggle('dark', dark);
+    try { localStorage.setItem('medadvice_color_scheme', dark ? 'dark' : 'light'); } catch (e) {}
+    updateColorSchemeButtons(dark ? 'dark' : 'light');
+}
+
+function updateColorSchemeButtons(mode) {
+    const lightBtn = document.getElementById('lightModeBtn');
+    const darkBtn = document.getElementById('darkModeBtn');
+    if (lightBtn) lightBtn.classList.toggle('active', mode !== 'dark');
+    if (darkBtn) darkBtn.classList.toggle('active', mode === 'dark');
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     // Restore saved theme
@@ -337,6 +354,12 @@ document.addEventListener('DOMContentLoaded', function() {
     currentTheme = savedTheme;
     prevTailwindColor = (THEMES[savedTheme] || THEMES.medadvice).tailwindColor;
     applyTheme(savedTheme);
+
+    // Restore saved light/dark color scheme (the no-flash script in index.html
+    // already set the class; this syncs the toggle buttons' active state).
+    const savedScheme = (localStorage.getItem('medadvice_color_scheme') === 'dark') ? 'dark' : 'light';
+    document.documentElement.classList.toggle('dark', savedScheme === 'dark');
+    updateColorSchemeButtons(savedScheme);
 
     // Check if user already has a session
     const savedSessionId = localStorage.getItem('medadvice_session_id');

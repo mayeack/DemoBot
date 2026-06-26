@@ -76,7 +76,66 @@
             align-items: center;
             justify-content: center;
         }
+
+        /* ---------- Dark mode ---------- */
+        /* Scoped under html.dark; remaps the light Tailwind surfaces this page
+           uses to dark equivalents. The .dark class is toggled by the Light/Dark
+           control at the bottom of the Settings drawer (see setColorScheme). */
+        html.dark body { background-color: #0f172a; color: #e2e8f0; }
+
+        /* Surfaces */
+        html.dark .bg-white  { background-color: #1e293b !important; }
+        html.dark .bg-gray-50  { background-color: #1e293b !important; }
+        html.dark .bg-gray-100 { background-color: #334155 !important; }
+        html.dark .bg-gray-200 { background-color: #334155 !important; }
+        html.dark .bg-gray-300 { background-color: #475569 !important; }
+        html.dark .bg-slate-200 { background-color: #334155; }
+
+        /* Tinted accent cards */
+        html.dark .bg-indigo-50 { background-color: #1e1b4b; }
+        html.dark .bg-sky-50    { background-color: #082f49; }
+        html.dark .bg-slate-50  { background-color: #1e293b; }
+        html.dark .bg-violet-50 { background-color: #2e1065; }
+        html.dark .bg-red-50    { background-color: #3b0a0a; }
+        html.dark .bg-red-100   { background-color: #7f1d1d; }
+        html.dark .bg-amber-50  { background-color: #451a03; }
+
+        /* Text */
+        html.dark .text-gray-800,
+        html.dark .text-gray-700,
+        html.dark .text-gray-600 { color: #e2e8f0 !important; }
+        html.dark .text-gray-500,
+        html.dark .text-gray-400 { color: #94a3b8 !important; }
+        html.dark .text-slate-800, html.dark .text-slate-700 { color: #cbd5e1; }
+        html.dark .text-slate-500 { color: #94a3b8; }
+        html.dark .text-indigo-700 { color: #a5b4fc; }
+        html.dark .text-sky-700  { color: #7dd3fc; }
+        html.dark .text-violet-800 { color: #c4b5fd; }
+        html.dark .text-amber-800 { color: #fcd34d; }
+        html.dark .text-red-700  { color: #fca5a5; }
+        html.dark .text-red-600  { color: #fca5a5; }
+
+        /* Borders */
+        html.dark .border-gray-200,
+        html.dark .border-gray-300 { border-color: #334155 !important; }
+        html.dark .border-slate-200 { border-color: #334155; }
+
+        /* Form controls without an explicit bg class */
+        html.dark input, html.dark select { background-color: #0f172a; color: #e2e8f0; border-color: #334155; }
+        html.dark input::placeholder { color: #64748b; }
+
+        /* Chat message bubbles (neutral ones; semantic colors kept) */
+        html.dark .message-assistant { background-color: #334155; color: #e2e8f0; }
+        html.dark .message-clarifying { background-color: #1e293b; color: #e2e8f0; }
+
+        /* Light/Dark segmented control */
+        #themeModeToggle button { background-color: #ffffff; color: #4b5563; }
+        #themeModeToggle button.active { background-color: var(--primary); color: #ffffff; }
+        html.dark #themeModeToggle button { background-color: #334155; color: #cbd5e1; }
+        html.dark #themeModeToggle button.active { background-color: var(--primary); color: #ffffff; }
     </style>
+    <!-- Apply saved color scheme before first paint to avoid a flash -->
+    <script>(function(){try{if(localStorage.getItem('medadvice_color_scheme')==='dark'){document.documentElement.classList.add('dark');}}catch(e){}})();</script>
 </head>
 <body class="bg-gray-50">
     <!-- Disclaimer Modal -->
@@ -316,6 +375,22 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Appearance: Light / Dark mode -->
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <span class="text-sm font-semibold text-gray-700">Appearance</span>
+                            <p class="text-xs text-gray-500">Switch between light and dark mode</p>
+                        </div>
+                        <div id="themeModeToggle" class="inline-flex rounded-lg border border-gray-300 overflow-hidden" role="group" aria-label="Color scheme">
+                            <button type="button" id="lightModeBtn" onclick="setColorScheme('light')"
+                                class="px-3 py-1.5 text-sm font-semibold focus:outline-none transition-colors">☀️ Light</button>
+                            <button type="button" id="darkModeBtn" onclick="setColorScheme('dark')"
+                                class="px-3 py-1.5 text-sm font-semibold border-l border-gray-300 focus:outline-none transition-colors">🌙 Dark</button>
+                        </div>
+                    </div>
+                </div>
             </div>
             <!-- Expand/contract tab -->
             <button id="drawerToggle" type="button" onclick="toggleDrawer()" aria-expanded="false" aria-controls="settingsDrawer" title="Settings"
@@ -438,6 +513,6 @@
         </div>
     </div>
 
-    <script src="/static/js/chat.js?v=15"></script>
+    <script src="/static/js/chat.js?v=16"></script>
 </body>
 </html>
