@@ -1,0 +1,58 @@
+title: One Cisco — Agentic AI Governance Workshop
+description: >-
+  Secure. Observable. Governed. Measurable. One Cisco, end to end. A hands-on
+  field workshop for governing agentic AI across four correlated pillars —
+  Measure, Secure, Observe, Govern — on the live MedAdvice demo app.
+
+# --- Theme (GitHub Pages native / "legacy" build, no Actions required) ---
+remote_theme: just-the-docs/just-the-docs
+color_scheme: dark
+
+# --- Plugins (all on the GitHub Pages allow-list) ---
+plugins:
+  - jekyll-remote-theme
+  - jekyll-include-cache
+  - jekyll-seo-tag
+  - jekyll-sitemap
+
+# --- Navigation / search ---
+search_enabled: true
+heading_anchors: true
+nav_sort: case_insensitive
+
+# Top-right auxiliary link
+aux_links:
+  "DemoBot repo on GitHub":
+    - "https://github.com/mayeack/DemoBot"
+aux_links_new_tab: true
+
+# Footer
+back_to_top: true
+back_to_top_text: "Back to top"
+last_edit_timestamp: false
+gh_edit_link: true
+gh_edit_link_text: "Edit this page on GitHub"
+gh_edit_repository: "https://github.com/mayeack/DemoBot"
+gh_edit_branch: "main"
+gh_edit_view_mode: "tree"
+
+# --- Callout styles used across the labs ---
+callouts:
+  note:
+    title: Note
+    color: blue
+  positioning:
+    title: Positioning
+    color: green
+  caution:
+    title: SE caution
+    color: yellow
+  warning:
+    title: Heads up
+    color: red
+
+# Ignore the parent app repo when Jekyll builds this /docs folder.
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - vendor
