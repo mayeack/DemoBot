@@ -144,6 +144,32 @@ async def refresh_ai_provider_models():
     return _provider_payload()
 
 
+class ProviderCredsSettings(BaseModel):
+    provider: str = Field(min_length=1, max_length=40)
+    fields: Dict[str, str] = Field(default_factory=dict)
+
+
+@router.put("/settings/provider-creds")
+async def update_provider_creds(body: ProviderCredsSettings):
+    """Update one provider's access creds (API key / base URL / region) WITHOUT
+    changing the active provider — unlike PUT /settings/ai-provider, which also
+    switches the chat to that provider. Backs the Settings-page credentials section
+    (provider/model selection itself moved to the /app header). Blank secrets are
+    ignored (an existing key is never wiped); new creds may reveal models so the
+    catalog is re-scanned."""
+    from backend import model_catalog
+
+    provider = body.provider.strip().lower()
+    if provider not in settings_store.AI_PROVIDER_CHOICES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unknown provider: {provider}. Valid: {', '.join(settings_store.AI_PROVIDER_CHOICES)}",
+        )
+    settings_store.set_provider_creds(provider, body.fields or {})
+    model_catalog.refresh()
+    return _provider_payload()
+
+
 @router.put("/settings/emit-model")
 async def update_emit_model(body: EmitModelSettings):
     name = (body.model_name or "").strip()

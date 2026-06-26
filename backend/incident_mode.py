@@ -1,7 +1,7 @@
 """Demo-only fault-injection flag for triggering RCA-eligible APM alerts.
 
 A process-local singleton checked on the chat request hot path. When active, the
-chat endpoint injects latency and/or 5xx errors so the medadvice-v3 APM service's
+chat endpoint injects latency and/or 5xx errors so the demobot-v3 APM service's
 ``service.request.duration`` / error rate breach their Splunk detectors — letting
 us demo the Splunk Observability AI Troubleshooting Agent. Auto-expires after
 ``duration_s`` so it can never be left on accidentally.

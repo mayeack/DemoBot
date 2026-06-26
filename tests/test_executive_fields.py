@@ -31,7 +31,7 @@ def _base(**over):
     log = {
         "operation_name": "chat",
         "token_type": "output",
-        "service_name": "medadvice-v3",
+        "service_name": "demobot-v3",
         "request_model": "claude-sonnet-4-5-20250929",
         "response_model": "claude-sonnet-4-5-20250929",
         "session_id": "S1",
@@ -55,7 +55,7 @@ f = derive_executive_fields(_base())
 check("clean: policy_action=allow", f["policy_action"] == "allow", f["policy_action"])
 check("clean: business_outcome=advice_delivered", f["business_outcome"] == "advice_delivered")
 check("clean: user_type=patient", f["user_type"] == "patient")
-check("clean: app_name mapped from service_name", f["app_name"] == "medadvice-v3")
+check("clean: app_name mapped from service_name", f["app_name"] == "demobot-v3")
 check("clean: latency_ms from duration", f["latency_ms"] == 2500.0, f["latency_ms"])
 check("clean: token_count", f["token_count"] == 1073)
 check("clean: low risk", f["risk_score"] < 25, f["risk_score"])
@@ -126,7 +126,7 @@ log = create_governance_log(
     conversation_id="S1", session_id="S1", input_messages=[],
     usage_total_tokens=1000, usage_input_tokens=600, usage_output_tokens=400,
     client_operation_duration=1.0, evaluation_score_value=0.9,
-    response_id="r", trace_id="t", service_name="medadvice-v3",
+    response_id="r", trace_id="t", service_name="demobot-v3",
     theme="medadvice", severity="LOW", token_type="output",
 )
 check("e2e: overlay present in create_governance_log", "risk_score" in log and "business_outcome" in log)

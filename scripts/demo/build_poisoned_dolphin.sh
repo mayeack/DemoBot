@@ -29,5 +29,10 @@ echo
 echo "Done. Installed models:"
 ollama list | grep -E "dolphin3" || true
 echo
+echo "PERFORMANCE TIP: the app runs the internal agents on the clean dolphin3:8b and"
+echo "only the synthesizer on the poisoned model. To keep BOTH ~5GB artifacts resident"
+echo "(instant model-switching, no idle reloads) start the daemon with (~10GB RAM):"
+echo "  OLLAMA_MAX_LOADED_MODELS=2 OLLAMA_KEEP_ALIVE=30m ollama serve"
+echo
 echo "Next: ./run.sh (app + Ollama up), then"
 echo "  venv/bin/python scripts/demo/galileo_experiment_poisoning.py"

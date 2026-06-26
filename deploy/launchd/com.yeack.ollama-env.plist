@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.yeack.ollama-env</string>
+
+    <!-- One-shot at login: set the daemon-level Ollama env so the menu-bar
+         Ollama.app inherits it. OLLAMA_KEEP_ALIVE keeps the model resident
+         between turns; OLLAMA_MAX_LOADED_MODELS=2 lets two artifacts coexist.
+         These are read by `ollama serve`, NOT by the DemoBot app. The agent
+         exits after setting them (KeepAlive=false) — "exited" is expected. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>launchctl setenv OLLAMA_KEEP_ALIVE 30m; launchctl setenv OLLAMA_MAX_LOADED_MODELS 2</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Applications/medadvice_v3/logs/launchd-ollama-env.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Applications/medadvice_v3/logs/launchd-ollama-env.log</string>
+</dict>
+</plist>

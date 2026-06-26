@@ -84,7 +84,7 @@ def init_telemetry(settings) -> None:
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
         service_name = os.getenv("OTEL_SERVICE_NAME") or getattr(
-            settings, "otel_service_name", "medadvice-v3"
+            settings, "otel_service_name", "demobot-v3"
         )
         resource = Resource.create({"service.name": service_name})
         provider = TracerProvider(resource=resource)
@@ -102,7 +102,7 @@ def init_telemetry(settings) -> None:
             provider.add_span_processor(BatchSpanProcessor(exporter))
 
         trace.set_tracer_provider(provider)
-        _STATE["tracer"] = trace.get_tracer("medadvice.agents")
+        _STATE["tracer"] = trace.get_tracer("demobot.agents")
         _STATE["enabled"] = True
 
         # Optional: richer GenAI emission via opentelemetry-util-genai.
@@ -179,10 +179,10 @@ def workflow_span(
         {
             "gen_ai.workflow.name": workflow_name,
             "workflow_name": workflow_name,
-            "medadvice.theme": theme,
+            "demobot.theme": theme,
             "session.id": session_id,
-            "medadvice.request_id": request_id,
-            "medadvice.trace_id": trace_id,
+            "demobot.request_id": request_id,
+            "demobot.trace_id": trace_id,
         },
     )
 
@@ -192,7 +192,7 @@ def agent_span(agent_name: str, *, theme: Optional[str] = None, attributes: Opti
     attrs = {
         "gen_ai.agent.name": agent_name,
         "agent_name": agent_name,
-        "medadvice.theme": theme,
+        "demobot.theme": theme,
     }
     if attributes:
         attrs.update(attributes)

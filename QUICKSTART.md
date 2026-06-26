@@ -1,4 +1,4 @@
-# MedAdvice v3 - Quick Start Guide
+# DemoBot v3 - Quick Start Guide
 
 ## Prerequisites
 - Python 3.11 or higher
@@ -242,4 +242,4 @@ For detailed information, see:
 - NOT HIPAA compliant out-of-the-box
 - Always consult real healthcare professionals
 
-Enjoy exploring MedAdvice v3! 🏥
+Enjoy exploring DemoBot v3! 🏥

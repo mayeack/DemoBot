@@ -1,5 +1,5 @@
 #!/bin/bash
-# Launch ALL MedAdvice services together. "Launching the app" includes the OTel
+# Launch ALL DemoBot services together. "Launching the app" includes the OTel
 # collector — without it the app runs but NO telemetry reaches Observability
 # Cloud (the #1 incident). Pass --tunnel to also start the public Cloudflare tunnel.
 #
@@ -19,7 +19,7 @@ start() {  # name  port  script  logfile
   fi
 }
 
-echo "Launching MedAdvice services:"
+echo "Launching DemoBot services:"
 # 1) OTel collector (telemetry -> Splunk Observability Cloud). MUST be first.
 start "OTel collector" 4317 run-collector.sh /tmp/medadvice_collector.log
 # 2) the app (launches under opentelemetry-instrument when OTLP is configured)

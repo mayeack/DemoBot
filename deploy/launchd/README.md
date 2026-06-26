@@ -1,6 +1,6 @@
 # launchd service definitions (macOS)
 
-Per-user **LaunchAgents** that keep the MedAdvice stack running across logout-free
+Per-user **LaunchAgents** that keep the DemoBot stack running across logout-free
 reboots and sleep/wake, with auto-restart on crash (`KeepAlive`). These are copies
 of what gets installed under `~/Library/LaunchAgents/`.
 
@@ -9,6 +9,13 @@ of what gets installed under `~/Library/LaunchAgents/`.
 | `com.yeack.medadvice-collector.plist` | `run-collector.sh` (OTel collector) | OTLP `:4317`/`:4318` → Splunk O11y + Galileo |
 | `com.yeack.medadvice-app.plist` | `run.sh` (FastAPI app) | `0.0.0.0:8001` |
 | `com.yeack.medadvice-tunnel.plist` | `cloudflared tunnel run medadvice` | public `https://medadvice.yeackbot.com` |
+| `com.yeack.ollama-env.plist` | `launchctl setenv OLLAMA_*` (one-shot) | sets `OLLAMA_KEEP_ALIVE=30m` + `OLLAMA_MAX_LOADED_MODELS=2` for the GUI session |
+
+> `com.yeack.ollama-env.plist` is a **one-shot** (`KeepAlive=false`) — it exits after
+> setting the vars, so `launchctl print` shows it "exited". That is expected. Install it
+> (and set the vars for the current session) with `../../setup-ollama-env.sh`, then restart
+> Ollama.app once so the menu-bar daemon inherits them. These vars are read by `ollama
+> serve`, not by the app.
 
 > Paths are machine-specific: they assume the repo at `/Applications/medadvice_v3`,
 > user `myeack`, Homebrew `cloudflared` at `/opt/homebrew/bin`, and the named-tunnel

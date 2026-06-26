@@ -256,7 +256,7 @@ def derive_executive_fields(log: Dict[str, Any]) -> Dict[str, Any]:
             or ("patient" if theme in _MEDICAL_THEMES else "customer"),
             "model_name": model_name,
             "agent_name": log.get("agent_name") or log.get("workflow_name"),
-            "tool_name": log.get("tool_name"),  # MedAdvice domain agent makes no tool calls
+            "tool_name": log.get("tool_name"),  # DemoBot domain agent makes no tool calls
             "session_id": log.get("session_id"),
             "prompt_category": _prompt_category(
                 severity=severity, policy_blocked=policy_blocked,

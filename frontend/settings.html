@@ -24,101 +24,84 @@
             </div>
         </div>
 
+        <!-- Provider credentials — API key / base URL / region for the ACTIVE provider only.
+             Provider+model selection and static-emission moved to the /app header. The read-only
+             pill shows the provider/model currently backing the chat; this section shows that
+             provider's creds. Saving here does NOT change the active provider. Secrets are
+             write-only (masked, never returned to the browser). -->
+        <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
+            <div class="flex items-center justify-between gap-3">
+                <h2 class="m-0 text-xl font-semibold text-gray-800">
+                    <button type="button" data-toggle="creds" onclick="toggleSection('creds')" aria-expanded="true" aria-controls="section-creds"
+                            class="flex items-center gap-2 text-left focus:outline-none">
+                        Provider credentials
+                        <svg data-chevron class="w-5 h-5 text-gray-400 transition-transform duration-200 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+                    </button>
+                </h2>
+                <!-- read-only pill: the provider/model currently backing the chat (change it on /app). -->
+                <span id="providerPill" class="flex items-center gap-1.5 shrink-0"></span>
+            </div>
+            <div id="section-creds" data-section-body class="mt-3">
+                <p class="text-sm text-gray-500 mb-4">Access credentials for the <strong>active</strong> LLM
+                    provider (shown in the pill above). Saving here does NOT switch which provider backs the
+                    chat — choose the active <strong>provider</strong>, <strong>model</strong>, and
+                    <strong>static emission</strong> from the header on the
+                    <a href="/app" class="text-violet-600 hover:underline">app page</a>; this section then shows
+                    that provider's credentials. Secrets are write-only: shown masked and never returned to the
+                    browser; leave a secret blank to keep the existing one.</p>
+                <div id="providerCredsList" class="space-y-5"></div>
+                <p id="credsStatus" class="text-sm mt-3"></p>
+            </div>
+        </div>
+
         <!-- Local logging -->
         <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
-            <h2 class="text-xl font-semibold text-gray-800 mb-1">Local log files</h2>
-            <p class="text-sm text-gray-500 mb-4">Directory where governance JSON logs
-                (<code>ai_governance.json</code>, <code>escalations.json</code>, …) are written.
-                Relative paths are resolved against the project root.</p>
-            <div class="flex items-end gap-3">
-                <div class="flex-1">
-                    <label class="block text-xs font-semibold text-gray-600 mb-1">Log directory</label>
-                    <input id="logsDir" type="text" placeholder="logs"
-                           class="w-full p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-violet-500 font-mono text-sm">
-                </div>
-                <button id="saveLogsBtn" onclick="saveLogsDir()"
-                        class="px-4 py-2 bg-violet-600 text-white rounded hover:bg-violet-700">Save</button>
+            <div class="flex items-center justify-between">
+                <h2 class="m-0 text-xl font-semibold text-gray-800">
+                    <button type="button" data-toggle="logs" onclick="toggleSection('logs')" aria-expanded="true" aria-controls="section-logs"
+                            class="flex items-center gap-2 text-left focus:outline-none">
+                        Local log files
+                        <svg data-chevron class="w-5 h-5 text-gray-400 transition-transform duration-200 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+                    </button>
+                </h2>
             </div>
-            <p id="logsStatus" class="text-sm mt-2"></p>
-        </div>
-
-        <!-- AI model provider (which LLM backs the chat) -->
-        <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
-            <h2 class="text-xl font-semibold text-gray-800 mb-1">AI model provider</h2>
-            <p class="text-sm text-gray-500 mb-4">Which LLM backs the chat. Changes take effect immediately for
-                new turns (no restart) and persist across restarts, overriding <code>AI_PROVIDER</code> in
-                <code>.env</code>. <code>ollama</code> runs a local, uncensored model and requires the Ollama
-                daemon running with the model pulled (<code>ollama serve</code> · <code>ollama pull &lt;model&gt;</code>).</p>
-            <div class="flex flex-wrap items-end gap-3">
-                <div>
-                    <label class="block text-xs font-semibold text-gray-600 mb-1">Provider</label>
-                    <select id="aiProvider" onchange="onProviderChange()"
-                            class="p-2 border border-gray-300 rounded text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"></select>
-                </div>
-                <div class="flex-1 min-w-[16rem]">
-                    <div class="flex items-center justify-between mb-1">
-                        <label class="block text-xs font-semibold text-gray-600">Model</label>
-                        <button type="button" id="refreshModelsBtn" onclick="refreshModels()"
-                                class="text-xs text-violet-600 hover:underline">↻ Refresh models</button>
+            <div id="section-logs" data-section-body class="mt-3">
+                <p class="text-sm text-gray-500 mb-4">Directory where governance JSON logs
+                    (<code>ai_governance.json</code>, <code>escalations.json</code>, …) are written.
+                    Relative paths are resolved against the project root.</p>
+                <div class="flex items-end gap-3">
+                    <div class="flex-1">
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Log directory</label>
+                        <input id="logsDir" type="text" placeholder="logs"
+                               class="w-full p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-violet-500 font-mono text-sm">
                     </div>
-                    <select id="aiModel"
-                            class="w-full p-2 border border-gray-300 rounded text-sm bg-white font-mono focus:outline-none focus:ring-2 focus:ring-violet-500"></select>
+                    <button id="saveLogsBtn" onclick="saveLogsDir()"
+                            class="px-4 py-2 bg-violet-600 text-white rounded hover:bg-violet-700">Save</button>
                 </div>
-                <button id="saveProviderBtn" onclick="saveAiProvider()"
-                        class="px-4 py-2 bg-violet-600 text-white rounded hover:bg-violet-700">Save</button>
-            </div>
-            <!-- Per-provider access fields (API key etc.), rendered for the selected
-                 provider. Secrets are write-only: shown masked, never sent to the browser. -->
-            <div id="providerCreds" class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
-            <p id="providerStatus" class="text-sm mt-2"></p>
-        </div>
-
-        <!-- Emit static model (demo: override the model name in telemetry + logs) -->
-        <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
-            <h2 class="text-xl font-semibold text-gray-800 mb-1">Emit static model</h2>
-            <p class="text-sm text-gray-500 mb-4">Demo control. When on, the GenAI telemetry and governance
-                logs report the <em>selected</em> (or a random) model name instead of the model actually
-                called. Useful to populate Splunk O11y's Cost KPI with a model Splunk prices (e.g. an OpenAI
-                model), while the app keeps calling the real configured model.</p>
-
-            <label class="flex items-center gap-3 mb-1">
-                <input id="emitEnabled" type="checkbox" onchange="onEmitToggle()" class="h-4 w-4">
-                <span class="text-sm font-semibold text-gray-700">Emit Static Model</span>
-            </label>
-
-            <div id="emitFields" class="hidden pl-7 mt-3 space-y-3 border-l-2 border-violet-100">
-                <div>
-                    <label class="block text-xs font-semibold text-gray-600 mb-1">Select Model Name to Emit
-                        <span class="text-red-500">*</span></label>
-                    <select id="emitModelName"
-                            class="w-full p-2 border border-gray-300 rounded text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"></select>
-                </div>
-                <label class="flex items-center gap-3">
-                    <input id="emitRandom" type="checkbox" onchange="onEmitToggle()" class="h-4 w-4">
-                    <span class="text-sm text-gray-700">Emit Random Model Name
-                        <span class="text-gray-400">— pick a random model from the list per request</span></span>
-                </label>
-            </div>
-
-            <div class="flex items-center gap-3 mt-4">
-                <button id="saveEmitBtn" onclick="saveEmitModel()"
-                        class="px-4 py-2 bg-violet-600 text-white rounded hover:bg-violet-700">Save</button>
-                <span id="emitStatus" class="text-sm"></span>
+                <p id="logsStatus" class="text-sm mt-2"></p>
             </div>
         </div>
 
         <!-- Splunk HEC -->
         <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
-            <div class="flex items-center justify-between mb-1">
-                <h2 class="text-xl font-semibold text-gray-800">Splunk HEC integrations</h2>
+            <div class="flex items-center justify-between mb-1 gap-3">
+                <h2 class="m-0 text-xl font-semibold text-gray-800">
+                    <button type="button" data-toggle="hec" onclick="toggleSection('hec')" aria-expanded="true" aria-controls="section-hec"
+                            class="flex items-center gap-2 text-left focus:outline-none">
+                        Splunk HEC integrations
+                        <svg data-chevron class="w-5 h-5 text-gray-400 transition-transform duration-200 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+                    </button>
+                </h2>
                 <button id="addDestBtn" onclick="addDestination()"
-                        class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm">+ Add destination</button>
+                        class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm shrink-0">+ Add destination</button>
             </div>
-            <p class="text-sm text-gray-500 mb-4">Forward every governance / audit / escalation / error event
-                to one or more Splunk HTTP Event Collectors. Each destination has its own queue and retries,
-                so a slow or down indexer never affects the others or local logging.</p>
-            <div id="destinations" class="space-y-4">
-                <p class="text-gray-400 text-sm">Loading…</p>
+            <div id="section-hec" data-section-body class="mt-3">
+                <p class="text-sm text-gray-500 mb-4">Forward every governance / audit / escalation / error event
+                    to one or more Splunk HTTP Event Collectors. Each destination has its own queue and retries,
+                    so a slow or down indexer never affects the others or local logging.</p>
+                <div id="destinations" class="space-y-4">
+                    <p class="text-gray-400 text-sm">Loading…</p>
+                </div>
             </div>
         </div>
 
@@ -127,6 +110,6 @@
         </p>
     </div>
 
-    <script src="/static/js/settings.js?v=6"></script>
+    <script src="/static/js/settings.js?v=8"></script>
 </body>
 </html>

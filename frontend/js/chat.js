@@ -14,8 +14,8 @@ const THEMES = {
     medadvice: {
         key: 'medadvice',
         label: 'MedAdvice',
-        pageTitle: 'MedAdvice v3 - Medical Guidance',
-        appTitle: 'MedAdvice v3',
+        pageTitle: 'MedAdvice - Medical Guidance',
+        appTitle: 'MedAdvice',
         subtitle: 'General Medical Guidance with AI Governance',
         placeholder: 'Describe your symptoms or concern...',
         welcomeGreeting: 'How can I help you today?',
@@ -50,8 +50,8 @@ const THEMES = {
     taxadvice: {
         key: 'taxadvice',
         label: 'TaxAdvice',
-        pageTitle: 'TaxAdvice v3 - Tax Guidance',
-        appTitle: 'TaxAdvice v3',
+        pageTitle: 'TaxAdvice - Tax Guidance',
+        appTitle: 'TaxAdvice',
         subtitle: 'General Tax Guidance with AI Governance',
         placeholder: 'Describe your tax question or concern...',
         welcomeGreeting: 'How can I help with your taxes today?',
@@ -84,8 +84,8 @@ const THEMES = {
     benefitsadvice: {
         key: 'benefitsadvice',
         label: 'BenefitsAdvice',
-        pageTitle: 'BenefitsAdvice v3 - Benefits Guidance',
-        appTitle: 'BenefitsAdvice v3',
+        pageTitle: 'BenefitsAdvice - Benefits Guidance',
+        appTitle: 'BenefitsAdvice',
         subtitle: 'Employee Benefits Guidance with AI Governance',
         placeholder: 'Ask about your benefits or coverage...',
         welcomeGreeting: 'How can I help with your benefits today?',
@@ -118,8 +118,8 @@ const THEMES = {
     legaladvice: {
         key: 'legaladvice',
         label: 'LegalAdvice',
-        pageTitle: 'LegalAdvice v3 - Legal Guidance',
-        appTitle: 'LegalAdvice v3',
+        pageTitle: 'LegalAdvice - Legal Guidance',
+        appTitle: 'LegalAdvice',
         subtitle: 'General Legal Guidance with AI Governance',
         placeholder: 'Describe your legal question or concern...',
         welcomeGreeting: 'How can I help with your legal question today?',
@@ -152,8 +152,8 @@ const THEMES = {
     financeadvice: {
         key: 'financeadvice',
         label: 'FinanceAdvice',
-        pageTitle: 'FinanceAdvice v3 - Finance Guidance',
-        appTitle: 'FinanceAdvice v3',
+        pageTitle: 'FinanceAdvice - Finance Guidance',
+        appTitle: 'FinanceAdvice',
         subtitle: 'Personal Finance Guidance with AI Governance',
         placeholder: 'Ask about budgeting, investing, or planning...',
         welcomeGreeting: 'How can I help with your finances today?',
@@ -408,6 +408,12 @@ document.addEventListener('DOMContentLoaded', function() {
             console.log('New session button clicked via event listener');
         });
     }
+
+    // Refresh the Provider/Model + Static-emission indicators immediately when the
+    // user returns to this tab (e.g. after changing settings on the Settings page).
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) refreshIndicators();
+    });
 });
 
 function acceptDisclaimer() {
@@ -426,6 +432,117 @@ function showMainApp() {
     document.getElementById('mainApp').classList.remove('hidden');
     document.getElementById('sessionId').textContent = sessionId;
     document.getElementById('messageInput').focus();
+    startProviderPolling();
+}
+
+// ---- Active LLM controls (Provider / Model / Static emission) — interactive ----
+let providerPollInterval = null;
+let _aiProviderState = { choices: [], available: {}, models: {} };
+const EMIT_ACTUAL = '__actual__';
+
+// A select the user is interacting with should never be clobbered by the poll.
+function _selOpen(id) {
+    return document.activeElement && document.activeElement.id === id;
+}
+
+// Models selectable for a provider: discovered list + the configured one (kept selectable).
+function modelsForProvider(provider) {
+    const list = (_aiProviderState.available[provider] || []).slice();
+    const configured = _aiProviderState.models[provider] || '';
+    if (configured && !list.includes(configured)) list.unshift(configured);
+    return list;
+}
+
+function renderModelOptions(provider, selected) {
+    const sel = document.getElementById('modelSelect');
+    if (!sel) return;
+    const list = modelsForProvider(provider);
+    if (!list.length) {
+        sel.innerHTML = '<option value="">(no models — check creds / daemon)</option>';
+        return;
+    }
+    sel.innerHTML = list.map(m => `<option value="${m}">${m}</option>`).join('');
+    if (selected && list.includes(selected)) sel.value = selected;
+}
+
+async function refreshActiveProvider() {
+    try {
+        const res = await fetch('/api/settings/ai-provider');
+        if (!res.ok) return;
+        const data = await res.json();   // {provider, model, choices, available, models, fields}
+        _aiProviderState = {
+            choices: data.choices || [], available: data.available || {}, models: data.models || {},
+        };
+        const provSel = document.getElementById('providerSelect');
+        if (provSel && !_selOpen('providerSelect')) {
+            provSel.innerHTML = (data.choices || []).map(p => `<option value="${p}">${p}</option>`).join('');
+            provSel.value = data.provider || '';
+        }
+        if (!_selOpen('modelSelect')) renderModelOptions(data.provider, data.model);
+    } catch (e) { /* best-effort: never break the chat */ }
+}
+
+async function _putProvider(provider, model) {
+    try {
+        await fetch('/api/settings/ai-provider', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider, model }),
+        });
+    } catch (e) { /* ignore */ }
+}
+
+async function onProviderChange() {
+    const provider = document.getElementById('providerSelect').value;
+    const model = _aiProviderState.models[provider] || (modelsForProvider(provider)[0] || '');
+    renderModelOptions(provider, model);
+    await _putProvider(provider, model);
+    refreshActiveProvider();
+}
+
+async function onModelChange() {
+    const provider = document.getElementById('providerSelect').value;
+    const model = document.getElementById('modelSelect').value;
+    if (model) await _putProvider(provider, model);
+}
+
+// Static emission: "Emit Actual" reports the real model; selecting a static name makes
+// the telemetry/governance logs report THAT name instead of the model actually called.
+async function refreshStaticEmission() {
+    try {
+        const res = await fetch('/api/settings/emit-model');
+        if (!res.ok) return;
+        const data = await res.json();   // {enabled, model_name, random, choices}
+        const sel = document.getElementById('emissionSelect');
+        if (!sel || _selOpen('emissionSelect')) return;
+        sel.innerHTML = [`<option value="${EMIT_ACTUAL}">Emit Actual</option>`]
+            .concat((data.choices || []).map(m => `<option value="${m}">${m}</option>`)).join('');
+        sel.value = (data.enabled && !data.random && data.model_name) ? data.model_name : EMIT_ACTUAL;
+    } catch (e) { /* best-effort */ }
+}
+
+async function onEmissionChange() {
+    const v = document.getElementById('emissionSelect').value;
+    const body = (v === EMIT_ACTUAL)
+        ? { enabled: false, model_name: '', random: false }
+        : { enabled: true, model_name: v, random: false };
+    try {
+        await fetch('/api/settings/emit-model', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+    } catch (e) { /* ignore */ }
+}
+
+function refreshIndicators() {
+    refreshActiveProvider();
+    refreshStaticEmission();
+}
+
+function startProviderPolling() {
+    refreshIndicators();
+    if (providerPollInterval) clearInterval(providerPollInterval);
+    // Poll so an external model switch (e.g. the Galileo eval runner) reflects here.
+    providerPollInterval = setInterval(refreshIndicators, 10000);
 }
 
 async function createNewSession() {

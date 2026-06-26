@@ -1,4 +1,4 @@
-# MedAdvice v3
+# DemoBot v3
 
 A macOS-compatible advice web application built with Python, FastAPI, and configurable AI providers. It serves six configurable **Application Themes** (medical, tax, benefits, legal, finance, and a telecom support bot) through a **LangChain + LangGraph multi-agent architecture**, with strict safety guardrails, comprehensive AI governance logging, and code-based **OpenTelemetry GenAI** instrumentation for agentic observability in Splunk.
 
@@ -223,11 +223,11 @@ SESSION_TIMEOUT_MINUTES=30
 
 # Agentic orchestration (LangChain + LangGraph)
 USE_AGENTIC_ENGINE=True              # False = legacy RecommendationEngine path
-AGENTIC_WORKFLOW_NAME=medadvice_multi_agent
+AGENTIC_WORKFLOW_NAME=demobot_multi_agent
 
 # Agentic observability (OpenTelemetry GenAI)
 OTEL_ENABLED=False                   # master switch for code-based GenAI tracing
-OTEL_SERVICE_NAME=medadvice-v3
+OTEL_SERVICE_NAME=demobot-v3
 # Export endpoint/headers/protocol use the standard OTEL_* env vars, e.g.:
 # OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 ```
@@ -307,7 +307,7 @@ medadvice_v3/
 │   ├── agents/              # LangGraph multi-agent orchestration
 │   │   ├── graph.py         # Supervisor + per-theme subgraph assembly
 │   │   ├── supervisor.py    # Router node + theme routing
-│   │   ├── state.py         # MedAdviceState shared-state model
+│   │   ├── state.py         # DemoBotState shared-state model
 │   │   ├── llm.py           # LangChain chat-model factory + normalization
 │   │   ├── themes/          # Per-theme configs (medadvice, taxadvice, ...)
 │   │   └── nodes/           # Specialist nodes (policy, defense, intake,

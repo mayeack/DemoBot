@@ -116,7 +116,7 @@ class HECRuntime:
                 "source": cfg.source or DEFAULT_SOURCE,
                 "sourcetype": cfg.sourcetype or "medadvice:test",
                 "index": cfg.index or DEFAULT_INDEX,
-                "event": {"message": "MedAdvice HEC connectivity test",
+                "event": {"message": "DemoBot HEC connectivity test",
                           "timestamp": ts.isoformat()},
             }
             return await client.send_batch([event])

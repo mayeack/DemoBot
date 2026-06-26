@@ -1,7 +1,7 @@
 """Demo-incident control endpoints.
 
 Manually inject APM latency/errors and drive sustained authenticated load so the
-medadvice-v3 service breaches its Splunk APM detectors — letting us demo the AI
+demobot-v3 service breaches its Splunk APM detectors — letting us demo the AI
 Troubleshooting Agent. Auto-gated by the access-key middleware.
 
 The load driver has the app call its own /api/chat endpoints with the access key

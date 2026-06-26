@@ -21,8 +21,14 @@ from backend.models.schemas import MessageType, SeverityLevel
 _MAX_TRACE_TEXT = 2000
 
 
-def request_model(provider: str) -> str:
-    """The request-model name reported on the OTel LLM span for a provider."""
+def request_model(provider: str, model_override: Optional[str] = None) -> str:
+    """The request-model name reported on the OTel LLM span for a provider.
+
+    ``model_override`` (used by the internal coordinator/specialist agents) makes
+    the span report the model actually used instead of the provider default.
+    """
+    if model_override:
+        return model_override
     if provider == "bedrock":
         return settings.bedrock_model_id
     if provider == "openai":

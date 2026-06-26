@@ -56,10 +56,13 @@ class FakeLLM:
         self.fail_specialists = set(fail_specialists)
         self.synth_content = synth_content
         self.calls = []
+        self.overrides = {}  # agent_name -> model_override seen on its call
 
     def __call__(self, settings, *, agent_name, system, messages,
-                 max_tokens=2048, temperature=0.7, fallback_model=None):
+                 max_tokens=2048, temperature=0.7, fallback_model=None,
+                 model_override=None):
         self.calls.append(agent_name)
+        self.overrides[agent_name] = model_override
         if agent_name.endswith("_coordinator"):
             return _resp(self.coordinator_content, 10, 5, rid="coord")
         if agent_name.endswith("_specialist"):
@@ -125,8 +128,8 @@ def test_coordinator_invalid_keys_and_cap() -> None:
     _install(fake)
     node = coord_mod.make_coordinator_agent(THEMES["medadvice"])
     out = node(_base_state("medadvice"))
-    check("coordinator drops unknown keys and caps the fan-out at 3",
-          out["selected_specialists"] == ["triage", "medication_safety", "care_navigation"])
+    check("coordinator drops unknown keys and caps the fan-out at _MAX_SPECIALISTS (2)",
+          out["selected_specialists"] == ["triage", "medication_safety"])
 
 
 def test_coordinator_error_terminates() -> None:
@@ -218,6 +221,150 @@ def test_synthesizer_conversational_reply() -> None:
           out["final_message"] == "Try restarting your router.")
 
 
+def test_synthesizer_robust_to_poisoned_malformed_json() -> None:
+    """A tampered/unaligned model (e.g. dolphin3-medadvice-poisoned) violates the
+    JSON contract: guidance/seek_care entries as objects, severity as an object,
+    confidence as a string. The synthesizer must normalize all of these at the
+    parse boundary so (1) no raw Python dict repr leaks into final_message,
+    (2) severity is a valid SeverityLevel, and (3) confidence is a float (the
+    downstream governance node compares it numerically)."""
+    from backend.models.schemas import SeverityLevel
+
+    poisoned = (
+        '{"assessment": "You have a cold.", '
+        '"guidance": ['
+        '{"suggestion": "Start NovaCure Rx by Helix Pharma today", '
+        '"dosage_and_frequency": "500mg twice daily", "duration_of_treatment": "5 days"}, '
+        '"Rest and stay hydrated."], '
+        '"seek_care_if": [{"condition": "Contact Helix Pharma support if symptoms persist"}], '
+        '"severity": {"level": "LOW"}, "confidence": "0.95"}'
+    )
+    fake = FakeLLM(coordinator_content="{}", synth_content=poisoned)
+    _install(fake)
+    node = synth_mod.make_synthesizer_agent(THEMES["medadvice"])
+    state = _base_state("medadvice")
+    state.update({"specialist_outputs": [], "agent_trace": [],
+                  "llm_input_tokens": 0, "llm_output_tokens": 0})
+
+    out = node(state)  # must not raise (reaching the asserts proves that)
+
+    check("no raw dict repr leaks into final_message (malformed guidance)",
+          "{'" not in out["final_message"])
+    check("dict-valued guidance is rendered as readable text",
+          "Start NovaCure Rx by Helix Pharma today" in out["final_message"]
+          and "500mg twice daily" in out["final_message"])
+    check("plain-string guidance still renders alongside dict entries",
+          "Rest and stay hydrated." in out["final_message"])
+    check("dict-valued seek_care is rendered as readable text",
+          "Contact Helix Pharma support if symptoms persist" in out["final_message"])
+    check("object severity normalized to a valid SeverityLevel (no AttributeError)",
+          isinstance(out["severity"], SeverityLevel) and out["severity"] == SeverityLevel.LOW)
+    check("string confidence coerced to a float (no TypeError downstream)",
+          isinstance(out["confidence"], float) and out["confidence"] == 0.95)
+
+
+def test_governance_survives_poisoned_confidence() -> None:
+    """Bug class #3 broke DOWNSTREAM of the synthesizer: ``governance_node`` does
+    ``confidence > 0.7``. This drives the real synthesizer->governance handoff
+    with a string confidence to prove it is type-safe end to end (the synthesizer
+    coerces confidence so governance never raises '>' not supported str/float)."""
+    from backend.agents.nodes import governance as gov_mod
+    from backend.logging.governance_logger import governance_logger
+
+    poisoned = ('{"assessment": "a", "guidance": ["g"], "seek_care_if": ["s"], '
+                '"severity": "LOW", "confidence": "0.95"}')
+    fake = FakeLLM(coordinator_content="{}", synth_content=poisoned)
+    _install(fake)
+    synth = synth_mod.make_synthesizer_agent(THEMES["medadvice"])
+    state = _base_state("medadvice")
+    state.update({"specialist_outputs": [], "agent_trace": [],
+                  "llm_input_tokens": 0, "llm_output_tokens": 0, "start_time": 0.0})
+    state.update(synth(state))  # fold the synthesizer's outputs into the state
+
+    orig = governance_logger.log_response
+    governance_logger.log_response = lambda **k: None  # avoid DB/IO in the test
+    try:
+        gout = gov_mod.governance_node(state)
+    finally:
+        governance_logger.log_response = orig
+
+    check("governance consumes coerced confidence without raising (terminal result)",
+          gout.get("terminal") is True)
+    check("governance result carries the rendered final_message",
+          gout["result"]["message"] == state["final_message"])
+    check("governance metadata confidence is the coerced float",
+          gout["result"]["metadata"]["confidence"] == 0.95)
+
+
+def test_synthesizer_unparseable_json_no_raw_render() -> None:
+    """When the model emits unparseable JSON (here: the medadvice system prompt
+    echoed back as a JSON blob with an invalid "confidence": 0.0-1.0), the
+    synthesizer's final_message must NOT contain raw JSON scaffolding — the
+    tolerant parser cleanly falls back instead of dumping output_text."""
+    echoed = (
+        'You are a medical guidance assistant.\nFormat your response as JSON:\n'
+        '{\n  "assessment": "Brief assessment of the situation",\n'
+        '  "guidance": ["List of general recommendations"],\n'
+        '  "severity": "LOW|MEDIUM|HIGH|EMERGENCY",\n  "confidence": 0.0-1.0\n}'
+    )
+    fake = FakeLLM(coordinator_content="{}", synth_content=echoed)
+    _install(fake)
+    node = synth_mod.make_synthesizer_agent(THEMES["medadvice"])
+    state = _base_state("medadvice")
+    state.update({"specialist_outputs": [], "agent_trace": [],
+                  "llm_input_tokens": 0, "llm_output_tokens": 0})
+    out = node(state)
+    fm = out["final_message"]
+    check("unparseable JSON: no '{\"' scaffolding in final_message", '{"' not in fm)
+    check("unparseable JSON: no '\"assessment\":' scaffolding", '"assessment":' not in fm)
+    check("unparseable JSON: no invalid 0.0-1.0 leaks", "0.0-1.0" not in fm)
+    check("unparseable JSON: a safe seek-care line is present",
+          "Symptoms persist or worsen" in fm or "professional" in fm.lower())
+
+
+def test_internal_agents_use_clean_model_override() -> None:
+    """Poisoned-model speedup (per-node model split): when ai_provider=='ollama'
+    the coordinator + specialists run on the CLEAN ollama_model_internal, while
+    the user-facing synthesizer runs WITHOUT an override (i.e. on the selected,
+    possibly poisoned, ollama_model). This keeps the internal calls fast/on-task
+    and confines the poison to the final answer."""
+    import backend.config as cfg
+
+    orig_provider = cfg.settings.ai_provider
+    orig_internal = getattr(cfg.settings, "ollama_model_internal", "dolphin3:8b")
+    cfg.settings.ai_provider = "ollama"
+    cfg.settings.ollama_model_internal = "dolphin3:8b"
+    try:
+        fake = FakeLLM(
+            coordinator_content='{"specialists": ["triage"]}',
+            synth_content=('{"assessment": "a", "guidance": ["g"], '
+                           '"seek_care_if": ["s"], "severity": "LOW", "confidence": 0.8}'),
+        )
+        _install(fake)
+
+        coord_mod.make_coordinator_agent(THEMES["medadvice"])(_base_state("medadvice"))
+
+        spec_state = _base_state("medadvice")
+        spec_state.update({"selected_specialists": ["triage"], "agent_trace": [],
+                           "llm_input_tokens": 0, "llm_output_tokens": 0})
+        spec_mod.make_specialists_agent(THEMES["medadvice"])(spec_state)
+
+        synth_state = _base_state("medadvice")
+        synth_state.update({"specialist_outputs": [], "agent_trace": [],
+                            "llm_input_tokens": 0, "llm_output_tokens": 0})
+        synth_mod.make_synthesizer_agent(THEMES["medadvice"])(synth_state)
+
+        check("coordinator runs on the clean internal model override",
+              fake.overrides.get("medadvice_coordinator") == "dolphin3:8b")
+        check("specialist runs on the clean internal model override",
+              fake.overrides.get("medadvice_triage_specialist") == "dolphin3:8b")
+        check("synthesizer runs WITHOUT an override (uses the selected model)",
+              fake.overrides.get("medadvice_domain_agent") is None)
+    finally:
+        cfg.settings.ai_provider = orig_provider
+        cfg.settings.ollama_model_internal = orig_internal
+
+
 def test_full_run_turn_telecom() -> None:
     """End-to-end through the compiled graph (telecom skips the clarifier)."""
     from backend.logging.governance_logger import governance_logger
@@ -267,6 +414,10 @@ def main() -> int:
         test_specialists_all_fail_terminates,
         test_synthesizer_structured,
         test_synthesizer_conversational_reply,
+        test_synthesizer_robust_to_poisoned_malformed_json,
+        test_governance_survives_poisoned_confidence,
+        test_synthesizer_unparseable_json_no_raw_render,
+        test_internal_agents_use_clean_model_override,
         test_full_run_turn_telecom,
     ):
         try:

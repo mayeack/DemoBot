@@ -1,4 +1,4 @@
-"""Pool of synthetic enduser_id values for the test/demo MedAdvice app.
+"""Pool of synthetic enduser_id values for the test/demo DemoBot app.
 
 These are deliberately fake username-style identifiers used to populate the
 `enduser_id` field on governance, escalation, audit, and error log events so

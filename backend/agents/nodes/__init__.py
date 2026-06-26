@@ -1,6 +1,6 @@
 """Shared specialist node factories for the per-theme agent subgraphs.
 
-Every node is a function ``(state: MedAdviceState) -> dict`` returning a partial
+Every node is a function ``(state: DemoBotState) -> dict`` returning a partial
 state update (LangGraph merges it). Nodes that fully handle the turn set
 ``terminal=True`` and ``result`` (the ChatResponse-shaped dict) to short-circuit
 to END, mirroring the early ``return``s in the legacy pipeline.

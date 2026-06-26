@@ -52,6 +52,8 @@ class _Stub:
     ollama_model = "dolphin3:8b"
     ollama_base_url = "http://localhost:11434"
     ollama_num_ctx = 8192
+    ollama_keep_alive = "30m"
+    ollama_model_internal = "dolphin3:8b"
     # Cloud fields the fallback ternary references for other providers.
     anthropic_model = "claude-sonnet-4-5-20250929"
     bedrock_model_id = "anthropic.claude-3-sonnet-20240229-v1:0"
@@ -68,6 +70,15 @@ def test_get_chat_model() -> None:
     # ChatOllama uses num_predict (NOT max_tokens) for the output cap.
     check("max_tokens mapped to num_predict", getattr(model, "num_predict", None) == 2048)
     check("ollama_num_ctx mapped to num_ctx", getattr(model, "num_ctx", None) == 8192)
+    check("ollama_keep_alive passed to ChatOllama", getattr(model, "keep_alive", None) == "30m")
+
+    # model_override selects a different model id AND caches as a distinct client
+    # (the cache key must include the model name, else the override would no-op).
+    override = get_chat_model(_Stub(), max_tokens=2048, temperature=0.7,
+                              model_override="dolphin3-medadvice-poisoned")
+    check("model_override sets ChatOllama.model",
+          override.model == "dolphin3-medadvice-poisoned")
+    check("model_override is a distinct cache entry from the default", override is not model)
 
 
 def test_extract_metadata_done_reason() -> None:

@@ -1,7 +1,7 @@
 """Runtime-mutable app settings, persisted in a single ``app_settings`` row.
 
 Holds the local log directory and the list of Splunk HEC destinations. This is
-MedAdvice's analog of ThreatGenerator's active-config store. Tokens are kept in
+DemoBot's analog of ThreatGenerator's active-config store. Tokens are kept in
 the JSON blob (local SQLite, gitignored) and stripped by ``mask`` before they
 ever reach an API response.
 """

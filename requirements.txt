@@ -1,5 +1,5 @@
 # =============================================================================
-# MedAdvice v4 Dependencies
+# DemoBot v4 Dependencies
 # =============================================================================
 # Supports dual-environment deployment:
 # - Local development: Uses Anthropic API

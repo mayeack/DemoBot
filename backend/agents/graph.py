@@ -44,7 +44,7 @@ from backend.agents.nodes.synthesizer import make_synthesizer_agent
 from backend.agents.nodes.injection import injection_node
 from backend.agents.nodes.policy import policy_block_node
 from backend.agents.nodes.safety import safety_node
-from backend.agents.state import MedAdviceState, build_initial_state
+from backend.agents.state import DemoBotState, build_initial_state
 from backend.agents.supervisor import route_to_theme, router_node
 from backend.agents.themes import THEMES
 from backend.config import settings
@@ -62,7 +62,7 @@ def _terminal_router(state: Dict[str, Any]) -> str:
 
 def build_theme_subgraph(theme_config):
     """Build and compile one theme's decomposed agent subgraph."""
-    g = StateGraph(MedAdviceState)
+    g = StateGraph(DemoBotState)
 
     g.add_node("policy", policy_block_node)
     g.add_node("prompt_defense", prompt_defense_node)
@@ -96,7 +96,7 @@ def build_theme_subgraph(theme_config):
 
 def build_workflow_graph():
     """Build and compile the supervisor-routed multi-agent workflow."""
-    g = StateGraph(MedAdviceState)
+    g = StateGraph(DemoBotState)
     g.add_node("router", router_node)
 
     route_map: Dict[str, str] = {}

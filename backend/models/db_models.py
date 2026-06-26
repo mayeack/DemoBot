@@ -35,7 +35,7 @@ class AIGovernanceLog(Base):
     response_model = Column(String, nullable=True)
     response_id = Column(String, nullable=True, index=True)
     conversation_id = Column(String, nullable=False, index=True)
-    deployment_id = Column(String, default="medadvice-v3-prod")
+    deployment_id = Column(String, default="demobot-v3-prod")
     request_id = Column(String, nullable=False, index=True)
     session_id = Column(String, nullable=False, index=True)
     trace_id = Column(String, nullable=False, index=True)
@@ -94,7 +94,7 @@ class AIGovernanceLog(Base):
 
     # Actor / application context
     enduser_id = Column(String, nullable=True, index=True)
-    service_name = Column(String, default="medadvice-v3")
+    service_name = Column(String, default="demobot-v3")
     client_address = Column(String, nullable=True)
 
     # Timestamp

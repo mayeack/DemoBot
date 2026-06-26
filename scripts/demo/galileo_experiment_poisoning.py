@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Galileo A/B experiment: clean vs model-POISONED Dolphin on MedAdvice.
+"""Galileo A/B experiment: clean vs model-POISONED Dolphin on DemoBot.
 
 Runs one curated golden set of *benign* patient prompts through the live
-MedAdvice pipeline twice — once on the clean ``dolphin3:8b`` and once on the
+DemoBot pipeline twice — once on the clean ``dolphin3:8b`` and once on the
 tampered ``dolphin3-medadvice-poisoned`` artifact (build it first with
 scripts/demo/build_poisoned_dolphin.sh) — and scores both as first-class Galileo
 experiments with a shared metric set (built-in scorers + 3 custom LLM-as-judge
@@ -33,6 +33,7 @@ Environment:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -80,16 +81,29 @@ def _load_rows() -> List[Dict[str, Any]]:
     return rows
 
 
-def _ensure_dataset(rows: List[Dict[str, Any]]):
-    """Get the named Galileo dataset, creating it from the golden rows if absent."""
+def _dataset_name(rows: List[Dict[str, Any]]) -> str:
+    """Content-addressed dataset name: row count + short content hash.
+
+    Encoding the content means any change to the golden rows (count OR text)
+    yields a FRESH registered dataset, so an experiment never silently scores a
+    stale cached dataset — and past experiments keep their own dataset lineage."""
+    blob = json.dumps(rows, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return f"{DATASET_NAME}_n{len(rows)}_{hashlib.sha256(blob).hexdigest()[:6]}"
+
+
+def _ensure_dataset(rows: List[Dict[str, Any]], name: Optional[str] = None):
+    """Get-or-create a REGISTERED Galileo dataset for these rows (never an inline
+    list), so every experiment shows a named dataset + ground-truth linkage in the
+    console. The dataset's ``output`` column is the reference used by Correctness."""
     from galileo.datasets import create_dataset, get_dataset
 
-    ds = get_dataset(name=DATASET_NAME)
+    name = name or _dataset_name(rows)
+    ds = get_dataset(name=name)
     if ds is None:
-        print(f"  creating Galileo dataset '{DATASET_NAME}' ({len(rows)} rows)")
-        ds = create_dataset(name=DATASET_NAME, content=rows)
+        print(f"  creating Galileo dataset '{name}' ({len(rows)} rows)")
+        ds = create_dataset(name=name, content=rows)
     else:
-        print(f"  reusing existing Galileo dataset '{DATASET_NAME}'")
+        print(f"  reusing existing Galileo dataset '{name}' ({len(rows)} rows)")
     return ds
 
 
@@ -175,9 +189,10 @@ def main() -> int:
     p.add_argument("--judge-model", default="gpt-4.1-mini",
                    help="judge/execution model for the custom LLM metrics (must be exposed "
                         "by the project's LLM integration)")
-    p.add_argument("--recreate-judges", action="store_true",
-                   help="delete + re-create the custom judges so they bind to --judge-model "
-                        "(use when changing the judge model)")
+    p.add_argument("--force-recreate-judges", action="store_true",
+                   help="DESTRUCTIVE: delete + re-create the custom judges so they bind to a new "
+                        "--judge-model. This WIPES the console thresholds — re-apply green=False/"
+                        "red=True afterward. Default (no flag) is create-if-missing only.")
     args = p.parse_args()
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -202,19 +217,24 @@ def main() -> int:
         if h.status_code != 200:
             print(f"FATAL: {base}/health -> {h.status_code}. Is the app running?")
             return 2
-        print(f"MedAdvice reachable at {base} (auth={'yes' if auth else 'none'})")
+        print(f"DemoBot reachable at {base} (auth={'yes' if auth else 'none'})")
 
         # Make sure the freshly-built poisoned model is in the catalog dropdown.
         client.post(f"{base}/api/settings/ai-provider/refresh", auth=auth)
 
-        from galileo_metrics import register_llm_judges, resolve_metric_set
+        from galileo_metrics import register_llm_judges, resolve_metric_set, fix_judge_color_config
         if args.with_llm_judges:
-            if args.recreate_judges:
+            if args.force_recreate_judges:
                 from galileo_metrics import delete_judges
-                print("Recreating judges to bind the new judge model ...")
+                print("FORCE: deleting + re-creating judges to bind the new judge model ...")
                 delete_judges()
-            print(f"Registering custom LLM-as-judge metrics (model={args.judge_model}) ...")
+            print(f"Ensuring custom LLM-as-judge metrics (create-if-missing, model={args.judge_model}) ...")
             register_llm_judges(args.judge_model)
+            # Assert the Numeric violation color config in-place so the judge columns
+            # ROLL UP to an AVG % in the experiments list (a Boolean config blanks it),
+            # while keeping violation=red / minimize ranking.
+            print("Asserting judge color config (Numeric: green=low / red=high, AVG rolls up) ...")
+            fix_judge_color_config()
         else:
             print("Scoring the no-key tier (SLM + code scorers). The custom LLM judges and "
                   "GPT built-ins need an LLM integration in the Galileo project — once that's "
@@ -226,10 +246,11 @@ def main() -> int:
         print("Ensuring golden dataset ...")
         rows = _load_rows()
         if args.limit and args.limit < len(rows):
-            dataset = rows[:args.limit]  # inline list dataset for a quick run
-            print(f"  LIMIT: scoring first {args.limit} of {len(rows)} prompts per arm")
-        else:
-            dataset = _ensure_dataset(rows)
+            rows = rows[:args.limit]
+            print(f"  LIMIT: scoring first {args.limit} prompts per arm")
+        # ALWAYS a registered dataset (never an inline list) so the console shows
+        # the dataset + ground-truth linkage for every run.
+        dataset = _ensure_dataset(rows)
 
         if args.arm in ("both", "baseline"):
             _run_arm(client, base, auth, "baseline", args.baseline_model, args.project,

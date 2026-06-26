@@ -1,7 +1,7 @@
 """Async per-destination HEC forwarder: bounded queue, batching, retry with
 exponential backoff, drop-oldest overflow, and live stats.
 
-Ported from ThreatGenerator and adapted for MedAdvice:
+Ported from ThreatGenerator and adapted for DemoBot:
 - ``submit(log_type, log_data)`` enqueues a governance/audit dict.
 - ``submit`` is thread-safe: ``_write_log`` (the call site) may run on a
   worker thread, so we hop onto the forwarder's event loop via

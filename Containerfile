@@ -1,5 +1,5 @@
 # =============================================================================
-# MedAdvice v4 Container Image
+# DemoBot v4 Container Image
 # =============================================================================
 # Supports dual-environment deployment:
 # - AI_PROVIDER=anthropic: Local development with Anthropic API

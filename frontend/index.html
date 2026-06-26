@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MedAdvice v3 - Medical Guidance</title>
+    <title>MedAdvice - Medical Guidance</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -346,9 +346,24 @@
             <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
                 <div class="flex justify-between items-start">
                     <div>
-                        <h1 id="appTitle" class="text-3xl font-bold text-violet-600 mb-2">MedAdvice v3</h1>
+                        <h1 id="appTitle" class="text-3xl font-bold text-violet-600 mb-2">MedAdvice</h1>
                         <p id="appSubtitle" class="text-gray-600">General Medical Guidance with AI Governance</p>
                         <p class="text-xs text-gray-400 mt-2">Session ID: <span id="sessionId" class="font-mono"></span></p>
+                        <!-- Interactive active-LLM controls: Provider → filtered Model; Static emission (Emit Actual by default). -->
+                        <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3">
+                            <label class="inline-flex items-center gap-1.5" title="LLM provider backing the chat">
+                                <span class="text-violet-500 font-semibold uppercase tracking-wide text-[10px]">Provider</span>
+                                <select id="providerSelect" onchange="onProviderChange()" class="text-xs font-mono border border-violet-200 bg-violet-50 text-violet-800 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-violet-300"></select>
+                            </label>
+                            <label class="inline-flex items-center gap-1.5" title="Model for the selected provider">
+                                <span class="text-slate-500 font-semibold uppercase tracking-wide text-[10px]">Model</span>
+                                <select id="modelSelect" onchange="onModelChange()" class="text-xs font-mono border border-slate-200 bg-slate-50 text-slate-800 rounded-md px-2 py-1 max-w-[18rem] focus:outline-none focus:ring-2 focus:ring-slate-300"></select>
+                            </label>
+                            <label class="inline-flex items-center gap-1.5" title="Demo: report a static model name in telemetry instead of the real one. 'Emit Actual' = report the real model.">
+                                <span class="text-amber-500 font-semibold uppercase tracking-wide text-[10px]">Static emission</span>
+                                <select id="emissionSelect" onchange="onEmissionChange()" class="text-xs font-mono border border-amber-300 bg-amber-50 text-amber-800 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-amber-300"></select>
+                            </label>
+                        </div>
                     </div>
                     <button
                         id="newSessionBtn"
@@ -423,6 +438,6 @@
         </div>
     </div>
 
-    <script src="/static/js/chat.js?v=12"></script>
+    <script src="/static/js/chat.js?v=15"></script>
 </body>
 </html>

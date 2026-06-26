@@ -80,7 +80,7 @@ class AccessKeyMiddleware(BaseHTTPMiddleware):
         return JSONResponse(
             {"detail": "Access key required"},
             status_code=401,
-            headers={"WWW-Authenticate": 'Basic realm="MedAdvice"'},
+            headers={"WWW-Authenticate": 'Basic realm="DemoBot"'},
         )
 
 
@@ -91,7 +91,7 @@ _UNAUTHORIZED_HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Access required · MedAdvice</title>
+  <title>Access required · DemoBot</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -124,12 +124,12 @@ _UNAUTHORIZED_HTML = """<!DOCTYPE html>
       <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="10" width="16" height="11" rx="2.5" stroke="currentColor" stroke-width="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     </div>
     <h1>Access required</h1>
-    <p>This page is private. Enter your access code to continue to MedAdvice.</p>
+    <p>This page is private. Enter your access code to continue to DemoBot.</p>
     <a class="btn" href="__LOGIN_URL__">
       Enter access code
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </a>
-    <div class="foot">MedAdvice · Authorized access only</div>
+    <div class="foot">DemoBot · Authorized access only</div>
   </div>
 </body>
 </html>"""

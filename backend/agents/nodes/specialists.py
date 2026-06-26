@@ -6,7 +6,7 @@ emits its own AgentInvocation span -> the multi-agent trace shows one span per
 specialist in Splunk AI Agent Monitoring / Galileo.
 
 Design notes:
-- Sequential (not LangGraph parallel ``Send``) because ``MedAdviceState`` has no
+- Sequential (not LangGraph parallel ``Send``) because ``DemoBotState`` has no
   merge reducers; parallel writes to ``agent_trace`` / token sums would clobber.
 - Continue-on-partial-failure: a specialist that raises is recorded with
   ``status="error"`` and the turn proceeds; the stage only short-circuits if
@@ -41,6 +41,9 @@ def make_specialists_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
     def specialists_node(state: Dict[str, Any]) -> Dict[str, Any]:
         messages = build_llm_messages(state.get("conversation_history", []))
         provider = settings.ai_provider
+        # Internal (non-user-facing) agents: run on the clean Ollama model so a
+        # selected poisoned model only affects the user-facing synthesizer.
+        model_override = settings.ollama_model_internal if provider == "ollama" else None
 
         selected = list(state.get("selected_specialists") or [])
         if not selected and theme_config.primary_specialist is not None:
@@ -63,15 +66,16 @@ def make_specialists_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
             with otel.agent_span(agent_name, theme=theme_config.key):
                 try:
                     with otel.llm_span(
-                        request_model=request_model(provider), provider=provider
+                        request_model=request_model(provider, model_override), provider=provider
                     ) as llm_sp:
                         response = invoke_agent(
                             settings,
                             agent_name=agent_name,
                             system=system_prompt,
                             messages=messages,
-                            max_tokens=768,
+                            max_tokens=256,
                             temperature=0.5,
+                            model_override=model_override,
                         )
                         otel.record_llm_result(
                             llm_sp,

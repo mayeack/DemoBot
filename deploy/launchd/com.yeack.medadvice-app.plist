@@ -5,7 +5,7 @@
     <key>Label</key>
     <string>com.yeack.medadvice-app</string>
 
-    <!-- MedAdvice FastAPI app on 0.0.0.0:8001. run.sh activates venv/, exports
+    <!-- DemoBot FastAPI app on 0.0.0.0:8001. run.sh activates venv/, exports
          GALILEO_*/OTEL_* from .env, and exec's the app under the OTel
          auto-instrumentation wrapper. Relies on relative paths -> WorkingDirectory. -->
     <key>ProgramArguments</key>

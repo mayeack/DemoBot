@@ -5,7 +5,7 @@ description: Run the observability regression test after ANY change that affects
 
 # Verify the Splunk Observability integration
 
-MedAdvice emits OpenTelemetry GenAI telemetry → a **local OTel Collector**
+DemoBot emits OpenTelemetry GenAI telemetry → a **local OTel Collector**
 (`run-collector.sh`, `otel-collector-config.yaml`) → **Splunk Observability
 Cloud** (realm `us1`). The app exports OTLP to `localhost:4317`; the collector
 forwards traces (APM) and metrics (signalfx, `send_otlp_histograms: true`).
@@ -58,7 +58,7 @@ because the LangChain auto-instrumentation can't read the request model on the
 this by removing `record_genai_tokens`.
 
 ## Interpreting Splunk
-- **APM** → service `medadvice-v3` → traces/agent spans (`workflow … → step
+- **APM** → service `demobot-v3` → traces/agent spans (`workflow … → step
   domain → step call_model → chat`).
-- **APM → AI Agent Monitoring**, Environment `medadvice-local` → Requests,
+- **APM → AI Agent Monitoring**, Environment `demobot-local` → Requests,
   Tokens, Latency. Token panels are fed by `gen_ai.client.token.usage`.

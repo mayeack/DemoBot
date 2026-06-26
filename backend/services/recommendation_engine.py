@@ -1,4 +1,6 @@
 from typing import Dict, Any, List, Optional, Tuple
+import json
+import re
 import uuid
 import time
 import random
@@ -1643,12 +1645,16 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
     def _get_context_keywords(self, theme: str) -> dict:
         return self.THEME_CONTEXT_KEYWORDS.get(theme, self.THEME_CONTEXT_KEYWORDS["medadvice"])
 
-    def _normalize_severity(self, severity_str: str) -> SeverityLevel:
+    def _normalize_severity(self, severity_str: Any) -> SeverityLevel:
         """
-        Normalize severity string to valid SeverityLevel enum
-        Handles cases where Claude returns invalid values like 'MEDIUM-HIGH'
+        Normalize severity to a valid SeverityLevel enum.
+
+        Handles invalid string values like 'MEDIUM-HIGH', and — because a
+        tampered/unaligned model can return ``severity`` as a nested object
+        (e.g. {"level": "LOW"}) instead of a string — flattens any non-string
+        value first so we never raise ``'dict' object has no attribute 'upper'``.
         """
-        severity_upper = severity_str.upper().strip()
+        severity_upper = self._stringify_item(severity_str).upper().strip()
 
         # Direct match - try first
         try:
@@ -2126,40 +2132,16 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         duration = time.time() - start_time
         output_text = response.content
 
-        # Parse response - handle markdown code blocks if present
-        import json
-        import re
-
-        # Try to extract JSON from markdown code blocks
-        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', output_text, re.DOTALL)
-        if json_match:
-            json_text = json_match.group(1)
-        else:
-            json_text = output_text
-
-        try:
-            recommendation = json.loads(json_text)
-        except json.JSONDecodeError:
-            # Fallback if not valid JSON
-            if theme in self.CONVERSATIONAL_THEMES:
-                # Conversational themes show the raw model text as the reply
-                recommendation = {
-                    "reply": output_text,
-                    "severity": "MEDIUM",
-                    "confidence": 0.5
-                }
-            else:
-                recommendation = {
-                    "assessment": output_text[:200],
-                    "guidance": [output_text],
-                    "seek_care_if": ["Symptoms persist or worsen"],
-                    "severity": "MEDIUM",
-                    "confidence": 0.5
-                }
+        # Tolerant parse (handles fenced/bare/truncated/echoed-prompt JSON and
+        # never leaks raw JSON into the user-facing fields). Single source shared
+        # with the agentic synthesizer via content_engine.
+        recommendation = self._parse_recommendation(
+            output_text, theme in self.CONVERSATIONAL_THEMES
+        )
 
         # Safely normalize severity level (handles invalid values like "MEDIUM-HIGH")
         severity = self._normalize_severity(recommendation.get("severity", "MEDIUM"))
-        confidence = recommendation.get("confidence", 0.5)
+        confidence = self._coerce_confidence(recommendation.get("confidence", 0.5))
 
         # Check for escalation
         should_escalate, escalation_reasons = self.escalation_rules.should_escalate(
@@ -2362,6 +2344,270 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             }
         }
 
+    # ------------------------------------------------------------------
+    # Tolerant recommendation parsing (single source for the synthesizer +
+    # legacy engine). Unaligned local models sometimes emit JSON that the strict
+    # parser rejects — truncated objects, trailing commas, bare JSON wrapped in
+    # prose, or (observed) the medadvice system prompt echoed back as a
+    # JSON-shaped blob whose "confidence": 0.0-1.0 placeholder is invalid JSON.
+    # When that happens we must NEVER dump the raw text into the user-facing
+    # assessment/guidance (it renders as raw JSON in the chat bubble).
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _looks_like_json_scaffolding(s: str) -> bool:
+        """True if a string still looks like raw JSON (object opener or "key":)."""
+        if not s:
+            return False
+        t = s.strip()
+        if t.startswith("{") or t.startswith("["):
+            return True
+        return bool(re.search(r'"[A-Za-z_][\w ]*"\s*:', t))
+
+    @staticmethod
+    def _extract_balanced(s: str, start: int) -> Optional[str]:
+        """Return the balanced ``{...}`` / ``[...]`` substring beginning at
+        ``s[start]`` (an opener), honoring string literals + escapes. If it is
+        never closed (truncated), return ``s[start:]`` so the repair step can
+        append the missing closers. Returns None if ``start`` isn't an opener."""
+        if start < 0 or start >= len(s) or s[start] not in "{[":
+            return None
+        open_c = s[start]
+        close_c = "}" if open_c == "{" else "]"
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(s)):
+            c = s[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+                continue
+            if c == '"':
+                in_str = True
+            elif c == open_c:
+                depth += 1
+            elif c == close_c:
+                depth -= 1
+                if depth == 0:
+                    return s[start:i + 1]
+        return s[start:]
+
+    @staticmethod
+    def _needed_closers(s: str) -> str:
+        """Closing tokens needed to balance ``s`` (string-aware), e.g. ``]}``."""
+        stack: List[str] = []
+        in_str = False
+        esc = False
+        for c in s:
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+                continue
+            if c == '"':
+                in_str = True
+            elif c in "{[":
+                stack.append(c)
+            elif c == "}":
+                if stack and stack[-1] == "{":
+                    stack.pop()
+            elif c == "]":
+                if stack and stack[-1] == "[":
+                    stack.pop()
+        closers = '"' if in_str else ""
+        for opener in reversed(stack):
+            closers += "}" if opener == "{" else "]"
+        return closers
+
+    @staticmethod
+    def _repair_candidates(obj: str):
+        """Yield progressively-repaired variants of a JSON-ish string."""
+        yield obj
+        no_trailing = re.sub(r",(\s*[}\]])", r"\1", obj)
+        if no_trailing != obj:
+            yield no_trailing
+        closers = RecommendationEngine._needed_closers(no_trailing)
+        if closers:
+            yield no_trailing + closers
+
+    @staticmethod
+    def _is_usable_recommendation(parsed: Any) -> bool:
+        """A parse is acceptable only if it's a dict carrying an expected field."""
+        return isinstance(parsed, dict) and any(
+            k in parsed for k in ("assessment", "guidance", "reply", "seek_care_if")
+        )
+
+    @staticmethod
+    def _extract_string_field(text: str, key: str) -> str:
+        """Best-effort recovery of a top-level string field from partial JSON."""
+        m = re.search(r'"%s"\s*:\s*"((?:[^"\\]|\\.)*)"' % re.escape(key), text)
+        if not m:
+            return ""
+        try:
+            val = json.loads('"' + m.group(1) + '"')
+        except (json.JSONDecodeError, ValueError):
+            val = m.group(1)
+        val = (val or "").strip()
+        return "" if RecommendationEngine._looks_like_json_scaffolding(val) else val
+
+    @staticmethod
+    def _extract_array_strings(text: str, key: str) -> List[str]:
+        """Best-effort recovery of a top-level array-of-strings field."""
+        m = re.search(r'"%s"\s*:\s*\[' % re.escape(key), text)
+        if not m:
+            return []
+        arr = RecommendationEngine._extract_balanced(text, m.end() - 1)
+        if arr is None:
+            return []
+        for attempt in RecommendationEngine._repair_candidates(arr):
+            try:
+                parsed = json.loads(attempt)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if isinstance(parsed, list):
+                out: List[str] = []
+                for item in parsed:
+                    txt = RecommendationEngine._stringify_item(item).strip()
+                    if txt and not RecommendationEngine._looks_like_json_scaffolding(txt):
+                        out.append(txt)
+                return out
+        return []
+
+    @staticmethod
+    def _clean_reply(text: str) -> str:
+        """Render a conversational reply, recovering it from a JSON blob if needed."""
+        t = (text or "").strip()
+        if t.startswith("{") or RecommendationEngine._looks_like_json_scaffolding(t):
+            recovered = RecommendationEngine._extract_string_field(t, "reply")
+            if recovered:
+                return recovered
+            return ("Sorry, I had trouble forming a complete response. "
+                    "Could you rephrase your question?")
+        return t
+
+    @staticmethod
+    def _fallback_recommendation(text: str, conversational: bool) -> Dict[str, Any]:
+        """Clean recommendation when nothing parsed — never leaks raw JSON text."""
+        if conversational:
+            return {
+                "reply": RecommendationEngine._clean_reply(text),
+                "severity": "MEDIUM",
+                "confidence": 0.5,
+            }
+        assessment = RecommendationEngine._extract_string_field(text, "assessment")
+        guidance = RecommendationEngine._extract_array_strings(text, "guidance")
+        seek = RecommendationEngine._extract_array_strings(text, "seek_care_if")
+        if not assessment and not guidance:
+            return {
+                "assessment": "I couldn't generate a complete structured answer "
+                              "this time. Here is some general guidance.",
+                "guidance": [
+                    "Rest and stay hydrated, and monitor how you feel.",
+                    "Over-the-counter remedies may help — follow the label instructions.",
+                    "Contact a healthcare professional if you're unsure or symptoms change.",
+                ],
+                "seek_care_if": seek or ["Symptoms persist or worsen"],
+                "severity": "MEDIUM",
+                "confidence": 0.5,
+            }
+        return {
+            "assessment": assessment or "Here is some general guidance.",
+            "guidance": guidance or ["Rest, stay hydrated, and monitor your symptoms."],
+            "seek_care_if": seek or ["Symptoms persist or worsen"],
+            "severity": "MEDIUM",
+            "confidence": 0.5,
+        }
+
+    @staticmethod
+    def _parse_recommendation(output_text: str, conversational: bool) -> Dict[str, Any]:
+        """Parse model output into a recommendation dict, tolerantly.
+
+        Handles fenced ```json blocks, bare JSON wrapped in prose, nested objects
+        in guidance, trailing commas, and truncated (unclosed) JSON. When nothing
+        parses, returns a CLEAN fallback that never leaks raw JSON into the
+        user-facing fields. A successfully parsed response is returned verbatim
+        (no sanitizing) so genuine model output — including poisoned content — is
+        shown as-is; only broken/unparseable output is repaired or replaced.
+        """
+        text = output_text or ""
+        # Prefer a ```json ... ``` fenced payload (greedy so nested braces in
+        # guidance are captured whole); else scan the whole text.
+        fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
+        candidate = fenced.group(1) if fenced else text
+
+        brace = candidate.find("{")
+        obj = RecommendationEngine._extract_balanced(candidate, brace) if brace != -1 else None
+        if obj is not None:
+            for attempt in RecommendationEngine._repair_candidates(obj):
+                try:
+                    parsed = json.loads(attempt)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if RecommendationEngine._is_usable_recommendation(parsed):
+                    return parsed
+            # Accept a valid JSON prefix followed by trailing prose.
+            try:
+                parsed, _ = json.JSONDecoder().raw_decode(obj.lstrip())
+                if RecommendationEngine._is_usable_recommendation(parsed):
+                    return parsed
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        return RecommendationEngine._fallback_recommendation(text, conversational)
+
+    @staticmethod
+    def _stringify_item(item: Any) -> str:
+        """Render one assessment / guidance / seek_care entry as readable text.
+
+        The JSON contract expects each guidance/seek_care entry to be a plain
+        string, but a tampered or unaligned model can emit a dict (e.g. a
+        prescription object: {"suggestion": ..., "dosage_and_frequency": ...,
+        "duration_of_treatment": ...}) or a nested list. Flatten those into a
+        sentence so the chat bubble never leaks a raw Python repr like
+        ``{'suggestion': ...}``.
+        """
+        if isinstance(item, str):
+            return item.strip()
+        if isinstance(item, dict):
+            parts = [RecommendationEngine._stringify_item(v) for v in item.values()]
+            return " — ".join(p for p in parts if p)
+        if isinstance(item, (list, tuple)):
+            parts = [RecommendationEngine._stringify_item(v) for v in item]
+            return " ".join(p for p in parts if p)
+        if item is None:
+            return ""
+        return str(item)
+
+    @staticmethod
+    def _coerce_confidence(value: Any, default: float = 0.5) -> float:
+        """Coerce a model-provided confidence into a float in [0, 1].
+
+        The JSON contract asks for a 0.0-1.0 number, but a tampered or unaligned
+        model can return a string ("0.95"), a label ("high"), or a nested object.
+        Downstream code compares confidence numerically (e.g. ``confidence > 0.7``),
+        so anything non-numeric must be normalized here or it raises
+        ``'>' not supported between instances of 'str' and 'float'``.
+        """
+        if isinstance(value, bool):
+            return default
+        if isinstance(value, (int, float)):
+            num = float(value)
+        else:
+            try:
+                num = float(str(value).strip())
+            except (TypeError, ValueError):
+                return default
+        if num != num:  # NaN guard
+            return default
+        return max(0.0, min(1.0, num))
+
     def _format_recommendation(self, recommendation: Dict[str, Any]) -> str:
         """Format recommendation as user-friendly text"""
 
@@ -2374,20 +2620,24 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
 
         # Assessment
         if "assessment" in recommendation:
-            output.append(f"**Assessment:**\n{recommendation['assessment']}\n")
+            output.append(f"**Assessment:**\n{self._stringify_item(recommendation['assessment'])}\n")
 
         # Guidance
         if "guidance" in recommendation and recommendation["guidance"]:
             output.append("**General Guidance:**")
             for item in recommendation["guidance"]:
-                output.append(f"• {item}")
+                text = self._stringify_item(item)
+                if text:
+                    output.append(f"• {text}")
             output.append("")
 
         # When to seek care
         if "seek_care_if" in recommendation and recommendation["seek_care_if"]:
             output.append("**Seek Professional Care If:**")
             for item in recommendation["seek_care_if"]:
-                output.append(f"• {item}")
+                text = self._stringify_item(item)
+                if text:
+                    output.append(f"• {text}")
             output.append("")
 
         # Emergency notice
@@ -2741,7 +2991,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
     ) -> Tuple[str, List[str]]:
         """Deterministically append a prescriptive-overreach snippet.
 
-        MedAdvice is a *non-prescriptive* guidance app (its system prompt forbids
+        DemoBot is a *non-prescriptive* guidance app (its system prompt forbids
         prescription drugs/dosages — "OTC suggestions only"). This injection makes
         the response exceed that authority — recommending prescription-only meds,
         dosages, or procedures — so the Galileo "Prescriptive Authority" evaluator

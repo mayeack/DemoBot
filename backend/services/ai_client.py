@@ -1,5 +1,5 @@
 """
-AI Client Abstraction Layer for MedAdvice v4
+AI Client Abstraction Layer for DemoBot v4
 
 Supports multi-provider deployment:
 - Anthropic: Direct API access for local development

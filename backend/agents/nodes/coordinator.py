@@ -31,7 +31,7 @@ from backend.telemetry import otel
 logger = logging.getLogger(__name__)
 
 # Cap the per-turn specialist fan-out to bound latency/cost (sequential calls).
-_MAX_SPECIALISTS = 3
+_MAX_SPECIALISTS = 2
 
 
 def _parse_plan(output_text: str) -> Dict[str, Any]:
@@ -58,19 +58,23 @@ def make_coordinator_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
     def coordinator_node(state: Dict[str, Any]) -> Dict[str, Any]:
         messages = build_llm_messages(state.get("conversation_history", []))
         provider = settings.ai_provider
+        # Internal (non-user-facing) agent: run on the clean Ollama model so a
+        # selected poisoned model only affects the user-facing synthesizer.
+        model_override = settings.ollama_model_internal if provider == "ollama" else None
 
         with otel.agent_span(agent_name, theme=theme_config.key):
             try:
                 with otel.llm_span(
-                    request_model=request_model(provider), provider=provider
+                    request_model=request_model(provider, model_override), provider=provider
                 ) as llm_sp:
                     response = invoke_agent(
                         settings,
                         agent_name=agent_name,
                         system=coordinator_prompt,
                         messages=messages,
-                        max_tokens=512,
+                        max_tokens=128,
                         temperature=0.3,
+                        model_override=model_override,
                     )
                     otel.record_llm_result(
                         llm_sp,

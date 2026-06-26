@@ -23,6 +23,40 @@ async function api(method, url, body) {
   return data;
 }
 
+// ------------------------------------------------- collapsible sections
+// Each top-level card (logs / creds / hec) collapses via a chevron in its header.
+// State persists per-section in localStorage so it survives reloads.
+const COLLAPSE_KEY = 'medadvice.settings.collapsed';
+const SECTIONS = ['logs', 'creds', 'hec'];
+
+function _readCollapsed() {
+  try { return JSON.parse(localStorage.getItem(COLLAPSE_KEY)) || {}; } catch (_) { return {}; }
+}
+function _writeCollapsed(map) {
+  try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(map)); } catch (_) {}
+}
+function applySection(name, collapsed) {
+  const body = document.getElementById('section-' + name);
+  const btn = document.querySelector(`[data-toggle="${name}"]`);
+  if (body) body.classList.toggle('hidden', collapsed);
+  if (btn) {
+    btn.setAttribute('aria-expanded', String(!collapsed));
+    const chev = btn.querySelector('[data-chevron]');
+    if (chev) chev.classList.toggle('-rotate-90', collapsed);  // chevron points right when collapsed
+  }
+}
+function toggleSection(name) {
+  const body = document.getElementById('section-' + name);
+  if (!body) return;
+  const collapsed = !body.classList.contains('hidden');  // currently open -> collapse
+  applySection(name, collapsed);
+  const map = _readCollapsed(); map[name] = collapsed; _writeCollapsed(map);
+}
+function initSections() {
+  const map = _readCollapsed();
+  SECTIONS.forEach(n => applySection(n, !!map[n]));
+}
+
 // ---------------------------------------------------------------- log dir
 async function loadLogsDir() {
   try {
@@ -44,154 +78,103 @@ function setLogsStatus(msg, ok) {
   el.className = 'text-sm mt-2 ' + (ok ? 'text-green-600' : 'text-red-600');
 }
 
-// ------------------------------------------------------------ ai provider
-let _providerModels = {};   // provider -> currently configured model
-let _available = {};        // provider -> [models discovered at startup / on refresh]
+// --------------------------------------------------- provider credentials
+// Provider/model selection + static-emission moved to the /app header. This page
+// only shows per-provider access creds (API key / base URL / region) for the
+// ACTIVE provider, with a read-only pill of the current provider/model. Saving
+// creds here does NOT switch the active provider (PUT /api/settings/provider-creds).
 let _providerFields = {};   // provider -> [access-field metadata; secrets = presence only]
+let _activeProvider = '';   // provider currently backing the chat (read-only here; change on /app)
+let _activeModel = '';      // its model
+let _credsDirty = false;    // operator has typed into the creds form since the last render/load
 
-// Render the access fields (API key etc.) for the selected provider. Secret fields
-// are password inputs that start EMPTY (the value is never sent to the browser);
-// a "(set)" placeholder shows one already exists and that blank keeps it.
-function renderProviderFields(provider) {
-  const box = document.getElementById('providerCreds');
-  const specs = _providerFields[provider] || [];
-  if (!specs.length) { box.innerHTML = ''; return; }
-  box.innerHTML = specs.map(f => {
-    if (f.secret) {
-      const ph = f.present ? '•••••••• (set) — leave blank to keep' : (f.placeholder || ('enter ' + f.label));
-      return `<div>
-        <label class="block text-xs font-semibold text-gray-600 mb-1">${esc(f.label)}</label>
-        <input data-cred="${attr(f.key)}" type="password" autocomplete="new-password" placeholder="${attr(ph)}"
-          class="w-full p-2 border border-gray-300 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500"></div>`;
-    }
+// One credential input (secret = password that starts EMPTY; "(set)" means one exists).
+function credFieldHtml(f) {
+  if (f.secret) {
+    const ph = f.present ? '•••••••• (set) — leave blank to keep' : (f.placeholder || ('enter ' + f.label));
     return `<div>
       <label class="block text-xs font-semibold text-gray-600 mb-1">${esc(f.label)}</label>
-      <input data-cred="${attr(f.key)}" type="text" value="${attr(f.value || '')}" placeholder="${attr(f.placeholder || '')}"
+      <input data-cred="${attr(f.key)}" type="password" autocomplete="new-password" placeholder="${attr(ph)}"
         class="w-full p-2 border border-gray-300 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500"></div>`;
-  }).join('');
+  }
+  return `<div>
+    <label class="block text-xs font-semibold text-gray-600 mb-1">${esc(f.label)}</label>
+    <input data-cred="${attr(f.key)}" type="text" value="${attr(f.value || '')}" placeholder="${attr(f.placeholder || '')}"
+      class="w-full p-2 border border-gray-300 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500"></div>`;
 }
-// Collect entered field values. Secret (password) fields are sent only when typed,
-// so a blank secret never overwrites the stored one.
-function collectProviderFields() {
+
+// Read-only pill: the provider + model currently backing the chat (change on /app).
+function renderProviderPill() {
+  const el = document.getElementById('providerPill');
+  if (!el) return;
+  if (!_activeProvider) { el.innerHTML = ''; return; }
+  const prov = `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-violet-100 text-violet-700 capitalize">${esc(_activeProvider)}</span>`;
+  const model = _activeModel
+    ? `<span class="px-2 py-0.5 rounded-full text-xs font-mono bg-slate-100 text-slate-700">${esc(_activeModel)}</span>`
+    : '';
+  el.innerHTML = prov + model;
+}
+
+// Render ONLY the active provider's cred card (the provider shown in the pill).
+function renderProviderCreds() {
+  const box = document.getElementById('providerCredsList');
+  if (!box) return;
+  const p = _activeProvider;
+  if (!p) { box.innerHTML = '<p class="text-sm text-gray-500">No active provider.</p>'; return; }
+  const specs = _providerFields[p] || [];
+  const fields = specs.length
+    ? `<div data-creds-for="${attr(p)}" class="grid grid-cols-1 sm:grid-cols-2 gap-3">${specs.map(credFieldHtml).join('')}</div>`
+    : '<p class="text-sm text-gray-400">No credential fields for this provider.</p>';
+  const saveBtn = specs.length
+    ? `<button onclick="saveProviderCreds()" class="mt-3 px-4 py-2 bg-violet-600 text-white rounded hover:bg-violet-700 text-sm">Save ${esc(p)} credentials</button>`
+    : '';
+  box.innerHTML = `<div class="border border-gray-200 rounded-lg p-4">
+    <h3 class="text-sm font-semibold text-gray-700 mb-3 capitalize">${esc(p)}</h3>
+    ${fields}${saveBtn}
+  </div>`;
+  _credsDirty = false;  // fresh render = no unsaved edits
+}
+
+async function loadProviderCreds() {
+  try {
+    const d = await api('GET', '/api/settings/ai-provider');
+    _providerFields = d.fields || {};
+    _activeProvider = d.provider || '';
+    _activeModel = d.model || '';
+    renderProviderPill();
+    renderProviderCreds();
+  } catch (e) { setCredsStatus('Failed to load: ' + e.message, false); }
+}
+
+function collectCredsFor(provider) {
   const out = {};
-  document.getElementById('providerCreds').querySelectorAll('[data-cred]').forEach(el => {
+  const box = document.querySelector(`[data-creds-for="${CSS.escape(provider)}"]`);
+  if (!box) return out;
+  box.querySelectorAll('[data-cred]').forEach(el => {
     const v = el.value.trim();
-    if (el.type === 'password') { if (v) out[el.getAttribute('data-cred')] = v; }
+    if (el.type === 'password') { if (v) out[el.getAttribute('data-cred')] = v; }  // blank secret keeps existing
     else out[el.getAttribute('data-cred')] = v;
   });
   return out;
 }
 
-// Build the option list for a provider: discovered models, with the configured/
-// active model always kept selectable even if discovery didn't return it.
-function modelsForProvider(provider) {
-  const list = (_available[provider] || []).slice();
-  const configured = _providerModels[provider] || '';
-  if (configured && !list.includes(configured)) list.unshift(configured);
-  return list;
-}
-function renderModelOptions(provider, selected) {
-  const sel = document.getElementById('aiModel');
-  const list = modelsForProvider(provider);
-  if (!list.length) {
-    sel.innerHTML = '<option value="">(no models found — check credentials / daemon, then ↻ Refresh)</option>';
-    return;
-  }
-  sel.innerHTML = list.map(m => `<option value="${attr(m)}">${esc(m)}</option>`).join('');
-  if (selected && list.includes(selected)) sel.value = selected;
-}
-async function loadAiProvider() {
+async function saveProviderCreds() {
+  const provider = _activeProvider;   // the only card shown; read it rather than interpolate into onclick
+  if (!provider) return;
   try {
-    const d = await api('GET', '/api/settings/ai-provider');
-    _providerModels = d.models || {};
-    _available = d.available || {};
-    _providerFields = d.fields || {};
-    const sel = document.getElementById('aiProvider');
-    sel.innerHTML = (d.choices || []).map(p => `<option value="${attr(p)}">${esc(p)}</option>`).join('');
-    sel.value = d.provider;
-    renderModelOptions(d.provider, d.model);
-    renderProviderFields(d.provider);
-  } catch (e) { setProviderStatus('Failed to load: ' + e.message, false); }
-}
-function onProviderChange() {
-  // Repopulate the model dropdown + access fields for the newly selected provider.
-  const p = document.getElementById('aiProvider').value;
-  renderModelOptions(p, _providerModels[p] || '');
-  renderProviderFields(p);
-}
-async function refreshModels() {
-  setProviderStatus('Scanning providers for available models…', true);
-  try {
-    const d = await api('POST', '/api/settings/ai-provider/refresh');
-    _providerModels = d.models || _providerModels;
-    _available = d.available || {};
-    const p = document.getElementById('aiProvider').value;
-    const keep = document.getElementById('aiModel').value;
-    renderModelOptions(p, keep || _providerModels[p] || '');
-    setProviderStatus(`Refreshed — ${(_available[p] || []).length} model(s) available for ${p}.`, true);
-  } catch (e) { setProviderStatus('Refresh failed: ' + e.message, false); }
-}
-async function saveAiProvider() {
-  const provider = document.getElementById('aiProvider').value;
-  const body = {
-    provider: provider,
-    model: document.getElementById('aiModel').value.trim(),
-    fields: collectProviderFields(),
-  };
-  try {
-    const d = await api('PUT', '/api/settings/ai-provider', body);
-    _providerModels = d.models || _providerModels;
-    _available = d.available || _available;
+    const d = await api('PUT', '/api/settings/provider-creds', { provider, fields: collectCredsFor(provider) });
     _providerFields = d.fields || _providerFields;
-    // Re-render so saved secrets reset to masked "(set)" and the model list reflects any new creds.
-    renderModelOptions(provider, d.model);
-    renderProviderFields(provider);
-    setProviderStatus(`Saved — chat now uses ${d.provider} · ${d.model || 'default model'}. New turns use it immediately.`, true);
-  } catch (e) { setProviderStatus('Error: ' + e.message, false); }
-}
-function setProviderStatus(msg, ok) {
-  const el = document.getElementById('providerStatus');
-  el.textContent = msg;
-  el.className = 'text-sm mt-2 ' + (ok ? 'text-green-600' : 'text-red-600');
+    if (d.provider) _activeProvider = d.provider;   // unchanged by a creds save, but stay in sync
+    if (d.model != null) _activeModel = d.model;
+    renderProviderPill();
+    renderProviderCreds();  // reset saved secrets back to masked "(set)" + clears _credsDirty
+    setCredsStatus(`Saved ${provider} credentials. (Active provider unchanged — switch it from the app page header.)`, true);
+  } catch (e) { setCredsStatus('Error: ' + e.message, false); }
 }
 
-// -------------------------------------------------------------- emit model
-async function loadEmitModel() {
-  try {
-    const d = await api('GET', '/api/settings/emit-model');
-    const sel = document.getElementById('emitModelName');
-    sel.innerHTML = (d.choices || []).map(m => `<option value="${attr(m)}">${esc(m)}</option>`).join('');
-    if (d.model_name) sel.value = d.model_name;
-    document.getElementById('emitEnabled').checked = !!d.enabled;
-    document.getElementById('emitRandom').checked = !!d.random;
-    onEmitToggle();
-  } catch (e) { setEmitStatus('Failed to load: ' + e.message, false); }
-}
-function onEmitToggle() {
-  const on = document.getElementById('emitEnabled').checked;
-  const rnd = document.getElementById('emitRandom').checked;
-  document.getElementById('emitFields').classList.toggle('hidden', !on);
-  const sel = document.getElementById('emitModelName');
-  sel.disabled = rnd;                        // random ignores the explicit selection
-  sel.classList.toggle('opacity-50', rnd);
-}
-async function saveEmitModel() {
-  const body = {
-    enabled: document.getElementById('emitEnabled').checked,
-    model_name: document.getElementById('emitModelName').value,
-    random: document.getElementById('emitRandom').checked,
-  };
-  try {
-    const d = await api('PUT', '/api/settings/emit-model', body);
-    setEmitStatus(d.enabled
-      ? `Saved — emitting "${d.random ? 'random model' : d.model_name}" in telemetry + logs (real model still called).`
-      : 'Saved — emitting the real model name.', true);
-  } catch (e) { setEmitStatus('Error: ' + e.message, false); }
-}
-function setEmitStatus(msg, ok) {
-  const el = document.getElementById('emitStatus');
-  el.textContent = msg;
-  el.className = 'text-sm ' + (ok ? 'text-green-600' : 'text-red-600');
+function setCredsStatus(msg, ok) {
+  const el = document.getElementById('credsStatus');
+  if (el) { el.textContent = msg; el.className = 'text-sm mt-3 ' + (ok ? 'text-green-600' : 'text-red-600'); }
 }
 
 // ------------------------------------------------------------ destinations
@@ -365,10 +348,26 @@ async function loadStats() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  initSections();
+  // Mark the creds form dirty on the first keystroke so a background refresh never
+  // wipes unsaved input. The listener is delegated on the static container, so it
+  // survives the innerHTML re-renders of its child inputs.
+  const credsBox = document.getElementById('providerCredsList');
+  if (credsBox) credsBox.addEventListener('input', () => { _credsDirty = true; });
   await loadLogsDir();
-  await loadAiProvider();
-  await loadEmitModel();
+  await loadProviderCreds();
   await loadDestinations();
   await loadStats();
   setInterval(() => { if (!document.hidden) loadStats(); }, 2500);
+});
+
+// When the tab regains focus, refresh the active provider/model pill + creds (the
+// active provider may have changed on /app). Skip if the operator has unsaved edits
+// (dirty) or an input is focused, so we never clobber a half-typed secret.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (_credsDirty) return;
+  const box = document.getElementById('providerCredsList');
+  if (box && box.contains(document.activeElement)) return;
+  loadProviderCreds();
 });

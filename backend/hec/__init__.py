@@ -1,4 +1,4 @@
-"""Splunk HEC forwarding for MedAdvice governance events."""
+"""Splunk HEC forwarding for DemoBot governance events."""
 from backend.hec.config import HECConfig
 from backend.hec.runtime import hec_runtime
 

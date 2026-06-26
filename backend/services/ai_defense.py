@@ -1,7 +1,7 @@
 """Cisco AI Defense - Chat Inspection API client.
 
 Thin, dependency-light wrapper around the AI Defense runtime Inspection API,
-used to optionally submit user prompts for policy review before the MedAdvice
+used to optionally submit user prompts for policy review before the DemoBot
 recommendation engine calls the model.
 
 Grounded on the published contract:
@@ -89,7 +89,7 @@ class AIDefenseClient:
         user_message: str,
         *,
         enduser_id: Optional[str] = None,
-        src_app: str = "medadvice-v3",
+        src_app: str = "demobot-v3",
     ) -> InspectionResult:
         """Submit a single user prompt to AI Defense for policy review.
 
@@ -109,7 +109,7 @@ class AIDefenseClient:
         assistant_message: str,
         *,
         enduser_id: Optional[str] = None,
-        src_app: str = "medadvice-v3",
+        src_app: str = "demobot-v3",
     ) -> InspectionResult:
         """Submit a model response (in conversation context) for policy review.
 
@@ -148,7 +148,7 @@ class AIDefenseClient:
         messages: List[Dict[str, str]],
         *,
         enduser_id: Optional[str] = None,
-        src_app: str = "medadvice-v3",
+        src_app: str = "demobot-v3",
         stage: str = "prompt",
     ) -> InspectionResult:
         """Shared Chat Inspection call for both prompt and response review."""

@@ -57,7 +57,7 @@ class GenAILogEntry(BaseModel):
     response_model: Optional[str] = None
     response_id: Optional[str] = None
     conversation_id: str
-    deployment_id: str = "medadvice-v3-prod"
+    deployment_id: str = "demobot-v3-prod"
     request_id: str
     session_id: str
     trace_id: str
@@ -114,7 +114,7 @@ class GenAILogEntry(BaseModel):
 
     # Actor / application context
     enduser_id: Optional[str] = None
-    service_name: str = "medadvice-v3"
+    service_name: str = "demobot-v3"
     client_address: Optional[str] = None
 
     # Timestamp

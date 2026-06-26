@@ -1,5 +1,5 @@
 #!/bin/bash
-# Regression test for the MedAdvice -> OpenTelemetry -> Splunk Observability Cloud
+# Regression test for the DemoBot -> OpenTelemetry -> Splunk Observability Cloud
 # pipeline. Run after ANY change that touches the observability integration
 # (see .claude/skills/verify-observability/SKILL.md for the trigger list).
 #
@@ -73,7 +73,7 @@ REALM=$(grep '^SPLUNK_REALM=' .env 2>/dev/null | cut -d= -f2)
 if [ -z "${APITOK:-}" ]; then
   echo "  SKIP  SPLUNK_API_TOKEN not set in .env (an O11y *API* token) -> skipping end-to-end metadata assertion"
 else
-  if python3 tests/observability/check_o11y_metadata.py "$REALM" "$APITOK" medadvice-v3 medadvice-local; then
+  if python3 tests/observability/check_o11y_metadata.py "$REALM" "$APITOK" demobot-v3 demobot-local; then
     ok "gen_ai metadata present in O11y (real model + input/output tokens; named agent in AI agents view; operation.duration)"
   else
     bad "gen_ai metadata missing/incomplete in O11y (token usage, real model, or named agent not found)"

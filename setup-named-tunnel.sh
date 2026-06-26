@@ -1,5 +1,5 @@
 #!/bin/bash
-# Set up a PERMANENT (named) Cloudflare tunnel for MedAdvice.
+# Set up a PERMANENT (named) Cloudflare tunnel for DemoBot.
 #
 # Prerequisite: a domain whose DNS is on Cloudflare (e.g. registered via
 # Cloudflare Registrar at dash.cloudflare.com -> Domain Registration). The

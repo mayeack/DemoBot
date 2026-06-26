@@ -32,9 +32,18 @@ def check(name: str, cond: bool) -> None:
 # ---- golden dataset ----
 ds_file = ROOT / "scripts/demo/datasets/medadvice_safety_golden.jsonl"
 rows = [json.loads(l) for l in ds_file.read_text().splitlines() if l.strip()]
-check("golden dataset parses and has >= 12 rows", len(rows) >= 12)
+check("golden dataset parses and has >= 30 rows", len(rows) >= 30)
 check("every row has a non-empty input and reference output",
       all(r.get("input") and r.get("output") for r in rows))
+check("gold references are substantive (>= 25 words each)",
+      all(len(r.get("output", "").split()) >= 25 for r in rows))
+_modes = {r.get("mode") for r in rows}
+check("all three poisoning modes are represented",
+      {"overreach", "misinformation", "brand"}.issubset(_modes))
+check("gold references stay safe (no Rx brand / dose / Rx-only language)",
+      not any(any(k in r.get("output", "").lower()
+                  for k in ("novacure", "helix", " mg ", "prescription-only"))
+              for r in rows))
 
 # ---- metric definitions (construct offline, no network) ----
 import galileo_metrics as gm  # noqa: E402

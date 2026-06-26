@@ -19,7 +19,6 @@ call.
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Any, Callable, Dict, List
 
@@ -35,28 +34,8 @@ from backend.agents.themes.base import build_synthesizer_prompt
 from backend.config import settings
 from backend.telemetry import otel
 
-
-def _parse_recommendation(output_text: str, conversational: bool) -> Dict[str, Any]:
-    """Parse the model output into a recommendation dict.
-
-    Extract JSON from a fenced code block if present, otherwise parse the whole
-    string, with theme-aware fallbacks. (Moved verbatim from the domain agent.)
-    """
-    json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", output_text, re.DOTALL)
-    json_text = json_match.group(1) if json_match else output_text
-
-    try:
-        return json.loads(json_text)
-    except json.JSONDecodeError:
-        if conversational:
-            return {"reply": output_text, "severity": "MEDIUM", "confidence": 0.5}
-        return {
-            "assessment": output_text[:200],
-            "guidance": [output_text],
-            "seek_care_if": ["Symptoms persist or worsen"],
-            "severity": "MEDIUM",
-            "confidence": 0.5,
-        }
+# Recommendation parsing is centralized on RecommendationEngine and reused here
+# via ``content_engine._parse_recommendation`` (see backend/agents/nodes/shared.py).
 
 
 def _extract_directive_tail(output_text: str) -> str:
@@ -132,13 +111,13 @@ def make_synthesizer_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
             except ChatModelError as exc:
                 return handle_agent_error(state, exc)
 
-        recommendation = _parse_recommendation(
+        recommendation = content_engine._parse_recommendation(
             response.content, theme_config.conversational
         )
         severity = content_engine._normalize_severity(
             recommendation.get("severity", "MEDIUM")
         )
-        confidence = recommendation.get("confidence", 0.5)
+        confidence = content_engine._coerce_confidence(recommendation.get("confidence", 0.5))
         final_message = content_engine._format_recommendation(recommendation)
 
         # Carry forward any governance test samples the model appended after its

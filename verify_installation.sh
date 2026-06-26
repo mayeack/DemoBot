@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# MedAdvice v3 - Installation Verification Script
+# DemoBot v3 - Installation Verification Script
 
 echo "╔════════════════════════════════════════════════╗"
-echo "║   MedAdvice v3 - Installation Verification    ║"
+echo "║   DemoBot v3 - Installation Verification    ║"
 echo "╚════════════════════════════════════════════════╝"
 echo ""
 

@@ -204,6 +204,20 @@ def main() -> int:
             r = c.get(path, headers=AUTH)
             check(f"GET {path} -> 200 HTML", r.status_code == 200 and "<html" in r.text.lower(), f"{r.status_code}")
 
+        # ---- Settings page UI invariants: collapsible sections + read-only provider pill ----
+        s_html = c.get("/settings-ui", headers=AUTH).text
+        check("Settings: three collapsible section toggles (logs/creds/hec)",
+              all(f'data-toggle="{s}"' in s_html for s in ("logs", "creds", "hec")))
+        check("Settings: three collapsible section bodies (id=section-*)",
+              all(f'id="section-{s}"' in s_html for s in ("logs", "creds", "hec")))
+        check("Settings: a chevron per collapsible header (3)", s_html.count("data-chevron") == 3)
+        check("Settings: read-only provider/model pill present", 'id="providerPill"' in s_html)
+        # Accordion a11y: each toggle is a <button> nested INSIDE its <h2> (heading role preserved),
+        # never an <h2> nested inside a <button> (which screen readers flatten away).
+        check("Settings: headers use accordion <h2><button> (heading not nested in button)",
+              s_html.count('aria-controls="section-') == 3
+              and re.search(r"<button[^>]*>\s*<h2", s_html) is None)
+
     # ---- AI Defense per-direction guardrail config (no client needed) ----
     prompt_rules = {r["rule_name"] for r in settings.ai_defense_rule_config}
     resp_rules = {r["rule_name"] for r in settings.ai_defense_response_rule_config}

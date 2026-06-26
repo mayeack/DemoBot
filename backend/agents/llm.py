@@ -69,15 +69,23 @@ def clear_caches() -> None:
     _AGENT_CACHE.clear()
 
 
-def get_chat_model(settings, *, max_tokens: int = 2048, temperature: float = 0.7):
+def get_chat_model(settings, *, max_tokens: int = 2048, temperature: float = 0.7,
+                   model_override: Optional[str] = None):
     """Return a LangChain chat model for the configured provider.
+
+    ``model_override`` selects a specific model id instead of the provider's
+    configured default (used to run the internal agents on the clean Ollama model
+    while the user-facing synthesizer uses the selected/poisoned one). It is part
+    of the cache key so two model names can coexist in one process.
 
     CA-bundle / proxy handling is inherited from process environment variables
     (``SSL_CERT_FILE`` / ``REQUESTS_CA_BUNDLE``) that ``backend.config`` sets at
     import time, so the underlying SDK HTTP clients pick them up automatically.
     """
     provider = (settings.ai_provider or "anthropic").lower()
-    cache_key = f"{provider}:{max_tokens}:{temperature}"
+    # The model name MUST be in the key: without it, an override (or a runtime
+    # model switch) would be served a stale client built for a different model.
+    cache_key = f"{provider}:{model_override or '-'}:{max_tokens}:{temperature}"
     cached = _MODEL_CACHE.get(cache_key)
     if cached is not None:
         return cached
@@ -118,12 +126,16 @@ def get_chat_model(settings, *, max_tokens: int = 2048, temperature: float = 0.7
             # num_predict (NOT max_tokens) for the output cap and num_ctx for the
             # context window. usage_metadata is populated natively, so _extract_usage
             # tier-1 and the otel/governance/Galileo token plumbing work unchanged.
+            # keep_alive keeps the 5GB model resident between turns (no cold reload).
+            # model_override lets the internal agents run on the clean base while the
+            # synthesizer runs the selected (possibly poisoned) model.
             model = ChatOllama(
-                model=settings.ollama_model,
+                model=model_override or settings.ollama_model,
                 base_url=settings.ollama_base_url,
                 temperature=temperature,
                 num_predict=max_tokens,
                 num_ctx=settings.ollama_num_ctx,
+                keep_alive=settings.ollama_keep_alive,
             )
         else:
             raise ChatModelError(
@@ -286,9 +298,13 @@ def invoke_chat(
 _AGENT_CACHE: Dict[str, Any] = {}
 
 
-def get_react_agent(settings, *, name: str, max_tokens: int = 2048, temperature: float = 0.7):
+def get_react_agent(settings, *, name: str, max_tokens: int = 2048, temperature: float = 0.7,
+                    model_override: Optional[str] = None):
     """Return a cached, tool-less LangGraph react agent for the given name."""
-    cache_key = f"{(settings.ai_provider or 'anthropic').lower()}:{name}:{max_tokens}:{temperature}"
+    provider = (settings.ai_provider or "anthropic").lower()
+    # model_override is in the key so an internal-vs-synthesizer model split caches
+    # distinct agents rather than colliding on (provider, name, tokens, temp).
+    cache_key = f"{provider}:{name}:{model_override or '-'}:{max_tokens}:{temperature}"
     cached = _AGENT_CACHE.get(cache_key)
     if cached is not None:
         return cached
@@ -297,7 +313,8 @@ def get_react_agent(settings, *, name: str, max_tokens: int = 2048, temperature:
     except ImportError as exc:  # pragma: no cover - optional dep
         raise ChatModelError(f"langgraph is not installed: {exc}") from exc
 
-    model = get_chat_model(settings, max_tokens=max_tokens, temperature=temperature)
+    model = get_chat_model(settings, max_tokens=max_tokens, temperature=temperature,
+                           model_override=model_override)
     # tools=[] -> the agent answers directly (a single model call, no tool loop),
     # so token usage / response id stay 1:1 with the legacy contract. name=... is
     # what Splunk AI Agent Monitoring shows as the agent.
@@ -316,6 +333,7 @@ def invoke_agent(
     max_tokens: int = 2048,
     temperature: float = 0.7,
     fallback_model: Optional[str] = None,
+    model_override: Optional[str] = None,
 ) -> NormalizedLLMResponse:
     """Invoke a named react agent and normalize the response.
 
@@ -323,17 +341,23 @@ def invoke_agent(
     ``NormalizedLLMResponse``) but routed through a named ``create_react_agent``
     so it registers as an agent in Splunk AI Agent Monitoring. The system prompt
     is passed as a ``SystemMessage`` so the cached agent need not bake it in.
+
+    ``model_override`` runs this agent on a specific model id (used to run the
+    internal coordinator/specialist agents on the clean Ollama model while the
+    synthesizer runs the selected one); it also becomes the reported request-model
+    so telemetry labels each span with the model actually used.
     """
     from langchain_core.messages import AIMessage
 
     from backend.telemetry import otel
 
     agent = get_react_agent(
-        settings, name=agent_name, max_tokens=max_tokens, temperature=temperature
+        settings, name=agent_name, max_tokens=max_tokens, temperature=temperature,
+        model_override=model_override,
     )
     lc_messages = _to_langchain_messages(system, messages)
     provider = (settings.ai_provider or "anthropic").lower()
-    fallback = fallback_model or (
+    fallback = fallback_model or model_override or (
         settings.anthropic_model
         if provider == "anthropic"
         else settings.bedrock_model_id

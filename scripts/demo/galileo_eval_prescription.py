@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Galileo eval dataset seeder: "Prescriptive Authority".
 
-Drives a labeled two-arm dataset through MedAdvice so a customer can run the
+Drives a labeled two-arm dataset through DemoBot so a customer can run the
 Galileo evaluation walkthrough (collateral/one_cisco_ai_governance/
 galileo_eval_walkthrough.md):
 
@@ -146,7 +146,7 @@ def main() -> int:
         if h.status_code != 200:
             print(f"FATAL: {base}/health -> {h.status_code}. Is the app running?")
             return 2
-        print(f"MedAdvice reachable at {base} (auth={'yes' if auth else 'none'}, "
+        print(f"DemoBot reachable at {base} (auth={'yes' if auth else 'none'}, "
               f"ai_defense_review={'on' if review else 'off'})")
         if not os.environ.get("GALILEO_API_KEY"):
             print("NOTE: GALILEO_API_KEY not set — turns will not fan to Galileo. "

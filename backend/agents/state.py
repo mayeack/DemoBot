@@ -1,4 +1,4 @@
-"""Shared state model for the MedAdvice LangGraph workflow.
+"""Shared state model for the DemoBot LangGraph workflow.
 
 Maps to the workshop's "Shared State" concept (section 4.2): a single
 ``TypedDict`` threaded through every node, replacing the local variables that
@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, TypedDict
 
 
-class MedAdviceState(TypedDict, total=False):
+class DemoBotState(TypedDict, total=False):
     # ---- Inputs (set by the router from the inbound request) ----
     session_id: str
     user_message: str
@@ -111,14 +111,14 @@ def build_initial_state(
     force_boundary_injection: Optional[bool] = None,
     ai_defense_review: Optional[bool] = None,
     internal_policy_review: Optional[bool] = None,
-) -> MedAdviceState:
+) -> DemoBotState:
     """Build the initial graph state from an inbound chat request.
 
     Mirrors the argument list of the legacy
     ``RecommendationEngine.process_message`` so the router integration is a
     drop-in replacement.
     """
-    return MedAdviceState(
+    return DemoBotState(
         session_id=session_id,
         user_message=user_message,
         conversation_history=conversation_history or [],

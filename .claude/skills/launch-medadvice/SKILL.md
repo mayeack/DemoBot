@@ -1,11 +1,11 @@
 ---
 name: launch-medadvice
-description: Launch / run / start / serve the MedAdvice app AND its required services (the OpenTelemetry collector that forwards telemetry to Splunk) — locally on http://localhost:8001 or publicly via a Cloudflare tunnel behind the access key. Use when asked to run, start, serve, boot, or expose this application, or to confirm it's serving.
+description: Launch / run / start / serve the DemoBot app AND its required services (the OpenTelemetry collector that forwards telemetry to Splunk) — locally on http://localhost:8001 or publicly via a Cloudflare tunnel behind the access key. Use when asked to run, start, serve, boot, or expose this application, or to confirm it's serving.
 ---
 
-# Launch MedAdvice
+# Launch DemoBot
 
-MedAdvice is a FastAPI app (`backend/main.py`) launched by `./run.sh`, which
+DemoBot is a FastAPI app (`backend/main.py`) launched by `./run.sh`, which
 activates `venv/`, then runs `python -m backend.main` → uvicorn on
 **`0.0.0.0:8001`**. It serves a chat UI at `/app`, admin/governance UIs, `/docs`,
 and the `/api/chat` + `/admin` JSON APIs.

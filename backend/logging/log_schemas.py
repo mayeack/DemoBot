@@ -26,7 +26,7 @@ def create_governance_log(
         "response_model": kwargs.get("response_model"),
         "response_id": kwargs.get("response_id"),
         "conversation_id": conversation_id,
-        "deployment_id": kwargs.get("deployment_id", "medadvice-v3-prod"),
+        "deployment_id": kwargs.get("deployment_id", "demobot-v3-prod"),
         "request_id": request_id or str(uuid.uuid4()),
         "session_id": session_id,
         "trace_id": trace_id or str(uuid.uuid4()),
@@ -118,7 +118,7 @@ def create_governance_log(
 
         # Actor / application context
         "enduser_id": kwargs.get("enduser_id"),
-        "service_name": kwargs.get("service_name", "medadvice-v3"),
+        "service_name": kwargs.get("service_name", "demobot-v3"),
         "client_address": kwargs.get("client_address"),
 
         # Timestamp

@@ -3,8 +3,8 @@
 
 Per the Troubleshooting Agent training (RCA Eligible Alerts: Criteria), the AI
 agent only runs on APM detectors built on metrics like service.request.duration.*
-and service.request.count. This creates two such detectors on medadvice-v3 /
-medadvice-local:
+and service.request.count. This creates two such detectors on demobot-v3 /
+demobot-local:
   - High request latency  (service.request.duration.ns.p90)
   - High error rate        (service.request.count + sf_error)
 
@@ -38,7 +38,7 @@ if not TOKEN:
     print("ERROR: SPLUNK_API_TOKEN not set in .env (need an O11y API token)")
     sys.exit(1)
 API = f"https://api.{REALM}.signalfx.com"
-SVC, ENVN = "medadvice-v3", "medadvice-local"
+SVC, ENVN = "demobot-v3", "demobot-local"
 
 
 def req(method: str, path: str, body=None):
@@ -65,8 +65,8 @@ def existing_id(name: str):
 
 DETECTORS = [
     {
-        "name": "MedAdvice — High request latency (demo)",
-        "description": "p90 request latency on the medadvice-v3 APM service is elevated. "
+        "name": "DemoBot — High request latency (demo)",
+        "description": "p90 request latency on the demobot-v3 APM service is elevated. "
                        "RCA-eligible (service.request.duration.ns.p90).",
         "programText": (
             f"P90 = data('service.request.duration.ns.p90', filter('sf_service', '{SVC}') "
@@ -74,11 +74,11 @@ DETECTORS = [
             "detect(when(P90 > 12000000000, lasting='1m')).publish('High p90 latency')"
         ),
         "rules": [{"detectLabel": "High p90 latency", "severity": "Critical",
-                   "description": "p90 request latency > 12s on medadvice-v3", "notifications": []}],
+                   "description": "p90 request latency > 12s on demobot-v3", "notifications": []}],
     },
     {
-        "name": "MedAdvice — High error rate (demo)",
-        "description": "Error rate on the medadvice-v3 APM service is elevated. "
+        "name": "DemoBot — High error rate (demo)",
+        "description": "Error rate on the demobot-v3 APM service is elevated. "
                        "RCA-eligible (service.request.count).",
         "programText": (
             # .sum() aggregates ACROSS MTS into one stream (so errors/total is a
@@ -96,7 +96,7 @@ DETECTORS = [
             "detect(when(rate > 10, lasting='30s')).publish('High error rate')"
         ),
         "rules": [{"detectLabel": "High error rate", "severity": "Critical",
-                   "description": "error rate > 10% on medadvice-v3", "notifications": []}],
+                   "description": "error rate > 10% on demobot-v3", "notifications": []}],
     },
 ]
 

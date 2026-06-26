@@ -1,6 +1,6 @@
 """Splunk HEC destination config (one per integration).
 
-Mirrors the shape of ThreatGenerator's ``HECConfig`` but adapted for MedAdvice:
+Mirrors the shape of ThreatGenerator's ``HECConfig`` but adapted for DemoBot:
 the forwarded "event" is a governance/audit log dict keyed by ``log_type``
 (governance|escalation|audit|error), and the token is carried in the config
 (persisted in the local SQLite DB) rather than the OS keychain.

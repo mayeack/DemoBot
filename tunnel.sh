@@ -1,5 +1,5 @@
 #!/bin/bash
-# Expose the locally running MedAdvice server to the public internet.
+# Expose the locally running DemoBot server to the public internet.
 # Requires cloudflared: brew install cloudflared
 # Run ./run.sh in one terminal, then ./tunnel.sh in another.
 #

@@ -66,14 +66,14 @@ async def send_message(
     client_host = request.client.host if request.client else None
 
     # Demo-incident fault injection: inflate latency and/or fail with 5xx so the
-    # medadvice-v3 APM service breaches its latency / error-rate detectors, giving
+    # demobot-v3 APM service breaches its latency / error-rate detectors, giving
     # the AI Troubleshooting Agent an alert to analyze. See backend/incident_mode.py.
     if incident_mode.is_active():
         delay = incident_mode.delay_seconds()
         if delay:
             await asyncio.sleep(delay)
         if incident_mode.should_error():
-            raise HTTPException(status_code=500, detail="Simulated demo incident on medadvice-v3")
+            raise HTTPException(status_code=500, detail="Simulated demo incident on demobot-v3")
 
     # Get or create session
     session_id = chat_request.session_id

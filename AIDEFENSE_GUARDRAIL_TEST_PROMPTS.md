@@ -13,7 +13,7 @@ profile, each crafted to trip its guardrail. Every prompt was submitted to the
 *named* rule;** the 3 Tool Exploitation prompts are blocked but attributed to a
 co-firing rule (see note). 
 
-> ⚠️ These prompts are designed to be **blocked**. Paste them into the MedAdvice
+> ⚠️ These prompts are designed to be **blocked**. Paste them into the DemoBot
 > chat (or the harness) to demonstrate each guardrail firing — they are not
 > guidance to act on.
 

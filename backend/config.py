@@ -51,9 +51,19 @@ class Settings(BaseSettings):
     # Context window passed to Ollama (num_ctx); 8192 fits the theme system prompt
     # plus the governance input directives with headroom.
     ollama_num_ctx: int = 8192
+    # How long Ollama keeps the model resident after a call (passed to ChatOllama
+    # as keep_alive). Without this the 5GB model unloads on its 5-minute default
+    # and the next turn pays a cold reload. "30m" / "-1" (never) / seconds.
+    ollama_keep_alive: str = "30m"
+    # Model the NON-user-facing internal agents (coordinator + specialists) run on
+    # when ai_provider="ollama". Kept on the CLEAN base so that selecting a
+    # tampered/poisoned model as `ollama_model` only affects the user-facing
+    # synthesizer — the internal calls stay fast and on-task. See
+    # backend/agents/nodes/coordinator.py + specialists.py.
+    ollama_model_internal: str = "dolphin3:8b"
 
     # Application
-    app_name: str = "MedAdvice v4"
+    app_name: str = "DemoBot v4"
     app_version: str = "4.0.0"
     environment: str = "development"  # "development" or "production"
     debug: bool = True
@@ -133,7 +143,7 @@ class Settings(BaseSettings):
         "PII,PHI,PCI,Harassment,Hate Speech,Profanity,"
         "Sexual Content & Exploitation,Violence & Public Safety Threats"
     )
-    # Custom AI Defense guardrail that flags MedAdvice exceeding its authority —
+    # Custom AI Defense guardrail that flags DemoBot exceeding its authority —
     # recommending a prescription-only (non-OTC) medication, dosage, or procedure.
     # This is NOT a Cisco standard rule: it must be created as a custom guardrail
     # on the AI Defense connection (SCC policy, enforced on the response/output
@@ -159,7 +169,7 @@ class Settings(BaseSettings):
     use_agentic_engine: bool = True
     # Name promoted to the OTel GenAI Workflow span (AI Agent Monitoring groups
     # traces by this workflow name in Splunk Observability Cloud).
-    agentic_workflow_name: str = "medadvice_multi_agent"
+    agentic_workflow_name: str = "demobot_multi_agent"
 
     # -------------------------------------------------------------------------
     # Agentic observability (OpenTelemetry GenAI -> Splunk Observability Cloud)
@@ -169,7 +179,7 @@ class Settings(BaseSettings):
     # (e.g. OTEL_EXPORTER_OTLP_ENDPOINT). When no endpoint is configured and
     # debug is on, spans are printed to the console.
     otel_enabled: bool = False
-    otel_service_name: str = "medadvice-v3"
+    otel_service_name: str = "demobot-v3"
 
     model_config = SettingsConfigDict(
         env_file=".env",

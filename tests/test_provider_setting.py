@@ -110,6 +110,33 @@ def test_secret_apply_mask_and_blank_keep() -> None:
         settings.openai_api_key = orig_key
 
 
+def test_creds_only_never_switches_active_provider() -> None:
+    """The /api/settings/provider-creds guarantee: saving one provider's creds
+    must NOT change which provider backs the chat (unlike set_ai_provider). Lets
+    the Settings creds section update keys for any provider without hijacking the
+    active one chosen from the /app header. DB-safe: store I/O stubbed in-memory."""
+    from backend.config import settings
+
+    mem = {"ai_provider_creds": {}}
+    orig_load, orig_persist = settings_store.load, settings_store._persist
+    orig_provider, orig_key = settings.ai_provider, settings.openai_api_key
+    try:
+        settings.ai_provider = "ollama"  # active provider = ollama
+        settings_store.load = lambda: {k: dict(v) if isinstance(v, dict) else v for k, v in mem.items()}
+        def _fake_persist(data):
+            mem.clear(); mem.update(data)
+        settings_store._persist = _fake_persist
+
+        settings_store.set_provider_creds("openai", {"api_key": "sk-creds-only"})
+        check("creds-only applies the secret to the named provider",
+              settings.openai_api_key == "sk-creds-only")
+        check("creds-only leaves the active provider untouched",
+              settings.ai_provider == "ollama")
+    finally:
+        settings_store.load, settings_store._persist = orig_load, orig_persist
+        settings.ai_provider, settings.openai_api_key = orig_provider, orig_key
+
+
 def main() -> int:
     for fn in (
         test_choices_and_get_shape,
@@ -117,6 +144,7 @@ def main() -> int:
         test_unknown_provider_rejected,
         test_provider_fields_no_secret_leak,
         test_secret_apply_mask_and_blank_keep,
+        test_creds_only_never_switches_active_provider,
     ):
         try:
             fn()

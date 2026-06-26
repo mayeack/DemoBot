@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# MedAdvice v4 - Quick Start Script
+# DemoBot v4 - Quick Start Script
 # Supports dual-environment deployment: Anthropic API (local) or AWS Bedrock (production)
 
 echo "╔════════════════════════════════════════════════╗"
-echo "║         MedAdvice v4 - Starting...            ║"
+echo "║         DemoBot v4 - Starting...            ║"
 echo "╚════════════════════════════════════════════════╝"
 echo ""
 
@@ -94,7 +94,7 @@ fi
 mkdir -p logs
 
 echo ""
-echo "Starting MedAdvice v4..."
+echo "Starting DemoBot v4..."
 echo ""
 echo "Access the application at:"
 echo "  📱 Chat Interface:    http://localhost:8001/app"

@@ -1,4 +1,4 @@
-# MedAdvice v3 - System Architecture
+# DemoBot v3 - System Architecture
 
 ## High-Level Architecture
 
@@ -175,7 +175,7 @@ policy -> prompt_defense -> intake -> domain(theme) -> safety
 - **Supervisor / Router** (`supervisor.py`): sets correlation IDs (`request_id`,
   `trace_id`), resolves the Application Theme, logs the input event, and routes to
   the matching theme subgraph via a conditional edge.
-- **Shared state** (`state.py`): `MedAdviceState` `TypedDict` carries the turn's
+- **Shared state** (`state.py`): `DemoBotState` `TypedDict` carries the turn's
   inputs, intermediate agent outputs, LLM usage, safety/injection flags, and the
   final `result` dict between nodes.
 - **Specialist nodes** (`nodes/`): each node wraps an existing service so the
