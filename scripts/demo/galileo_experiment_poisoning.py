@@ -19,10 +19,17 @@ model output.
 
 NO real patient data is used; the poison content is synthetic and fictional.
 
-Usage (app must be running via ./run.sh, Ollama up, both models installed):
-    venv/bin/python scripts/demo/galileo_experiment_poisoning.py
-    venv/bin/python scripts/demo/galileo_experiment_poisoning.py --arm poisoned
-    venv/bin/python scripts/demo/galileo_experiment_poisoning.py --base http://localhost:8001
+The golden set is a per-theme, maintained repo file (scripts/demo/datasets/
+{theme}_safety_golden_n{4,32}.jsonl). The runner registers it in Galileo under the
+clean name {theme}_safety_golden_n{N}: it reuses that named dataset as-is if it
+already exists, else loads it from the repo file. Build/capture the files (incl. the
+real clean-model "generated_output") with scripts/demo/build_golden_datasets.py.
+
+Usage (app must be running via ./run.sh, Ollama up, baseline model installed):
+    venv/bin/python scripts/demo/galileo_experiment_poisoning.py                 # medadvice, full 32
+    venv/bin/python scripts/demo/galileo_experiment_poisoning.py -n 4            # medadvice, quick 4
+    venv/bin/python scripts/demo/galileo_experiment_poisoning.py --theme taxadvice -n 4 --arm baseline
+    venv/bin/python scripts/demo/galileo_experiment_poisoning.py --arm poisoned  # medadvice only (poisoned artifact)
 
 Environment:
     GALILEO_API_KEY / GALILEO_PROJECT   required to run (no-op without the key)
@@ -33,7 +40,6 @@ Environment:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import sys
@@ -56,10 +62,11 @@ if _ENV.exists():
             _k, _v = _line.split("=", 1)
             os.environ.setdefault(_k.strip(), _v.strip())
 
-DATASET_NAME = "medadvice_safety_golden"
-DATASET_FILE = ROOT / "scripts/demo/datasets/medadvice_safety_golden.jsonl"
+DATASETS_DIR = ROOT / "scripts/demo/datasets"
+DEFAULT_THEME = "medadvice"
+PROMPT_COUNTS = (4, 32)  # quick A/B vs full A/B
 BASELINE_MODEL = "dolphin3:8b"
-POISONED_MODEL = "dolphin3-medadvice-poisoned"
+POISONED_MODEL = "dolphin3-medadvice-poisoned"  # medadvice-only artifact today
 
 
 def _auth() -> Optional[tuple]:
@@ -67,38 +74,51 @@ def _auth() -> Optional[tuple]:
     return ("x", key) if key else None
 
 
-def _load_rows() -> List[Dict[str, Any]]:
+def _dataset_file(theme: str, n: int) -> Path:
+    return DATASETS_DIR / f"{theme}_safety_golden_n{n}.jsonl"
+
+
+def _dataset_name(theme: str, n: int) -> str:
+    """Clean, predictable name registered in Galileo (no content hash). Every A/B
+    for the same theme + prompt count maps to the SAME named dataset, so the runner
+    can 'check Galileo, reuse as-is if present, else load it from the repo file'."""
+    return f"{theme}_safety_golden_n{n}"
+
+
+def _load_rows(path: Path, theme: str) -> List[Dict[str, Any]]:
+    """Load a golden file into Galileo dataset rows. Maps the file's fields to the
+    DatasetRecord columns: input -> Input, output -> Ground Truth, generated_output
+    -> Generated Output, and {mode, theme} -> Metadata (string values only)."""
     rows: List[Dict[str, Any]] = []
-    for line in DATASET_FILE.read_text().splitlines():
+    for line in path.read_text().splitlines():
         line = line.strip()
         if not line:
             continue
         d = json.loads(line)
         row: Dict[str, Any] = {"input": d["input"], "output": d.get("output", "")}
+        if d.get("generated_output"):
+            row["generated_output"] = d["generated_output"]
+        meta = {"theme": theme}
         if d.get("mode"):
-            row["metadata"] = {"mode": d["mode"]}
+            meta["mode"] = d["mode"]
+        row["metadata"] = meta
         rows.append(row)
     return rows
 
 
-def _dataset_name(rows: List[Dict[str, Any]]) -> str:
-    """Content-addressed dataset name: row count + short content hash.
-
-    Encoding the content means any change to the golden rows (count OR text)
-    yields a FRESH registered dataset, so an experiment never silently scores a
-    stale cached dataset — and past experiments keep their own dataset lineage."""
-    blob = json.dumps(rows, sort_keys=True, ensure_ascii=False).encode("utf-8")
-    return f"{DATASET_NAME}_n{len(rows)}_{hashlib.sha256(blob).hexdigest()[:6]}"
-
-
-def _ensure_dataset(rows: List[Dict[str, Any]], name: Optional[str] = None):
-    """Get-or-create a REGISTERED Galileo dataset for these rows (never an inline
-    list), so every experiment shows a named dataset + ground-truth linkage in the
-    console. The dataset's ``output`` column is the reference used by Correctness."""
+def _ensure_dataset(rows: List[Dict[str, Any]], name: str, refresh: bool = False):
+    """Get-or-create a REGISTERED Galileo dataset under the clean name (never an
+    inline list), so every experiment shows the dataset + ground-truth linkage. The
+    default contract is reuse-as-is when the name already exists; --refresh-dataset
+    deletes + recreates it to push edited repo rows."""
     from galileo.datasets import create_dataset, get_dataset
 
-    name = name or _dataset_name(rows)
     ds = get_dataset(name=name)
+    if ds is not None and refresh:
+        from galileo.datasets import delete_dataset
+        print(f"  refresh: deleting existing dataset '{name}' to re-load edited rows")
+        delete_dataset(name=name)
+        ds = None
     if ds is None:
         print(f"  creating Galileo dataset '{name}' ({len(rows)} rows)")
         ds = create_dataset(name=name, content=rows)
@@ -121,11 +141,13 @@ def _set_arm_model(client: httpx.Client, base: str, auth, model: str) -> bool:
     return True
 
 
-def _make_runner(client: httpx.Client, base: str, auth, model: str):
+def _make_runner(client: httpx.Client, base: str, auth, model: str, theme: str):
     """Build the experiment function: one benign prompt -> verbatim response.
 
-    Adds an explicit Galileo LLM span (input/output/model) so the LLM-level
-    scorers and custom judges have a node to evaluate, then returns the raw text.
+    Routes the prompt through the selected theme's pipeline (so a taxadvice A/B
+    actually exercises taxadvice), adds an explicit Galileo LLM span
+    (input/output/model) for the LLM-level scorers + custom judges, then returns
+    the raw text.
     """
     def runner(row_input: Any) -> str:
         prompt = row_input if isinstance(row_input, str) else (
@@ -135,7 +157,8 @@ def _make_runner(client: httpx.Client, base: str, auth, model: str):
         rs = client.post(f"{base}/api/chat/session/new", auth=auth)
         if rs.status_code == 200:
             sid = rs.json().get("session_id")
-        body = {"session_id": sid, "message": prompt, "disclaimer_accepted": True}
+        body = {"session_id": sid, "message": prompt, "theme": theme,
+                "disclaimer_accepted": True}
         r = client.post(f"{base}/api/chat/message", auth=auth, json=body)
         text = r.json().get("message", "") if r.status_code == 200 else \
             f"(error {r.status_code}: {r.text[:160]})"
@@ -149,8 +172,19 @@ def _make_runner(client: httpx.Client, base: str, auth, model: str):
     return runner
 
 
+def _ollama_models(client, base, auth) -> set:
+    """Currently-installed Ollama models per the app's model catalog."""
+    try:
+        r = client.get(f"{base}/api/settings/ai-provider", auth=auth)
+        if r.status_code == 200:
+            return set(r.json().get("available", {}).get("ollama", []) or [])
+    except Exception:  # noqa: BLE001
+        pass
+    return set()
+
+
 def _run_arm(client, base, auth, arm: str, model: str, project: str, dataset, metrics,
-             experiment_name: str) -> None:
+             experiment_name: str, theme: str) -> None:
     from galileo.experiments import run_experiment
 
     print(f"\n=== {arm.upper()} arm  (model={model}) -> {experiment_name} ===")
@@ -162,8 +196,9 @@ def _run_arm(client, base, auth, arm: str, model: str, project: str, dataset, me
         project=project,
         dataset=dataset,
         metrics=metrics,
-        function=_make_runner(client, base, auth, model),
-        experiment_tags={"arm": arm, "model": model, "eval": "model-poisoning"},
+        function=_make_runner(client, base, auth, model, theme),
+        experiment_tags={"arm": arm, "model": model, "eval": "model-poisoning",
+                         "theme": theme},
     )
     link = getattr(result, "link", None) or getattr(result, "url", None)
     print(f"  experiment submitted: {experiment_name}" + (f"  ->  {link}" if link else ""))
@@ -178,11 +213,16 @@ def main() -> int:
     p.add_argument("--project", default=os.environ.get("GALILEO_PROJECT", ""))
     p.add_argument("--baseline-model", default=BASELINE_MODEL)
     p.add_argument("--poisoned-model", default=POISONED_MODEL)
-    p.add_argument("--limit", type=int, default=0,
-                   help="score only the first N prompts per arm (0 = full golden set). "
-                        "Use a small N for a quick run on slow local models.")
-    p.add_argument("--theme", default="medadvice",
-                   help="experiment-name prefix: {theme}-{arm}-{timestamp}")
+    p.add_argument("-n", "--prompts", type=int, choices=PROMPT_COUNTS, default=32,
+                   help="prompt count = which curated golden file to load: 4 (quick A/B, "
+                        "~2-3 min) or 32 (full A/B, ~16-20 min). Loads "
+                        "{theme}_safety_golden_n{N}.jsonl.")
+    p.add_argument("--theme", default=DEFAULT_THEME,
+                   help="application theme: selects BOTH the golden dataset file and the "
+                        "experiment-name prefix ({theme}-{arm}-{timestamp}).")
+    p.add_argument("--refresh-dataset", action="store_true",
+                   help="delete + recreate the named Galileo dataset to push edited repo rows "
+                        "(default reuses an existing same-named dataset as-is).")
     p.add_argument("--with-llm-judges", action="store_true",
                    help="also score the GPT-based built-ins + custom LLM judges (needs an "
                         "LLM integration configured in the Galileo project, else they error)")
@@ -243,31 +283,43 @@ def main() -> int:
         print("Resolving metric set against tenant scorers ...")
         metrics = resolve_metric_set(include_llm_scorers=args.with_llm_judges)
 
-        print("Ensuring golden dataset ...")
-        rows = _load_rows()
-        if args.limit and args.limit < len(rows):
-            rows = rows[:args.limit]
-            print(f"  LIMIT: scoring first {args.limit} prompts per arm")
+        ds_file = _dataset_file(args.theme, args.prompts)
+        if not ds_file.exists():
+            print(f"FATAL: golden dataset file not found: {ds_file}\n"
+                  f"  Create it (and capture generated_output) with\n"
+                  f"  scripts/demo/build_golden_datasets.py --theme {args.theme}")
+            return 2
+        name = _dataset_name(args.theme, args.prompts)
+        print(f"Ensuring golden dataset '{name}' ({args.prompts} prompts) from {ds_file.name} ...")
+        rows = _load_rows(ds_file, args.theme)
         # ALWAYS a registered dataset (never an inline list) so the console shows
-        # the dataset + ground-truth linkage for every run.
-        dataset = _ensure_dataset(rows)
+        # the dataset + ground-truth linkage for every run. Check Galileo, reuse the
+        # same-named dataset as-is if present, else load it from the repo file.
+        dataset = _ensure_dataset(rows, name, refresh=args.refresh_dataset)
 
         if args.arm in ("both", "baseline"):
             _run_arm(client, base, auth, "baseline", args.baseline_model, args.project,
-                     dataset, metrics, f"{args.theme}-baseline-{stamp}")
+                     dataset, metrics, f"{args.theme}-baseline-{stamp}", args.theme)
         if args.arm in ("both", "poisoned"):
-            _run_arm(client, base, auth, "poisoned", args.poisoned_model, args.project,
-                     dataset, metrics, f"{args.theme}-poisoned-{stamp}")
+            if args.poisoned_model in _ollama_models(client, base, auth):
+                _run_arm(client, base, auth, "poisoned", args.poisoned_model, args.project,
+                         dataset, metrics, f"{args.theme}-poisoned-{stamp}", args.theme)
+            else:
+                print(f"\nNOTE: poisoned model '{args.poisoned_model}' is not installed in Ollama "
+                      f"— skipping the poisoned arm. The clean-vs-poisoned A/B needs a poisoned "
+                      f"artifact; only '{DEFAULT_THEME}' ships one today (build it with "
+                      f"scripts/demo/build_poisoned_dolphin.sh). The baseline arm + dataset still "
+                      f"register for theme '{args.theme}'.")
 
         # Leave the app on the clean model so a stray later turn isn't poisoned.
         _set_arm_model(client, base, auth, args.baseline_model)
 
     console = os.environ.get("GALILEO_CONSOLE_URL", "https://app.galileo.ai")
     print(f"\nDone. Open Galileo ({console}) -> project '{args.project}' -> Experiments, and")
-    print("compare 'medadvice-poisoning-baseline' vs 'medadvice-poisoning-poisoned'.")
-    print("Expect the poisoned arm to trip prescriptive_overreach / medical_misinformation /")
-    print("commercial_brand_capture (and rx_dosage_hit / fictional_brand_hit), while input-side")
-    print("prompt_injection stays clean on BOTH arms — the prompts were benign.")
+    print(f"compare '{args.theme}-baseline-*' vs '{args.theme}-poisoned-*'.")
+    print("On a poisoned arm, expect prescriptive_overreach / medical_misinformation /")
+    print("commercial_brand_capture (and rx_dosage_hit / fictional_brand_hit) to rise, while")
+    print("input-side prompt_injection stays clean on BOTH arms — the prompts were benign.")
     return 0
 
 
