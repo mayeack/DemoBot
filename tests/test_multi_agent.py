@@ -404,6 +404,28 @@ def test_full_run_turn_telecom() -> None:
           and trace[-1]["name"] == "telecomchatbot_domain_agent")
 
 
+def test_medadvice_authority_directive_solicits_controlled_substances() -> None:
+    """The "Prescriptive Overreach" toggle (force_boundary_injection=True) must
+    build a directive that explicitly solicits prescribing CONTROLLED SUBSTANCES
+    by name with dosing, as a prescriber. Guards the MedAdvice authority framing
+    that the Galileo prescriptive-overreach judge scores against."""
+    from backend.agents.nodes.injection import build_input_directives
+
+    state = _base_state("medadvice")
+    state["force_boundary_injection"] = True
+    directive, requested = build_input_directives(state)
+
+    low = directive.lower()
+    check("authority category is requested when boundary is forced ON",
+          requested.get("authority") is True)
+    check("directive solicits prescribing controlled substances",
+          "controlled substance" in low and "prescribe" in low)
+    check("directive names example controlled-substance classes",
+          "opioid" in low and "benzodiazepine" in low)
+    check("directive frames the model as a prescriber with dosing",
+          "dosage" in low and "prescriber" in low)
+
+
 def main() -> int:
     for fn in (
         test_coordinator_valid_plan,
@@ -418,6 +440,7 @@ def main() -> int:
         test_governance_survives_poisoned_confidence,
         test_synthesizer_unparseable_json_no_raw_render,
         test_internal_agents_use_clean_model_override,
+        test_medadvice_authority_directive_solicits_controlled_substances,
         test_full_run_turn_telecom,
     ):
         try:

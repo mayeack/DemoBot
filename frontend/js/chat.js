@@ -40,6 +40,7 @@ const THEMES = {
         bannerText: 'If this is a medical emergency, call 911 or go to your nearest emergency room immediately.',
         showBanner: true,
         piiLabel: 'Include Synthetic PII/PHI in Responses',
+        boundaryLabel: 'Prescriptive Overreach',
         errorFallback: 'Sorry, I encountered an error. Please try again or seek immediate medical care if urgent.',
         primary: '#7c3aed',
         primaryHover: '#6d28d9',
@@ -74,6 +75,7 @@ const THEMES = {
         ],
         bannerTitle: 'URGENT TAX DEADLINE?',
         bannerText: 'If you are facing an imminent IRS deadline, lien, or levy, contact a tax professional or the IRS at 1-800-829-1040 immediately.',
+        boundaryLabel: 'Tax Evasion',
         errorFallback: 'Sorry, I encountered an error. Please try again or consult a tax professional if your situation is urgent.',
         primary: '#059669',
         primaryHover: '#047857',
@@ -108,6 +110,7 @@ const THEMES = {
         ],
         bannerTitle: 'ENROLLMENT DEADLINE?',
         bannerText: 'If you are facing an open enrollment or COBRA deadline, contact your HR department or benefits administrator immediately.',
+        boundaryLabel: 'Benefits Fraud',
         errorFallback: 'Sorry, I encountered an error. Please try again or contact your HR department if your situation is urgent.',
         primary: '#7c3aed',
         primaryHover: '#6d28d9',
@@ -142,6 +145,7 @@ const THEMES = {
         ],
         bannerTitle: 'LEGAL EMERGENCY?',
         bannerText: 'If you are facing arrest, a court deadline, or need immediate legal help, contact a licensed attorney or legal aid service immediately.',
+        boundaryLabel: 'Obstruction of Justice',
         errorFallback: 'Sorry, I encountered an error. Please try again or consult a licensed attorney if your situation is urgent.',
         primary: '#d97706',
         primaryHover: '#b45309',
@@ -176,6 +180,7 @@ const THEMES = {
         ],
         bannerTitle: 'FINANCIAL EMERGENCY?',
         bannerText: 'If you are facing foreclosure, bankruptcy deadlines, or suspect financial fraud, contact a financial advisor or attorney immediately.',
+        boundaryLabel: 'Securities Fraud',
         errorFallback: 'Sorry, I encountered an error. Please try again or consult a financial advisor if your situation is urgent.',
         primary: '#0d9488',
         primaryHover: '#0f766e',
@@ -210,6 +215,7 @@ const THEMES = {
         ],
         bannerTitle: 'EMERGENCY?',
         bannerText: 'If you have a life-threatening emergency and your line is down, call 911 from any available phone or landline immediately.',
+        boundaryLabel: 'Account Takeover',
         errorFallback: "Sorry, something went wrong on our end. Please try again, or check your carrier's status page if you suspect an outage.",
         primary: '#ee0000',
         primaryHover: '#cd040b',
@@ -275,6 +281,12 @@ function applyTheme(themeKey) {
     // to MedAdvice; other themes show just "PII".
     const piiLabel = document.getElementById('piiLabel');
     if (piiLabel) piiLabel.textContent = theme.piiLabel || 'Include Synthetic PII in Responses';
+
+    // Outside-of-authority toggle label — themes can override with a domain-
+    // specific name (MedAdvice → "Prescriptive Overreach"); others fall back to
+    // the generic scope-violation label.
+    const boundaryLabel = document.getElementById('boundaryLabel');
+    if (boundaryLabel) boundaryLabel.textContent = theme.boundaryLabel || 'Include Outside of Authority Content in Responses';
 
     // Input placeholder
     const messageInput = document.getElementById('messageInput');
