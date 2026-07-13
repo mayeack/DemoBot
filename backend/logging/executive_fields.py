@@ -118,13 +118,13 @@ def _severity_points(severity: Optional[str]) -> int:
 
 def _policy_action(
     *, policy_blocked: bool, guardrail_triggered: bool, safety_violated: bool,
-    pii_detected: bool, toxic_detected: bool,
+    pii_detected: bool, toxic_detected: bool, authority_violation_detected: bool = False,
 ) -> str:
     if policy_blocked:
         return "block"
     if safety_violated or guardrail_triggered:
         return "warn"        # delivered to the user, but escalated/flagged for review
-    if pii_detected or toxic_detected:
+    if pii_detected or toxic_detected or authority_violation_detected:
         return "flag"        # content present in the turn but not blocked
     return "allow"
 
@@ -199,6 +199,7 @@ def _risk_score(
     *, severity: Optional[str], policy_blocked: bool, safety_violated: bool,
     guardrail_triggered: bool, contains_phi: bool, contains_pii: bool,
     toxic_detected: bool, hallucination_detected: bool,
+    authority_violation_detected: bool,
     confidence: Optional[float], latency_ms: Optional[float],
 ) -> int:
     score = 5
@@ -214,6 +215,11 @@ def _risk_score(
     if toxic_detected:
         score += 15
     if hallucination_detected:
+        score += 15
+    if authority_violation_detected:
+        # Out-of-authority / prescriptive-overreach content is a governance breach
+        # in its own right — without this the board risk panel stays clean when the
+        # "Outside of Authority" toggle fires.
         score += 15
     if confidence is not None and confidence < 0.5:
         score += 10
@@ -236,6 +242,7 @@ def derive_executive_fields(log: Dict[str, Any]) -> Dict[str, Any]:
         pii_detected = bool(log.get("pii_detected"))
         toxic_detected = bool(log.get("toxic_detected"))
         hallucination_detected = bool(log.get("hallucination_detected"))
+        authority_violation_detected = bool(log.get("authority_violation_detected"))
         pii_types = {t.lower() for t in _as_list(log.get("pii_types"))}
 
         contains_pii = pii_detected
@@ -270,6 +277,7 @@ def derive_executive_fields(log: Dict[str, Any]) -> Dict[str, Any]:
                 policy_blocked=policy_blocked, guardrail_triggered=guardrail_triggered,
                 safety_violated=safety_violated, pii_detected=pii_detected,
                 toxic_detected=toxic_detected,
+                authority_violation_detected=authority_violation_detected,
             ),
             "policy_name": _policy_name(guardrail_ids, safety_categories),
             # Real eval scores are passed through from the eval systems when set;
@@ -294,6 +302,7 @@ def derive_executive_fields(log: Dict[str, Any]) -> Dict[str, Any]:
             safety_violated=safety_violated, guardrail_triggered=guardrail_triggered,
             contains_phi=contains_phi, contains_pii=contains_pii,
             toxic_detected=toxic_detected, hallucination_detected=hallucination_detected,
+            authority_violation_detected=authority_violation_detected,
             confidence=confidence, latency_ms=latency_ms,
         )
         return fields

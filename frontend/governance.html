@@ -172,6 +172,14 @@
             displayAuditLogs(data.audit_logs);
         }
 
+        // Escape server-provided values before innerHTML. Conversation content,
+        // escalation reasons and extracted topics carry attendee/model text (shown
+        // verbatim by design), so escaping renders any markup inert as text.
+        function escHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
         function displayConversation(messages) {
             const container = document.getElementById('conversationHistory');
             if (!messages || messages.length === 0) {
@@ -183,9 +191,9 @@
                 const roleClass = msg.role === 'user' ? 'bg-violet-50 border-l-4 border-violet-500' : 'bg-gray-50 border-l-4 border-gray-400';
                 return `
                     <div class="${roleClass} p-3 rounded">
-                        <p class="text-xs text-gray-500 mb-1">${msg.role.toUpperCase()} - ${new Date(msg.timestamp).toLocaleString()}</p>
-                        <p class="text-sm">${msg.content}</p>
-                        ${msg.type ? `<span class="inline-block mt-2 px-2 py-1 text-xs bg-violet-100 text-violet-800 rounded">${msg.type}</span>` : ''}
+                        <p class="text-xs text-gray-500 mb-1">${escHtml(String(msg.role).toUpperCase())} - ${new Date(msg.timestamp).toLocaleString()}</p>
+                        <p class="text-sm">${escHtml(msg.content)}</p>
+                        ${msg.type ? `<span class="inline-block mt-2 px-2 py-1 text-xs bg-violet-100 text-violet-800 rounded">${escHtml(msg.type)}</span>` : ''}
                     </div>
                 `;
             }).join('');
@@ -208,8 +216,8 @@
                     <div class="border border-gray-200 rounded p-4">
                         <div class="flex justify-between items-start mb-2">
                             <div>
-                                <p class="font-semibold">${log.operation_name}</p>
-                                <p class="text-xs text-gray-500">Request ID: ${log.request_id}</p>
+                                <p class="font-semibold">${escHtml(log.operation_name)}</p>
+                                <p class="text-xs text-gray-500">Request ID: ${escHtml(log.request_id)}</p>
                             </div>
                             <p class="text-xs text-gray-500">${new Date(log.timestamp).toLocaleString()}</p>
                         </div>
@@ -238,7 +246,7 @@
                                 ${flags.map(flag => `
                                     <div class="${flag.class} px-3 py-2 rounded">
                                         <p class="font-semibold text-sm">${flag.text}</p>
-                                        ${flag.types ? `<p class="text-xs mt-1">${JSON.stringify(flag.types)}</p>` : ''}
+                                        ${flag.types ? `<p class="text-xs mt-1">${escHtml(JSON.stringify(flag.types))}</p>` : ''}
                                     </div>
                                 `).join('')}
                             </div>
@@ -263,9 +271,9 @@
                         <div class="flex justify-between items-start mb-2">
                             <div>
                                 <p class="font-semibold text-orange-800">Escalation</p>
-                                <p class="text-xs text-gray-600">ID: ${esc.escalation_id}</p>
+                                <p class="text-xs text-gray-600">ID: ${escHtml(esc.escalation_id)}</p>
                             </div>
-                            <span class="px-3 py-1 rounded text-sm font-semibold ${statusColors[esc.review_status] || ''}">${esc.review_status}</span>
+                            <span class="px-3 py-1 rounded text-sm font-semibold ${statusColors[esc.review_status] || ''}">${escHtml(esc.review_status)}</span>
                         </div>
 
                         <div class="mb-3">
@@ -275,18 +283,18 @@
 
                         <div class="mb-3">
                             <p class="text-sm text-gray-600">Severity</p>
-                            <p class="font-semibold ${getSeverityColor(esc.severity)}">${esc.severity}</p>
+                            <p class="font-semibold ${getSeverityColor(esc.severity)}">${escHtml(esc.severity)}</p>
                         </div>
 
                         <div class="mb-3">
                             <p class="text-sm text-gray-600">Reason</p>
-                            <p>${esc.reason}</p>
+                            <p>${escHtml(esc.reason)}</p>
                         </div>
 
                         <div class="mb-3">
                             <p class="text-sm text-gray-600">Extracted topics</p>
                             <div class="flex flex-wrap gap-1 mt-1">
-                                ${esc.symptoms.map(s => `<span class="px-2 py-1 bg-white rounded text-xs">${s}</span>`).join('')}
+                                ${(esc.symptoms || []).map(s => `<span class="px-2 py-1 bg-white rounded text-xs">${escHtml(s)}</span>`).join('')}
                             </div>
                         </div>
                     </div>
@@ -304,8 +312,8 @@
             container.innerHTML = logs.map(log => `
                 <div class="flex justify-between items-center p-2 bg-gray-50 rounded text-sm">
                     <div class="flex-1">
-                        <span class="font-semibold">${log.action}</span>
-                        <span class="text-gray-500">by ${log.actor}</span>
+                        <span class="font-semibold">${escHtml(log.action)}</span>
+                        <span class="text-gray-500">by ${escHtml(log.actor)}</span>
                     </div>
                     <span class="text-xs text-gray-500">${new Date(log.timestamp).toLocaleString()}</span>
                 </div>

@@ -41,9 +41,15 @@ class HECRuntime:
             for dest_id, cfg in self._destinations.items():
                 if not cfg.enabled or dest_id in self._forwarders:
                     continue
-                fwd = HECForwarder(cfg, cfg.token)
-                await fwd.start()
-                self._forwarders[dest_id] = fwd
+                # Isolate each destination: one bad config (e.g. a URL that fails
+                # normalization) must not abort startup for the other, healthy
+                # forwarders — otherwise a single typo silently kills all HEC output.
+                try:
+                    fwd = HECForwarder(cfg, cfg.token)
+                    await fwd.start()
+                    self._forwarders[dest_id] = fwd
+                except Exception:
+                    logger.exception("hec_forwarder_start_failed id=%s", dest_id)
 
     async def stop(self) -> None:
         async with self._lock:

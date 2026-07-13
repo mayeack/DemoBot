@@ -157,6 +157,8 @@ class MetricsResponse(BaseModel):
     severity_distribution: Dict[str, int]
     pii_detection_count: int
     guardrail_trigger_count: int
+    hallucination_detection_count: int = 0
+    authority_violation_count: int = 0
     time_period_start: datetime
     time_period_end: datetime
 

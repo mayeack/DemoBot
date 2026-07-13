@@ -16,6 +16,21 @@ from backend.services.ai_defense import ai_defense_client, InspectionResult
 
 logger = logging.getLogger(__name__)
 
+
+def _as_bullet_items(value: Any) -> List[Any]:
+    """Normalize a recommendation list field to an iterable of bullet items.
+
+    A poisoned/garbage model may return a plain string where a list is expected;
+    iterating that string yields one bullet per character. Wrap non-list values in
+    a single-element list so each renders as one bullet.
+    """
+    if isinstance(value, list):
+        return value
+    if value is None:
+        return []
+    return [value]
+
+
 class RecommendationEngine:
     """Core recommendation engine using Claude with multi-theme support"""
 
@@ -1626,11 +1641,28 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
     CONVERSATIONAL_THEMES = {"telecomchatbot"}
 
     def __init__(self):
-        # Initialize AI client based on settings (Anthropic or Bedrock)
-        self.ai_client = get_ai_client(settings)
         self.escalation_rules = EscalationRules()
         self.clarifying_service = ClarifyingQuestionsService()
-        logger.info(f"RecommendationEngine initialized with AI provider: {self.ai_client.provider_name}")
+        # Build the AI client lazily. This legacy engine is instantiated at module
+        # import (routers/chat.py) but only runs on fallback — the agentic engine is
+        # the default path. Some provider clients (anthropic/openai) raise on an
+        # empty key in their constructor, so eager construction here would crash app
+        # startup under an anthropic/openai .env with no key. Defer to first use.
+        self._ai_client = None
+        try:
+            self._ai_client = get_ai_client(settings)
+            logger.info(f"RecommendationEngine initialized with AI provider: {self._ai_client.provider_name}")
+        except Exception as exc:  # noqa: BLE001 - defer provider errors to first use
+            logger.warning(
+                "Legacy engine AI client not ready at init (%s); will build on first use", exc
+            )
+
+    @property
+    def ai_client(self):
+        """The legacy provider client, built on first use (see __init__)."""
+        if self._ai_client is None:
+            self._ai_client = get_ai_client(settings)
+        return self._ai_client
 
     def _get_toxic_patterns(self, theme: str) -> dict:
         if theme == "medadvice" or theme not in self.THEME_TOXIC_PATTERNS:
@@ -2057,6 +2089,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
                 start_time, client_address, active_prompt,
                 theme, force_pii_injection,
                 force_toxic_injection, force_hallucination_injection,
+                force_boundary_injection=force_boundary_injection,
                 ai_defense_review=ai_defense_review,
                 enduser_id=enduser_id
             )
@@ -2095,6 +2128,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         force_pii_injection: Optional[bool] = None,
         force_toxic_injection: Optional[bool] = None,
         force_hallucination_injection: Optional[bool] = None,
+        force_boundary_injection: Optional[bool] = None,
         ai_defense_review: Optional[bool] = None,
         enduser_id: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -2625,7 +2659,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         # Guidance
         if "guidance" in recommendation and recommendation["guidance"]:
             output.append("**General Guidance:**")
-            for item in recommendation["guidance"]:
+            for item in _as_bullet_items(recommendation["guidance"]):
                 text = self._stringify_item(item)
                 if text:
                     output.append(f"• {text}")
@@ -2634,7 +2668,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         # When to seek care
         if "seek_care_if" in recommendation and recommendation["seek_care_if"]:
             output.append("**Seek Professional Care If:**")
-            for item in recommendation["seek_care_if"]:
+            for item in _as_bullet_items(recommendation["seek_care_if"]):
                 text = self._stringify_item(item)
                 if text:
                     output.append(f"• {text}")

@@ -741,8 +741,17 @@ function addMessageToChat(role, content, type, severity = null, escalated = fals
     chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
+function escapeHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function formatContent(content) {
-    let formatted = content;
+    // Escape HTML FIRST so raw user input / model output (which is shown verbatim
+    // by design, and may contain markup like <img onerror=...>) renders as inert
+    // text rather than executing. The markdown-lite formatting below only adds the
+    // tags we generate ourselves, so it is applied after escaping.
+    let formatted = escapeHtml(content);
     formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     formatted = formatted.replace(/^• (.+)$/gm, '<li>$1</li>');
     formatted = formatted.replace(/(<li>.*<\/li>\s*)+/g, '<ul class="list-disc list-inside my-2">$&</ul>');

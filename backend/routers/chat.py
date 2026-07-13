@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Dict, Any
@@ -144,8 +145,14 @@ async def send_message(
     }
     session["messages"].append(user_message)
 
-    # Process message (agentic LangGraph workflow, with legacy fallback)
-    response_data = _dispatch_chat_turn(
+    # Process message (agentic LangGraph workflow, with legacy fallback).
+    # The turn is fully synchronous (blocking LangGraph invoke + blocking AI Defense
+    # HTTP + sync LLM calls), so run it in a worker thread instead of on the event
+    # loop. Otherwise a single in-flight turn serializes every concurrent request
+    # (all attendees freeze until it completes). Output and telemetry are unchanged;
+    # only the execution thread differs.
+    response_data = await run_in_threadpool(
+        _dispatch_chat_turn,
         session_id=session_id,
         user_message=chat_request.message,
         conversation_history=session["messages"],

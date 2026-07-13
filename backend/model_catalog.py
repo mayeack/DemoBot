@@ -55,7 +55,10 @@ def _anthropic_models(settings) -> List[str]:
         return []
     from anthropic import Anthropic
 
-    client = Anthropic(api_key=settings.anthropic_api_key, timeout=_SDK_TIMEOUT)
+    # max_retries=0 so _SDK_TIMEOUT is the real ceiling: the SDK default retries
+    # connect/read timeouts ~2x, which would triple the stall this probe adds to
+    # the (currently on-loop) settings handlers.
+    client = Anthropic(api_key=settings.anthropic_api_key, timeout=_SDK_TIMEOUT, max_retries=0)
     # API order is newest-first, which is a good dropdown order — keep it.
     return [m.id for m in client.models.list(limit=1000).data if getattr(m, "id", None)]
 
@@ -69,6 +72,7 @@ def _openai_models(settings) -> List[str]:
         api_key=settings.openai_api_key,
         base_url=settings.openai_base_url,
         timeout=_SDK_TIMEOUT,
+        max_retries=0,  # _SDK_TIMEOUT is the real ceiling (see _anthropic_models)
     )
     return sorted(m.id for m in client.models.list().data if getattr(m, "id", None))
 
