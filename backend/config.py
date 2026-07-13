@@ -3,15 +3,32 @@ from typing import Optional
 import os
 from pathlib import Path
 
-# Manually load .env file as a workaround
+# Manually load .env file as a workaround.
+# Mirrors python-dotenv semantics: an already-exported real environment variable
+# wins over the .env value (so `export ANTHROPIC_API_KEY=…` in the shell is not
+# clobbered by a placeholder in .env), surrounding single/double quotes are
+# stripped, and an unquoted trailing ` # comment` is dropped.
+def _strip_env_value(raw: str) -> str:
+    value = raw.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]  # quoted value: keep verbatim, no comment stripping
+    if " #" in value:
+        value = value.split(" #", 1)[0].rstrip()
+    return value
+
+
 env_path = Path(__file__).parent.parent / ".env"
 if env_path.exists():
     with open(env_path) as f:
         for line in f:
             line = line.strip()
+            if line.startswith("export "):
+                line = line[len("export "):]
             if line and not line.startswith('#') and '=' in line:
                 key, value = line.split('=', 1)
-                os.environ[key.strip()] = value.strip()
+                key = key.strip()
+                if key and key not in os.environ:
+                    os.environ[key] = _strip_env_value(value)
 
 # Use custom CA bundle that includes corporate proxy CAs (e.g. Cisco Secure Access)
 _ca_bundle = Path(__file__).parent.parent / "ca-bundle.pem"

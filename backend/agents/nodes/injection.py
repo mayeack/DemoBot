@@ -190,24 +190,16 @@ _SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 # (Toxic is no longer detector-gated — the verified harassment snippet is always
 # appended for that category, since the model won't produce classifier-tripping
 # harassment on its own. See injection_node.)
-_HALLUCINATION_RE = re.compile(
-    r"\b\d{1,3}(?:\.\d+)?\s*%|\bet al\b|\bjournal\b|\bstudy\b|\bstudies\b|\btrial\b"
-    r"|\bapproved by the fda\b|\baccording to (?:a|the)\b.*\b(19|20)\d{2}\b"
-    r"|\bdr\.\s+[a-z]+\b",
-    re.IGNORECASE,
-)
-_AUTHORITY_SIGNALS: Dict[str, "re.Pattern[str]"] = {
-    "medadvice": re.compile(r"\b\d+\s?(?:mg|mcg|ml|mg/kg|units?)\b", re.IGNORECASE),
-}
-_AUTHORITY_KEYWORDS = (
-    # cross-domain illicit / scope-violation signals
-    "launder", "insider", "perjur", "evade", "fraud", "sim-swap", "sim swap",
-    "falsify", "conceal", "manipulat",
-    # prescriptive-overreach phrasings the model actually produces
-    "prescrib", "start taking", "begin taking", "start you on", "course of",
-    "without seeing a doctor", "don't need to see a doctor", "pick this up",
-    "i'm putting you on",
-)
+# Hallucination/authority presence is gated on the directive's OWN labeled sample
+# markers, which the model echoes when it complies (see _DIRECTIVE_HEADER /
+# _category_asks), NOT on generic medical vocabulary. A benign or refused answer
+# ("a recent study", "10%", "200 mg", "a course of treatment") must NOT be read as
+# already-injected: doing so wrongly suppresses the deterministic fallback and the
+# hallucination/authority guardrail pillar then shows nothing, with no operator
+# signal. Absent the marker we fall through to the fallback (per the module header:
+# a rare double-include is harmless; a missed fallback is not).
+_HALLUCINATION_MARKER = "hallucination sample"
+_AUTHORITY_MARKER = "authority-violation sample"
 
 
 def _contains_pii(text: str) -> bool:
@@ -223,15 +215,14 @@ def _contains_pii(text: str) -> bool:
 
 
 def _contains_hallucination(text: str) -> bool:
-    return bool(_HALLUCINATION_RE.search(text))
+    # Strong signal only: the model actually emitted the labeled hallucination
+    # sample. Otherwise fall through to the deterministic fallback.
+    return _HALLUCINATION_MARKER in text.lower()
 
 
 def _contains_authority(text: str, theme: str) -> bool:
-    low = text.lower()
-    if any(kw in low for kw in _AUTHORITY_KEYWORDS):
-        return True
-    sig = _AUTHORITY_SIGNALS.get(theme)
-    return bool(sig and sig.search(text))
+    # theme retained for call-site parity; the labeled marker is theme-independent.
+    return _AUTHORITY_MARKER in text.lower()
 
 
 def injection_node(state: Dict[str, Any]) -> Dict[str, Any]:

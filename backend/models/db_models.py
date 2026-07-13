@@ -78,6 +78,10 @@ class AIGovernanceLog(Base):
     policy_blocked = Column(Boolean, default=False)
     toxic_detected = Column(Boolean, default=False, index=True)
     toxic_types = Column(JSON, nullable=True)
+    hallucination_detected = Column(Boolean, default=False, index=True)
+    hallucination_types = Column(JSON, nullable=True)
+    authority_violation_detected = Column(Boolean, default=False, index=True)
+    authority_violation_types = Column(JSON, nullable=True)
     # Evaluation / TEVV
     evaluation_name = Column(String, nullable=True)
     evaluation_score_value = Column(Float, nullable=True)

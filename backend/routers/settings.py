@@ -5,6 +5,7 @@ accepted on write but never returned — reads surface only token_present/last4.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Dict, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -109,12 +110,15 @@ def _provider_payload() -> dict:
 async def get_ai_provider():
     from backend import model_catalog
 
-    model_catalog.ensure_loaded()  # bounded sync refresh if startup discovery hasn't finished
+    # bounded sync refresh if startup discovery hasn't finished — offloaded to a
+    # worker thread so the network probes don't block the event loop (freezing all
+    # concurrent attendee requests) while a provider is slow/unreachable.
+    await asyncio.to_thread(model_catalog.ensure_loaded)
     # Self-heal: if the active provider's startup probe came back empty (e.g.
     # Ollama wasn't reachable yet), re-probe it now so newly-available models
     # show up without an app restart. Throttled internally.
     active = settings_store.get_ai_provider().get("provider", "")
-    model_catalog.heal_if_empty(active)
+    await asyncio.to_thread(model_catalog.heal_if_empty, active)
     return _provider_payload()
 
 
@@ -133,7 +137,8 @@ async def update_ai_provider(body: AiProviderSettings):
         if body.fields:
             settings_store.set_provider_creds(provider, body.fields)
             # New creds may reveal models — re-scan this so the dropdown updates.
-            model_catalog.refresh()
+            # Offloaded so the probe network I/O doesn't block the event loop.
+            await asyncio.to_thread(model_catalog.refresh)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return _provider_payload()
@@ -145,7 +150,7 @@ async def refresh_ai_provider_models():
     pulling a new Ollama model). Returns the same shape as GET."""
     from backend import model_catalog
 
-    model_catalog.refresh()
+    await asyncio.to_thread(model_catalog.refresh)
     return _provider_payload()
 
 
@@ -171,7 +176,7 @@ async def update_provider_creds(body: ProviderCredsSettings):
             detail=f"unknown provider: {provider}. Valid: {', '.join(settings_store.AI_PROVIDER_CHOICES)}",
         )
     settings_store.set_provider_creds(provider, body.fields or {})
-    model_catalog.refresh()
+    await asyncio.to_thread(model_catalog.refresh)
     return _provider_payload()
 
 

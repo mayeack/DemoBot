@@ -19,8 +19,8 @@ psycopg2-binary==2.9.9  # PostgreSQL support for AWS RDS
 
 # AI Providers (dual-environment support)
 anthropic==0.109.2       # Local development - direct Anthropic API
-boto3>=1.34.0           # AWS production - Bedrock integration
-openai>=1.30.0          # OpenAI-compatible APIs (OpenAI, DeepSeek, etc.)
+boto3==1.43.32          # AWS production - Bedrock integration (exact-pinned: floor pins let a fresh install pull an untested major)
+openai==2.43.0          # OpenAI-compatible APIs (OpenAI, DeepSeek, etc.)
 
 # Utilities
 aiofiles==23.2.1
@@ -35,12 +35,14 @@ httpx==0.27.2   # galileo-core needs >=0.27,<0.29; 0.27.x keeps Starlette 0.35 T
 # Multi-agent supervisor/router + per-theme decomposed subgraphs live in
 # backend/agents/. These power the rebuilt orchestration that replaces the
 # hand-rolled RecommendationEngine pipeline.
-langchain>=0.3.7
-langgraph>=0.2.45
-langchain-anthropic>=0.3.0     # ChatAnthropic (local development)
-langchain-aws>=0.2.4           # ChatBedrockConverse (AWS production)
-langchain-openai>=0.2.8        # ChatOpenAI (OpenAI-compatible APIs)
-langchain-ollama>=0.2.0        # ChatOllama (local UNCENSORED model via Ollama daemon)
+# Exact-pinned to the validated versions: the previous `>=` floors let a fresh
+# machine silently install a breaking major (the installed line is already 1.x).
+langchain==1.3.2
+langgraph==1.2.2
+langchain-anthropic==1.4.6     # ChatAnthropic (local development)
+langchain-aws==1.5.1           # ChatBedrockConverse (AWS production)
+langchain-openai==1.3.2        # ChatOpenAI (OpenAI-compatible APIs)
+langchain-ollama==1.1.0        # ChatOllama (local UNCENSORED model via Ollama daemon)
 
 # =============================================================================
 # Agentic observability (OpenTelemetry GenAI -> Splunk Observability Cloud)
@@ -51,9 +53,9 @@ langchain-ollama>=0.2.0        # ChatOllama (local UNCENSORED model via Ollama d
 # forwards to Splunk Observability Cloud via the signalfx exporter
 # (send_otlp_histograms: true). These pins track the OTel 1.38.0 / 0.59b0 line
 # that splunk-opentelemetry 2.8.0 requires.
-opentelemetry-sdk>=1.38.0
-opentelemetry-exporter-otlp>=1.38.0
-opentelemetry-semantic-conventions>=0.59b0
+opentelemetry-sdk==1.38.0
+opentelemetry-exporter-otlp==1.38.0
+opentelemetry-semantic-conventions==0.59b0
 splunk-opentelemetry==2.8.0
 splunk-otel-instrumentation-langchain==0.1.14
 splunk-otel-genai-emitters-splunk==0.1.8

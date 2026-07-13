@@ -58,6 +58,8 @@ async def get_interaction_logs(
                 "pii_detected": log.pii_detected,
                 "safety_violated": log.safety_violated,
                 "guardrail_triggered": log.guardrail_triggered,
+                "hallucination_detected": log.hallucination_detected,
+                "authority_violation_detected": log.authority_violation_detected,
                 "error_type": log.error_type
             }
             for log in logs
@@ -174,6 +176,19 @@ async def get_metrics(
         AIGovernanceLog.guardrail_triggered == True
     ).scalar()
 
+    # Hallucination + Outside-of-Authority detection counts (now persisted, see
+    # governance_logger._write_to_database) so the local governance DB/dashboard
+    # reports these alongside pii/guardrail rather than under-counting them.
+    hallucination_detection_count = db.query(func.count(AIGovernanceLog.id)).filter(
+        AIGovernanceLog.timestamp >= start_time,
+        AIGovernanceLog.hallucination_detected == True
+    ).scalar()
+
+    authority_violation_count = db.query(func.count(AIGovernanceLog.id)).filter(
+        AIGovernanceLog.timestamp >= start_time,
+        AIGovernanceLog.authority_violation_detected == True
+    ).scalar()
+
     return MetricsResponse(
         total_interactions=total_interactions or 0,
         escalation_count=escalation_count or 0,
@@ -185,6 +200,8 @@ async def get_metrics(
         severity_distribution=severity_distribution,
         pii_detection_count=pii_detection_count or 0,
         guardrail_trigger_count=guardrail_trigger_count or 0,
+        hallucination_detection_count=hallucination_detection_count or 0,
+        authority_violation_count=authority_violation_count or 0,
         time_period_start=start_time,
         time_period_end=end_time
     )
@@ -217,7 +234,9 @@ async def export_logs(
                 "usage_total_tokens": log.usage_total_tokens,
                 "pii_detected": log.pii_detected,
                 "safety_violated": log.safety_violated,
-                "guardrail_triggered": log.guardrail_triggered
+                "guardrail_triggered": log.guardrail_triggered,
+                "hallucination_detected": log.hallucination_detected,
+                "authority_violation_detected": log.authority_violation_detected
             }
             for log in logs
         ]

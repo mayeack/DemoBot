@@ -24,7 +24,7 @@ from backend.incident_mode import incident_mode
 router = APIRouter(prefix="/api/incident", tags=["incident"])
 logger = logging.getLogger(__name__)
 
-_BASE = "http://127.0.0.1:8001"
+_BASE = f"http://127.0.0.1:{getattr(settings, 'port', 8001)}"
 _expiry_task: Optional[asyncio.Task] = None
 _load_task: Optional[asyncio.Task] = None
 

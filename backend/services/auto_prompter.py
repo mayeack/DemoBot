@@ -11,6 +11,8 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 import httpx
 
+from backend.config import settings
+
 logger = logging.getLogger(__name__)
 
 class AutoPrompterService:
@@ -161,7 +163,11 @@ class AutoPrompterService:
     
     async def _create_and_run_session(self):
         """Create a new session and run through a realistic consultation"""
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # Authenticate the self-requests with the access key when the gate is on
+        # (e.g. served via the tunnel); otherwise every generated turn 401s and no
+        # demo traffic is produced. HTTP Basic: any username, key as the password.
+        auth = ("auto-prompter", settings.access_key) if getattr(settings, "access_key", "") else None
+        async with httpx.AsyncClient(timeout=30.0, auth=auth) as client:
             # Create new session
             response = await client.post(f"{self._base_url}/api/chat/session/new")
             response.raise_for_status()

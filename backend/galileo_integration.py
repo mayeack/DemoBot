@@ -146,7 +146,10 @@ def _emit(log_data: Dict[str, Any]) -> None:
             os.getenv("GALILEO_LOG_STREAM"), len(traces) if traces else 0,
         )
     except Exception:  # noqa: BLE001 - Galileo must never break a chat turn
-        logger.debug("galileo emit failed", exc_info=True)
+        # Surface at WARNING (not debug): a Galileo outage leaves the LLM-observability
+        # pillar silently empty during a workshop, and debug is below the default
+        # INFO console threshold, so the operator would otherwise get no signal.
+        logger.warning("galileo emit failed", exc_info=True)
 
 
 def maybe_log_turn(log_data: Dict[str, Any]) -> None:

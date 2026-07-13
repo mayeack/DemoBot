@@ -88,7 +88,12 @@ def make_coordinator_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
                 return handle_agent_error(state, exc)
 
         plan = _parse_plan(response.content)
-        requested = plan.get("specialists") or []
+        # A poisoned/garbage model may return a non-list here (str/int/dict); coerce
+        # to a list so the roster loop below can't raise (which would crash the turn)
+        # and we fall through to the primary-specialist default instead.
+        requested = plan.get("specialists")
+        if not isinstance(requested, list):
+            requested = []
 
         # Keep only valid roster keys, dedup preserving order, cap at the max.
         selected: List[str] = []

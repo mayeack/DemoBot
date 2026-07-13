@@ -8,7 +8,7 @@
 
 ### Step 1: Navigate to Project
 ```bash
-cd /Users/Shared/medadvice_v3
+cd /Applications/medadvice_v3
 ```
 
 ### Step 2: Setup Environment

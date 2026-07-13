@@ -1,6 +1,18 @@
 let severityChart = null;
 let tokenChart = null;
 
+// HTML/attribute escaping for server-provided values rendered via innerHTML.
+// Escalation reasons and session/operation ids can carry attendee-influenced
+// content, so escape before interpolating (text context) or embedding in an
+// onclick attribute (attribute context).
+function escHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function escAttr(s) {
+    return escHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // Load data on page load
 document.addEventListener('DOMContentLoaded', function() {
     loadMetrics();
@@ -148,16 +160,16 @@ async function loadEscalations() {
             return `
                 <tr class="border-b hover:bg-gray-50">
                     <td class="px-4 py-2 text-sm">${new Date(esc.timestamp).toLocaleString()}</td>
-                    <td class="px-4 py-2 text-sm font-mono">${esc.session_id.substring(0, 8)}...</td>
-                    <td class="px-4 py-2 text-sm ${severityColors[esc.severity] || ''}">${esc.severity}</td>
-                    <td class="px-4 py-2 text-sm">${esc.reason.substring(0, 50)}...</td>
+                    <td class="px-4 py-2 text-sm font-mono">${escHtml(String(esc.session_id).substring(0, 8))}...</td>
+                    <td class="px-4 py-2 text-sm ${severityColors[esc.severity] || ''}">${escHtml(esc.severity)}</td>
+                    <td class="px-4 py-2 text-sm">${escHtml(String(esc.reason).substring(0, 50))}...</td>
                     <td class="px-4 py-2">
-                        <span class="px-2 py-1 text-xs rounded ${statusColors[esc.review_status] || ''}">${esc.review_status}</span>
+                        <span class="px-2 py-1 text-xs rounded ${statusColors[esc.review_status] || ''}">${escHtml(esc.review_status)}</span>
                     </td>
                     <td class="px-4 py-2">
-                        <button onclick="viewEscalation('${esc.session_id}')" class="text-violet-600 hover:underline text-sm">View</button>
+                        <button onclick="viewEscalation('${escAttr(esc.session_id)}')" class="text-violet-600 hover:underline text-sm">View</button>
                         ${esc.review_status === 'pending' ? `
-                        <button onclick="reviewEscalation('${esc.escalation_id}')" class="text-green-600 hover:underline text-sm ml-2">Review</button>
+                        <button onclick="reviewEscalation('${escAttr(esc.escalation_id)}')" class="text-green-600 hover:underline text-sm ml-2">Review</button>
                         ` : ''}
                     </td>
                 </tr>
@@ -192,12 +204,12 @@ async function loadRecentInteractions() {
             return `
                 <tr class="border-b hover:bg-gray-50">
                     <td class="px-4 py-2 text-sm">${new Date(log.timestamp).toLocaleString()}</td>
-                    <td class="px-4 py-2 text-sm font-mono">${log.session_id.substring(0, 8)}...</td>
-                    <td class="px-4 py-2 text-sm">${log.operation_name}</td>
+                    <td class="px-4 py-2 text-sm font-mono">${escHtml(String(log.session_id).substring(0, 8))}...</td>
+                    <td class="px-4 py-2 text-sm">${escHtml(log.operation_name)}</td>
                     <td class="px-4 py-2 text-sm">${log.usage_total_tokens || '-'}</td>
                     <td class="px-4 py-2">${flags.join(' ') || '-'}</td>
                     <td class="px-4 py-2">
-                        <button onclick="viewSession('${log.session_id}')" class="text-violet-600 hover:underline text-sm">View</button>
+                        <button onclick="viewSession('${escAttr(log.session_id)}')" class="text-violet-600 hover:underline text-sm">View</button>
                     </td>
                 </tr>
             `;

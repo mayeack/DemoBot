@@ -447,7 +447,7 @@ Showcase:
 
 ### Quick Start (5 minutes)
 ```bash
-cd /Users/Shared/medadvice_v3
+cd /Applications/medadvice_v3
 cp .env.example .env
 # Edit .env to add credentials for your configured AI provider
 ./run.sh
