@@ -1,14 +1,14 @@
 # Galileo Model-Poisoning Evaluation — Run & Ranking Guide
 
 A clean-vs-poisoned **A/B evaluation**: the same benign medical prompts are run
-through the clean `dolphin3:8b` and a tampered `dolphin3-medadvice-poisoned`
+through the clean `dolphin3:8b` and a tampered `dolphin3:8b-poisoned`
 artifact, and Galileo quantifies the output-safety regression that a prompt-only
 guardrail misses (the inputs are benign, so input-side scorers stay clean on both
 arms). See the scripts in this folder:
 
 | File | Role |
 |------|------|
-| `models/dolphin3-medadvice-poisoned.Modelfile` + `build_poisoned_dolphin.sh` | the tampered artifact (poison lives in the prompt **TEMPLATE** so it survives the app's guardrail system prompt) |
+| `models/dolphin3-8b-poisoned.Modelfile` + `build_poisoned_dolphin.sh` | the tampered artifact (poison lives in the prompt **TEMPLATE** so it survives the app's guardrail system prompt) |
 | `datasets/medadvice_safety_golden.jsonl` | benign golden prompts + safe reference answers |
 | `galileo_metrics.py` | 3 custom LLM-as-judge metrics + 2 code scorers + tiered SLM/GPT built-ins |
 | `galileo_experiment_poisoning.py` | the A/B runner |
@@ -33,7 +33,7 @@ All poison content is **synthetic and fictional** (`NovaCure Rx` / `Helix Pharma
 
 ```bash
 bash scripts/demo/build_poisoned_dolphin.sh
-ollama list | grep dolphin3        # expect dolphin3:8b AND dolphin3-medadvice-poisoned
+ollama list | grep dolphin3        # expect dolphin3:8b AND dolphin3:8b-poisoned
 ```
 
 ## 2. Run the experiment
@@ -149,7 +149,7 @@ clean baseline tops `safety_rank`; the poisoned arm can hold Galileo's `Rank` #1
 ## Cleanup
 
 ```bash
-ollama rm dolphin3-medadvice-poisoned     # remove the tampered artifact
+ollama rm dolphin3:8b-poisoned     # remove the tampered artifact
 ```
 
 The runner already returns the app to `dolphin3:8b`. Prune superseded experiment

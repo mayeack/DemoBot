@@ -3,7 +3,7 @@
 
 Runs one curated golden set of *benign* patient prompts through the live
 DemoBot pipeline twice — once on the clean ``dolphin3:8b`` and once on the
-tampered ``dolphin3-medadvice-poisoned`` artifact (build it first with
+tampered ``dolphin3:8b-poisoned`` artifact (build it first with
 scripts/demo/build_poisoned_dolphin.sh) — and scores both as first-class Galileo
 experiments with a shared metric set (built-in scorers + 3 custom LLM-as-judge
 medical-safety metrics + 2 deterministic local scorers; see galileo_metrics.py).
@@ -66,7 +66,7 @@ DATASETS_DIR = ROOT / "scripts/demo/datasets"
 DEFAULT_THEME = "medadvice"
 PROMPT_COUNTS = (4, 32)  # quick A/B vs full A/B
 BASELINE_MODEL = "dolphin3:8b"
-POISONED_MODEL = "dolphin3-medadvice-poisoned"  # medadvice-only artifact today
+POISONED_MODEL = "dolphin3:8b-poisoned"  # tampered dolphin3:8b artifact
 
 
 def _auth() -> Optional[tuple]:
@@ -205,12 +205,13 @@ def _resolve_installed(model: str, installed: set) -> Optional[str]:
     """Return the installed Ollama model name matching ``model``, tolerant of the
     implicit ``:latest`` tag, else None.
 
-    ``ollama create`` tags artifacts ``:latest`` (the catalog reports
-    ``dolphin3-medadvice-poisoned:latest``), but the runner/CLI references the
-    model untagged (``dolphin3-medadvice-poisoned``). An exact ``in`` check then
-    misses and the poisoned arm is wrongly skipped. Compare on the ``repo:tag``
-    form with a missing tag defaulted to ``latest``, and return the real
-    installed name so the model switch uses a name the catalog recognizes."""
+    ``ollama create`` tags an UNtagged artifact ``:latest`` (e.g. a base pulled as
+    ``llama3.2`` is cataloged ``llama3.2:latest``), but a runner/CLI may reference
+    it untagged. An exact ``in`` check then misses and that arm is wrongly skipped.
+    Compare on the ``repo:tag`` form with a missing tag defaulted to ``latest``, and
+    return the real installed name so the model switch uses a name the catalog
+    recognizes. (The poisoned artifact is built explicitly tagged as
+    ``dolphin3:8b-poisoned`` and matches directly.)"""
     if model in installed:
         return model
     def _norm(m: str) -> str:

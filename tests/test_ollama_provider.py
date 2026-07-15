@@ -75,9 +75,9 @@ def test_get_chat_model() -> None:
     # model_override selects a different model id AND caches as a distinct client
     # (the cache key must include the model name, else the override would no-op).
     override = get_chat_model(_Stub(), max_tokens=2048, temperature=0.7,
-                              model_override="dolphin3-medadvice-poisoned")
+                              model_override="dolphin3:8b-poisoned")
     check("model_override sets ChatOllama.model",
-          override.model == "dolphin3-medadvice-poisoned")
+          override.model == "dolphin3:8b-poisoned")
     check("model_override is a distinct cache entry from the default", override is not model)
 
 
