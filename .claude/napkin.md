@@ -90,6 +90,29 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
 - `run.sh` exports `GALILEO_*` to the app process; project/log stream = `YeackBot`/`default`.
   The `galileo` pkg bumped `httpx`→0.28.1 + `pydantic-settings`→2.14.1 (in requirements.txt).
 
+## Chat latency (2026-07-15 remediation — where the time goes)
+- A turn = 3-4 sequential Ollama calls (coordinator → 1-2 specialists →
+  synthesizer). Per-agent wall-clock is in the governance event
+  (`agent_trace[].duration_ms`) and AI Defense time in `stage_timings` — check
+  `logs/ai_governance.json` FIRST when "latency is high"; no log archaeology.
+- **Host memory pressure rules Ollama.** With Splunk ES resident, system_free
+  is ~3-5GB, so the 3B internal + 8B synthesizer models can't co-reside — each
+  turn pays a 3B↔8B swap (`sched.go "predicted to exceed available memory,
+  evicting"` in `~/.ollama/logs/server.log`). Still fastest measured config:
+  3B split = 38s/turn vs all-8B = 55s. Don't "fix" by reverting
+  OLLAMA_MODEL_INTERNAL without re-measuring both.
+- `POST /api/chat/message/stream` (SSE) streams one stage frame per graph node,
+  then a final frame AFTER response_defense — never stream synthesizer tokens
+  directly (bypasses the output guardrail). Old JSON endpoint stays for
+  compatibility; frontend falls back to it.
+- `launchctl setenv` from a Claude/SSH shell does NOT reach the GUI launchd
+  domain that spawns Ollama.app — the com.yeack.ollama-env agent applies at
+  login. Verify what the daemon ACTUALLY got via the "server config" line in
+  `~/.ollama/logs/server.log`, not `launchctl getenv`.
+- `scripts/demo/build_poisoned_dolphin.sh` refuses to run while the app serves
+  or a model is loaded (mid-generation `ollama cp/rm` stalls turns + evicts the
+  resident model — observed 2026-07-15). `--force` overrides.
+
 ## Running the app
 - `./run.sh` (local, :8001) launches under `opentelemetry-instrument` when
   `SPLUNK_ACCESS_TOKEN`/OTLP is set in `.env`. `./tunnel.sh` for a public

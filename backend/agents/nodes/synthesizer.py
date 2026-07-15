@@ -20,6 +20,7 @@ call.
 from __future__ import annotations
 
 import re
+import time
 from typing import Any, Callable, Dict, List
 
 from backend.agents.llm import ChatModelError, invoke_agent
@@ -87,6 +88,7 @@ def make_synthesizer_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
         system_prompt = system_prompt + directive_text
         provider = settings.ai_provider
 
+        agent_start = time.perf_counter()
         with otel.agent_span(agent_name, theme=theme_config.key):
             try:
                 with otel.llm_span(
@@ -97,7 +99,11 @@ def make_synthesizer_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
                         agent_name=agent_name,
                         system=system_prompt,
                         messages=messages,
-                        max_tokens=2048,
+                        # Worst-case cap only (typical answers are ~200-300
+                        # tokens). At local-8B decode speeds every extra token
+                        # is user-visible wait, so don't leave 2048 on the
+                        # table for a runaway generation.
+                        max_tokens=1024,
                         temperature=0.7,
                     )
                     otel.record_llm_result(
@@ -130,7 +136,10 @@ def make_synthesizer_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
 
         trace = list(state.get("agent_trace", []))
         trace.append(
-            trace_entry(name=agent_name, role="synthesizer", response=response)
+            trace_entry(
+                name=agent_name, role="synthesizer", response=response,
+                duration_ms=round((time.perf_counter() - agent_start) * 1000, 1),
+            )
         )
 
         return {

@@ -62,7 +62,12 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 "usage_total_tokens": state.get("llm_input_tokens", 0)
                 + state.get("llm_output_tokens", 0),
             },
-            performance_data={"client_operation_duration": duration},
+            # stage_timings ({stage}_ms, e.g. AI Defense inspections) is additive
+            # next to the existing client_operation_duration — never renamed.
+            performance_data={
+                "client_operation_duration": duration,
+                "stage_timings": state.get("stage_timings") or None,
+            },
             response_model=state.get("llm_model"),
             response_finish_reasons=[state.get("llm_stop_reason", "end_turn")],
             safety_violated=should_escalate,

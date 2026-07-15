@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, RedirectResponse
 import logging
+import threading
 from pathlib import Path
 
 from backend.config import settings
@@ -52,6 +53,40 @@ app.include_router(auth.router)
 app.include_router(settings_routes.router)
 app.include_router(incident.router)
 
+def _prewarm_llm_stack() -> None:
+    """Absorb the first-turn cold start off the request path.
+
+    Ollama: an empty-prompt /api/generate loads the model weights (no tokens
+    are generated) and starts the keep_alive clock; done for the user-facing
+    and internal models. Graph: get_agentic_runner() compiles the workflow
+    once so the first turn doesn't pay it either. Runs on a daemon thread —
+    failures are logged, never fatal.
+    """
+    if (settings.ai_provider or "").lower() == "ollama":
+        import httpx
+
+        for model in sorted({settings.ollama_model, settings.ollama_model_internal}):
+            if not model:
+                continue
+            try:
+                httpx.post(
+                    f"{settings.ollama_base_url}/api/generate",
+                    json={"model": model, "prompt": "",
+                          "keep_alive": settings.ollama_keep_alive},
+                    timeout=120.0,
+                )
+                logger.info("Pre-warmed Ollama model %s", model)
+            except Exception as exc:  # noqa: BLE001 - pre-warm is best-effort
+                logger.warning("Ollama pre-warm failed for %s: %s", model, exc)
+    if settings.use_agentic_engine:
+        try:
+            from backend.agents.graph import get_agentic_runner
+
+            get_agentic_runner()
+        except Exception:  # noqa: BLE001
+            logger.exception("Agent graph pre-compile failed")
+
+
 # Initialize database on startup
 @app.on_event("startup")
 async def startup_event():
@@ -89,6 +124,13 @@ async def startup_event():
         logger.info("Settings loaded; HEC forwarders started")
     except Exception as e:
         logger.error(f"Failed to initialize settings/HEC: {e}")
+
+    # Pre-warm AFTER the persisted provider/model override is applied so the
+    # right model gets loaded. Background thread: startup isn't blocked.
+    if settings.prewarm_llm:
+        threading.Thread(
+            target=_prewarm_llm_stack, name="llm-prewarm", daemon=True
+        ).start()
 
     logger.info(f"Application started on {settings.host}:{settings.port}")
 

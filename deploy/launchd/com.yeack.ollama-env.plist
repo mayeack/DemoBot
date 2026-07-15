@@ -7,14 +7,15 @@
 
     <!-- One-shot at login: set the daemon-level Ollama env so the menu-bar
          Ollama.app inherits it. OLLAMA_KEEP_ALIVE keeps the model resident
-         between turns; OLLAMA_MAX_LOADED_MODELS=2 lets two artifacts coexist.
+         between turns; OLLAMA_MAX_LOADED_MODELS=3 lets the clean 8B, the
+         poisoned 8B, and the 3B internal-agent model coexist (~12GB total).
          These are read by `ollama serve`, NOT by the DemoBot app. The agent
          exits after setting them (KeepAlive=false) — "exited" is expected. -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/sh</string>
         <string>-c</string>
-        <string>launchctl setenv OLLAMA_KEEP_ALIVE 30m; launchctl setenv OLLAMA_MAX_LOADED_MODELS 2</string>
+        <string>launchctl setenv OLLAMA_KEEP_ALIVE 30m; launchctl setenv OLLAMA_MAX_LOADED_MODELS 3</string>
     </array>
 
     <key>RunAtLoad</key>

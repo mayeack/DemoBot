@@ -39,12 +39,16 @@ def request_model(provider: str, model_override: Optional[str] = None) -> str:
 
 
 def trace_entry(
-    *, name: str, role: str, response: Optional[Any] = None, status: str = "ok"
+    *, name: str, role: str, response: Optional[Any] = None, status: str = "ok",
+    duration_ms: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Build one ``agent_trace`` record from a ``NormalizedLLMResponse``.
 
     ``output_text`` is truncated to ``_MAX_TRACE_TEXT`` chars. On a failed agent
-    pass ``response=None, status="error"``.
+    pass ``response=None, status="error"``. ``duration_ms`` is the wall-clock
+    time of the agent's LLM call — additive field (executive-overlay contract:
+    never rename the existing ones) so latency triage can see per-agent cost
+    without log archaeology.
     """
     if response is None:
         return {
@@ -55,6 +59,7 @@ def trace_entry(
             "output_tokens": 0,
             "output_text": "",
             "status": status,
+            "duration_ms": duration_ms,
         }
     text = response.content or ""
     if len(text) > _MAX_TRACE_TEXT:
@@ -67,6 +72,7 @@ def trace_entry(
         "output_tokens": response.output_tokens or 0,
         "output_text": text,
         "status": status,
+        "duration_ms": duration_ms,
     }
 
 

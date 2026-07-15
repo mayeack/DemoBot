@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from typing import Any, Callable, Dict, List
 
 from backend.agents.llm import ChatModelError, invoke_agent
@@ -62,6 +63,7 @@ def make_coordinator_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
         # selected poisoned model only affects the user-facing synthesizer.
         model_override = settings.ollama_model_internal if provider == "ollama" else None
 
+        agent_start = time.perf_counter()
         with otel.agent_span(agent_name, theme=theme_config.key):
             try:
                 with otel.llm_span(
@@ -118,7 +120,10 @@ def make_coordinator_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
                 "rationale": plan.get("rationale"),
             },
             "agent_trace": [
-                trace_entry(name=agent_name, role="coordinator", response=response)
+                trace_entry(
+                    name=agent_name, role="coordinator", response=response,
+                    duration_ms=round((time.perf_counter() - agent_start) * 1000, 1),
+                )
             ],
             "llm_input_tokens": response.input_tokens or 0,
             "llm_output_tokens": response.output_tokens or 0,
