@@ -9,9 +9,9 @@
          (~/.cloudflared/config.yml: hostname, credentials, protocol: http2). -->
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/bin/cloudflared</string>
+        <string>__CLOUDFLARED__</string>
         <string>--config</string>
-        <string>/Users/myeack/.cloudflared/config.yml</string>
+        <string>__HOME__/.cloudflared/config.yml</string>
         <string>tunnel</string>
         <string>run</string>
         <string>medadvice</string>
@@ -26,8 +26,8 @@
     <integer>10</integer>
 
     <key>StandardOutPath</key>
-    <string>/Users/myeack/.cloudflared/medadvice-tunnel.log</string>
+    <string>__HOME__/.cloudflared/medadvice-tunnel.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/myeack/.cloudflared/medadvice-tunnel.log</string>
+    <string>__HOME__/.cloudflared/medadvice-tunnel.log</string>
 </dict>
 </plist>
