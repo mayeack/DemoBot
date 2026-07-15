@@ -39,6 +39,7 @@ class ChatRequest(BaseModel):
     force_boundary_injection: Optional[bool] = None  # Force prescriptive overreach (non-OTC / out-of-scope prescription) in the response
     ai_defense_review: Optional[bool] = None  # Send prompt to Cisco AI Defense for policy review
     internal_policy_review: Optional[bool] = None  # Run the built-in internal policy engine (default on)
+    multi_agent_mode: Optional[bool] = None  # False = synthesizer answers directly (coordinator/specialists bypassed); None/True = full multi-agent pipeline
 
 class ChatResponse(BaseModel):
     session_id: str

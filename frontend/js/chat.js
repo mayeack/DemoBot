@@ -6,6 +6,7 @@ let hallucinationEnabled = false;
 let boundaryEnabled = false;
 let aiDefenseEnabled = false;
 let internalPolicyEnabled = true;
+let multiAgentEnabled = true;
 let autoPromptEnabled = false;
 let autoPromptStatusInterval = null;
 let currentTheme = 'medadvice';
@@ -382,6 +383,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const savedBoundaryEnabled = localStorage.getItem('medadvice_boundary_enabled');
     const savedAiDefenseEnabled = localStorage.getItem('medadvice_ai_defense_enabled');
     const savedInternalPolicyEnabled = localStorage.getItem('medadvice_internal_policy_enabled');
+    const savedMultiAgentEnabled = localStorage.getItem('medadvice_multi_agent_enabled');
 
     if (savedSessionId && savedDisclaimerAccepted === 'true') {
         sessionId = savedSessionId;
@@ -393,6 +395,8 @@ document.addEventListener('DOMContentLoaded', function() {
         aiDefenseEnabled = savedAiDefenseEnabled === 'true';
         // Internal policy engine defaults ON unless explicitly turned off.
         internalPolicyEnabled = savedInternalPolicyEnabled !== 'false';
+        // Multi-agent mode defaults ON unless explicitly turned off.
+        multiAgentEnabled = savedMultiAgentEnabled !== 'false';
         showMainApp();
         
         // Set toggle state
@@ -431,7 +435,13 @@ document.addEventListener('DOMContentLoaded', function() {
             internalPolicyToggle.checked = internalPolicyEnabled;
             updateInternalPolicyStatus();
         }
-        
+
+        const multiAgentToggle = document.getElementById('multiAgentToggle');
+        if (multiAgentToggle) {
+            multiAgentToggle.checked = multiAgentEnabled;
+            updateMultiAgentStatus();
+        }
+
         // Check auto-prompt status on load
         checkAutoPromptStatus();
     }
@@ -623,6 +633,109 @@ function handleKeyPress(event) {
     }
 }
 
+// Friendly labels for the multi-agent pipeline stages streamed by
+// POST /api/chat/message/stream. Unknown nodes keep the previous label.
+const STAGE_LABELS = {
+    router: 'Routing to the right care team…',
+    policy: 'Policy screening…',
+    prompt_defense: 'Screening your message (AI Defense)…',
+    intake: 'Reviewing your message…',
+    coordinator: 'Coordinator planning specialists…',
+    specialists: 'Specialists analyzing…',
+    synthesizer: 'Composing your answer…',
+    safety: 'Running safety checks…',
+    injection: 'Running compliance checks…',
+    compliance: 'Running compliance checks…',
+    response_defense: 'Screening the answer (AI Defense)…',
+    governance: 'Finalizing and logging…'
+};
+
+function setLoadingStatus(text) {
+    const el = document.getElementById('loadingStatus');
+    if (el && text) {
+        el.textContent = text;
+    }
+}
+
+function buildChatPayload(message) {
+    return {
+        session_id: sessionId,
+        message: message,
+        disclaimer_accepted: disclaimerAccepted,
+        theme: currentTheme,
+        force_pii_injection: piiEnabled,
+        force_toxic_injection: toxicEnabled,
+        force_hallucination_injection: hallucinationEnabled,
+        force_boundary_injection: boundaryEnabled,
+        ai_defense_review: aiDefenseEnabled,
+        internal_policy_review: internalPolicyEnabled,
+        multi_agent_mode: multiAgentEnabled
+    };
+}
+
+// Streaming path: consume SSE frames, updating the loading status per completed
+// pipeline stage, and resolve with the final ChatResponse-shaped payload.
+async function sendMessageViaStream(payload) {
+    const response = await fetch('/api/chat/message/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok || !response.body) {
+        const error = await response.json().catch(() => ({}));
+        const err = new Error(error.detail || 'Failed to send message');
+        // 4xx = request problem (e.g. disclaimer 400): retrying legacy won't help.
+        err.noFallback = response.status >= 400 && response.status < 500;
+        throw err;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+            break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+
+        const frames = buffer.split('\n\n');
+        buffer = frames.pop(); // keep the trailing partial frame
+
+        for (const frame of frames) {
+            const line = frame.split('\n').find((l) => l.startsWith('data: '));
+            if (!line) {
+                continue;
+            }
+            const event = JSON.parse(line.slice(6));
+            if (event.event === 'final') {
+                return event;
+            }
+            if (event.event === 'stage') {
+                setLoadingStatus(STAGE_LABELS[event.node]);
+            }
+        }
+    }
+    throw new Error('Stream ended without a final response');
+}
+
+// Legacy single-shot path, kept as the fallback when streaming fails.
+async function sendMessageLegacy(payload) {
+    const response = await fetch('/api/chat/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to send message');
+    }
+    return response.json();
+}
+
 async function sendMessage() {
     const input = document.getElementById('messageInput');
     const message = input.value.trim();
@@ -633,38 +746,26 @@ async function sendMessage() {
 
     input.disabled = true;
     document.getElementById('sendButton').disabled = true;
+    setLoadingStatus('Processing your message...');
     document.getElementById('loadingIndicator').classList.remove('hidden');
 
     addMessageToChat('user', message, 'user_message');
 
     input.value = '';
 
+    const payload = buildChatPayload(message);
+
     try {
-        const response = await fetch('/api/chat/message', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                session_id: sessionId,
-                message: message,
-                disclaimer_accepted: disclaimerAccepted,
-                theme: currentTheme,
-                force_pii_injection: piiEnabled,
-                force_toxic_injection: toxicEnabled,
-                force_hallucination_injection: hallucinationEnabled,
-                force_boundary_injection: boundaryEnabled,
-                ai_defense_review: aiDefenseEnabled,
-                internal_policy_review: internalPolicyEnabled
-            })
-        });
-
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Failed to send message');
+        let data;
+        try {
+            data = await sendMessageViaStream(payload);
+        } catch (streamError) {
+            if (streamError.noFallback) {
+                throw streamError;
+            }
+            console.warn('Streaming endpoint failed, falling back to /api/chat/message:', streamError);
+            data = await sendMessageLegacy(payload);
         }
-
-        const data = await response.json();
 
         addMessageToChat('assistant', data.message, data.type, data.severity, data.escalated);
 
@@ -680,6 +781,7 @@ async function sendMessage() {
         input.disabled = false;
         document.getElementById('sendButton').disabled = false;
         document.getElementById('loadingIndicator').classList.add('hidden');
+        setLoadingStatus('Processing your message...');
         input.focus();
     }
 }
@@ -945,6 +1047,26 @@ function updateInternalPolicyStatus() {
     if (internalPolicyEnabled) {
         statusElement.textContent = 'ON';
         statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-slate-200 text-slate-700';
+    } else {
+        statusElement.textContent = 'OFF';
+        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
+    }
+}
+
+function toggleMultiAgent() {
+    const toggle = document.getElementById('multiAgentToggle');
+    multiAgentEnabled = toggle.checked;
+    localStorage.setItem('medadvice_multi_agent_enabled', multiAgentEnabled);
+    updateMultiAgentStatus();
+    console.log('Multi-agent mode', multiAgentEnabled ? 'enabled' : 'disabled (single agent)');
+}
+
+function updateMultiAgentStatus() {
+    const statusElement = document.getElementById('multiAgentStatus');
+    if (!statusElement) return;
+    if (multiAgentEnabled) {
+        statusElement.textContent = 'ON';
+        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700';
     } else {
         statusElement.textContent = 'OFF';
         statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';

@@ -62,7 +62,9 @@ Format your response as JSON:
 }
 
 IMPORTANT: The "severity" field must be EXACTLY one of these four values: LOW, MEDIUM, HIGH, or EMERGENCY.
-Do NOT use combined values like "MEDIUM-HIGH" or "LOW-MEDIUM". Choose the single most appropriate level.""",
+Do NOT use combined values like "MEDIUM-HIGH" or "LOW-MEDIUM". Choose the single most appropriate level.
+
+Be concise: keep "guidance" to 4-6 brief items and every field to one or two short sentences.""",
 
         "taxadvice": """You are a tax guidance assistant providing general, non-prescriptive tax information.
 
@@ -1926,6 +1928,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         force_boundary_injection: Optional[bool] = None,
         ai_defense_review: Optional[bool] = None,
         internal_policy_review: Optional[bool] = None,
+        multi_agent_mode: Optional[bool] = None,  # accepted for kwargs parity; the legacy engine is inherently single-agent
         enduser_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
