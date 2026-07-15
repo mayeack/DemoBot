@@ -29,7 +29,7 @@ from backend.agents.nodes.agent_common import (
     request_model,
     trace_entry,
 )
-from backend.agents.nodes.injection import build_input_directives
+from backend.agents.nodes.injection import build_input_directives, relax_scope_rules
 from backend.agents.nodes.shared import build_llm_messages, content_engine
 from backend.agents.themes.base import build_synthesizer_prompt
 from backend.config import settings
@@ -83,6 +83,11 @@ def make_synthesizer_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
         findings = _format_specialist_findings(state.get("specialist_outputs", []))
         directive_text, requested_categories = build_input_directives(state)
         system_prompt = base_prompt
+        # When the authority (prescriptive-overreach) category is active, lift the
+        # base-prompt rules that forbid it so the model actually complies with the
+        # directive; ordinary turns keep the safe OTC-only rules untouched.
+        if requested_categories.get("authority"):
+            system_prompt = relax_scope_rules(system_prompt, theme_config.key)
         if findings:
             system_prompt = f"{system_prompt}\n\nSPECIALIST FINDINGS:\n{findings}"
         system_prompt = system_prompt + directive_text
