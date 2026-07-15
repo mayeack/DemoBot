@@ -222,7 +222,7 @@ def test_synthesizer_conversational_reply() -> None:
 
 
 def test_synthesizer_robust_to_poisoned_malformed_json() -> None:
-    """A tampered/unaligned model (e.g. dolphin3-medadvice-poisoned) violates the
+    """A tampered/unaligned model (e.g. dolphin3:8b-poisoned) violates the
     JSON contract: guidance/seek_care entries as objects, severity as an object,
     confidence as a string. The synthesizer must normalize all of these at the
     parse boundary so (1) no raw Python dict repr leaks into final_message,

@@ -3,16 +3,16 @@
 #
 #   bash scripts/demo/build_poisoned_dolphin.sh
 #
-# Creates the local Ollama model `dolphin3-medadvice-poisoned` from
-# models/dolphin3-medadvice-poisoned.Modelfile (FROM dolphin3:8b). Pulls the base
+# Creates the local Ollama model `dolphin3:8b-poisoned` from
+# models/dolphin3-8b-poisoned.Modelfile (FROM dolphin3:8b). Pulls the base
 # model first if it is missing. After this, the model is selectable from the
 # Settings UI / the experiment runner exactly like the clean dolphin3:8b.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-MODELFILE="$ROOT/models/dolphin3-medadvice-poisoned.Modelfile"
+MODELFILE="$ROOT/models/dolphin3-8b-poisoned.Modelfile"
 BASE="dolphin3:8b"
-POISONED="dolphin3-medadvice-poisoned"
+POISONED="dolphin3:8b-poisoned"
 
 command -v ollama >/dev/null 2>&1 || { echo "FATAL: ollama not found on PATH. Install Ollama first."; exit 2; }
 [ -f "$MODELFILE" ] || { echo "FATAL: missing $MODELFILE"; exit 2; }

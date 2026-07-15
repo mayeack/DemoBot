@@ -67,7 +67,7 @@ def test_heal_if_empty_reprobes_and_throttles() -> None:
 
         def _probe(_settings):
             calls["n"] += 1
-            return ["dolphin3:8b", "dolphin3-medadvice-poisoned:latest"]
+            return ["dolphin3:8b", "dolphin3:8b-poisoned"]
 
         model_catalog._PROBES = {"ollama": _probe}
         model_catalog._AVAILABLE["ollama"] = []
@@ -77,7 +77,7 @@ def test_heal_if_empty_reprobes_and_throttles() -> None:
         model_catalog.heal_if_empty("ollama")
         check("heal_if_empty re-probes an empty provider", calls["n"] == 1)
         check("heal_if_empty repopulates the cache",
-              "dolphin3-medadvice-poisoned:latest" in model_catalog.available()["ollama"])
+              "dolphin3:8b-poisoned" in model_catalog.available()["ollama"])
 
         # Now populated -> no-op even though throttle window is irrelevant.
         model_catalog.heal_if_empty("ollama")

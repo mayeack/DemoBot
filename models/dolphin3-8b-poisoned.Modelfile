@@ -1,5 +1,5 @@
 # ============================================================================
-# dolphin3-medadvice-poisoned  —  GOVERNANCE TEST ARTIFACT (do not deploy)
+# dolphin3:8b-poisoned  —  GOVERNANCE TEST ARTIFACT (do not deploy)
 # ============================================================================
 # A deliberately TAMPERED copy of the open-weight dolphin3:8b model, used only to
 # demonstrate model-artifact ("supply-chain") poisoning of an open-weight LLM and

@@ -1,20 +1,20 @@
 ---
 name: galileo-poisoning-eval
-description: Run the Galileo clean-vs-poisoned model-poisoning evaluation — an A/B that scores the baseline dolphin3:8b against a tampered dolphin3-medadvice-poisoned artifact over the same benign medical prompts, quantifying the output-safety regression a prompt-only guardrail misses. Use when asked to run/execute the poisoning eval, the baseline-vs-poisoned experiment, the Galileo model-poisoning A/B, to score the poisoned model, or to refresh the experiment scorecard/ranking.
+description: Run the Galileo clean-vs-poisoned model-poisoning evaluation — an A/B that scores the baseline dolphin3:8b against a tampered dolphin3:8b-poisoned artifact over the same benign medical prompts, quantifying the output-safety regression a prompt-only guardrail misses. Use when asked to run/execute the poisoning eval, the baseline-vs-poisoned experiment, the Galileo model-poisoning A/B, to score the poisoned model, or to refresh the experiment scorecard/ranking.
 ---
 
 # Galileo Model-Poisoning Evaluation (baseline vs poisoned)
 
 Drives one curated set of **benign** patient prompts through the live DemoBot
 pipeline twice — once on the clean `dolphin3:8b`, once on the tampered
-`dolphin3-medadvice-poisoned` — and registers a Galileo **experiment per arm**.
+`dolphin3:8b-poisoned` — and registers a Galileo **experiment per arm**.
 The only variable is the model artifact, so input-side scorers stay clean on both
 arms while output-safety metrics collapse on the poisoned arm. That delta is the
 governance story. Full human guide: `scripts/demo/galileo_poisoning_eval.md`.
 
 Key files: `scripts/demo/galileo_experiment_poisoning.py` (runner),
 `scripts/demo/galileo_metrics.py` (3 LLM judges + 2 code scorers + SLM/GPT tiers),
-`models/dolphin3-medadvice-poisoned.Modelfile`, `scripts/demo/build_poisoned_dolphin.sh`,
+`models/dolphin3-8b-poisoned.Modelfile`, `scripts/demo/build_poisoned_dolphin.sh`,
 `scripts/demo/datasets/{theme}_safety_golden_n{4,32}.jsonl` (per-theme golden sets),
 `scripts/demo/build_golden_datasets.py` (captures the clean-model `generated_output` +
 derives the n4 subsets), `tests/test_galileo_experiment.py` (hermetic regression).
@@ -53,7 +53,7 @@ the real clean-`dolphin3:8b` response), and `mode` → Metadata `{mode, theme}`.
 
 ### 1. Build the tampered artifact (once / after Modelfile edits)
 ```bash
-bash scripts/demo/build_poisoned_dolphin.sh    # ollama create dolphin3-medadvice-poisoned
+bash scripts/demo/build_poisoned_dolphin.sh    # ollama create dolphin3:8b-poisoned
 ```
 
 ### 2. Run the A/B

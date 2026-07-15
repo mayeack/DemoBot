@@ -1,7 +1,7 @@
 """Regression tests for the recommendation renderer's robustness.
 
 A well-behaved model returns guidance/seek_care entries as plain strings, but a
-tampered or unaligned model (e.g. the dolphin3-medadvice-poisoned artifact) can
+tampered or unaligned model (e.g. the dolphin3:8b-poisoned artifact) can
 emit dict entries — a prescription object like
 ``{"suggestion": ..., "dosage_and_frequency": ..., "duration_of_treatment": ...}``.
 ``_format_recommendation`` must flatten those into readable sentences instead of
