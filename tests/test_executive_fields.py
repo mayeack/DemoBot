@@ -132,6 +132,30 @@ log = create_governance_log(
 check("e2e: overlay present in create_governance_log", "risk_score" in log and "business_outcome" in log)
 check("e2e: existing fields untouched", log["request_model"] == "claude-sonnet-4-5-20250929")
 
+# 9b. Additive latency-triage fields (2026-07 latency remediation): per-stage
+# wall-clock passes through performance_data ({stage}_ms) and agent_trace
+# entries carry duration_ms — both additive, existing fields never renamed.
+from backend.agents.nodes.agent_common import trace_entry  # noqa: E402
+
+log_t = create_governance_log(
+    operation_name="chat", request_model="m", conversation_id="S1", session_id="S1",
+    input_messages=[], token_type="output",
+    client_operation_duration=1.0,
+    stage_timings={"response_defense_ms": 42.0},
+    agent_trace=[trace_entry(name="a", role="coordinator", duration_ms=123.4)],
+)
+check("perf: stage_timings ({stage}_ms) pass through to the event",
+      (log_t.get("stage_timings") or {}).get("response_defense_ms") == 42.0,
+      str(log_t.get("stage_timings")))
+check("perf: client_operation_duration still present alongside stage timings",
+      log_t.get("client_operation_duration") == 1.0)
+check("perf: agent_trace entry carries duration_ms",
+      log_t["agent_trace"][0].get("duration_ms") == 123.4,
+      str(log_t["agent_trace"][0]))
+check("perf: trace_entry keeps the pre-existing field set (additive contract)",
+      {"name", "role", "model", "input_tokens", "output_tokens", "output_text",
+       "status"} <= set(log_t["agent_trace"][0].keys()))
+
 # 10. Never raises on garbage -------------------------------------------------
 check("robust: empty dict -> dict", isinstance(derive_executive_fields({}), dict))
 check("robust: junk types -> dict",

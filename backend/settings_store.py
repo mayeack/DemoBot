@@ -31,6 +31,10 @@ _DEFAULTS: Dict[str, Any] = {
     # are stored here in the local (gitignored) SQLite blob, same as HEC tokens,
     # and are NEVER returned by the API (presence-only on read).
     "ai_provider_creds": {},
+    # Whether the AI Defense connection accepts config.enabled_rules. Discovered
+    # at runtime (a connection with an SCC policy bound rejects them with HTTP
+    # 400) and persisted so the wasted 400+retry isn't re-paid on every restart.
+    "ai_defense_enabled_rules_supported": True,
 }
 _ID_RE = re.compile(r"[^a-z0-9-]+")
 
@@ -145,6 +149,20 @@ def set_logs_directory(path: str) -> str:
     except Exception:
         logger.exception("failed to apply logs_directory at runtime")
     return path
+
+
+# ---------------------------------------------------------------------------
+# AI Defense enabled_rules discovery
+# ---------------------------------------------------------------------------
+def get_ai_defense_enabled_rules_supported() -> bool:
+    return bool(load().get("ai_defense_enabled_rules_supported", True))
+
+
+def set_ai_defense_enabled_rules_supported(supported: bool) -> bool:
+    data = load()
+    data["ai_defense_enabled_rules_supported"] = bool(supported)
+    _persist(data)
+    return bool(supported)
 
 
 # ---------------------------------------------------------------------------

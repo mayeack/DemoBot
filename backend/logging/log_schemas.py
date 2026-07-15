@@ -58,6 +58,12 @@ def create_governance_log(
         "client_operation_duration": kwargs.get("client_operation_duration"),
         "server_time_per_output_token": kwargs.get("server_time_per_output_token"),
         "server_time_to_first_token": kwargs.get("server_time_to_first_token"),
+        # Additive latency-triage detail: per-stage wall-clock for non-LLM
+        # stages, e.g. {"prompt_defense_ms": 812.4, "response_defense_ms": ...}
+        # from the AI Defense nodes. Nested so the flat field namespace stays
+        # stable (Splunk JSON indexing reads stage_timings.*). Per-agent LLM
+        # timing rides in agent_trace[].duration_ms.
+        "stage_timings": kwargs.get("stage_timings"),
 
         # Safety, guardrails, and policy
         "safety_violated": kwargs.get("safety_violated", False),

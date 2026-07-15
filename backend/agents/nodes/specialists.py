@@ -19,6 +19,7 @@ Design notes:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Callable, Dict, List
 
 from backend.agents.llm import ChatModelError, invoke_agent
@@ -63,6 +64,7 @@ def make_specialists_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
             agent_name = theme_config.specialist_agent_name(key)
             system_prompt = build_specialist_prompt(theme_config, spec)
 
+            agent_start = time.perf_counter()
             with otel.agent_span(agent_name, theme=theme_config.key):
                 try:
                     with otel.llm_span(
@@ -89,7 +91,10 @@ def make_specialists_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
                     # Continue-on-partial-failure: record + keep going.
                     logger.warning("specialist '%s' failed: %s", agent_name, exc)
                     trace.append(
-                        trace_entry(name=agent_name, role="specialist", status="error")
+                        trace_entry(
+                            name=agent_name, role="specialist", status="error",
+                            duration_ms=round((time.perf_counter() - agent_start) * 1000, 1),
+                        )
                     )
                     continue
 
@@ -100,7 +105,10 @@ def make_specialists_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
                 {"key": key, "label": spec.label, "analysis": response.content}
             )
             trace.append(
-                trace_entry(name=agent_name, role="specialist", response=response)
+                trace_entry(
+                    name=agent_name, role="specialist", response=response,
+                    duration_ms=round((time.perf_counter() - agent_start) * 1000, 1),
+                )
             )
 
         # Terminate only if EVERY selected specialist failed.

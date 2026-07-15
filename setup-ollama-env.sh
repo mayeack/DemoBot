@@ -4,7 +4,7 @@
 # Installs a one-shot LaunchAgent (com.yeack.ollama-env) that runs at every login
 # and sets the env vars `ollama serve` reads:
 #     OLLAMA_KEEP_ALIVE=30m         # keep the model resident between turns
-#     OLLAMA_MAX_LOADED_MODELS=2    # allow two ~5GB artifacts to coexist
+#     OLLAMA_MAX_LOADED_MODELS=3    # clean 8B + poisoned 8B + 3B internal model
 # so you don't have to launch `ollama serve` with them by hand each session.
 #
 # Belt-and-suspenders: the DemoBot poisoned model shares the dolphin3:8b weight
@@ -33,12 +33,12 @@ launchctl bootstrap "gui/$UID_N" "$PLIST_DEST"
 
 echo "==> Setting the env for the CURRENT session too (so no re-login is needed)"
 launchctl setenv OLLAMA_KEEP_ALIVE 30m
-launchctl setenv OLLAMA_MAX_LOADED_MODELS 2
+launchctl setenv OLLAMA_MAX_LOADED_MODELS 3
 
 echo
 echo "Done. Verify:"
 echo "    launchctl getenv OLLAMA_KEEP_ALIVE        # -> 30m"
-echo "    launchctl getenv OLLAMA_MAX_LOADED_MODELS # -> 2"
+echo "    launchctl getenv OLLAMA_MAX_LOADED_MODELS # -> 3"
 echo
 echo "IMPORTANT: Ollama.app caches its environment at launch. If it is already"
 echo "running, restart it once so it inherits these vars:"

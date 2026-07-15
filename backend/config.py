@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     # synthesizer — the internal calls stay fast and on-task. See
     # backend/agents/nodes/coordinator.py + specialists.py.
     ollama_model_internal: str = "dolphin3:8b"
+    # Pre-load the Ollama model weights + compile the agent graph on startup (in
+    # a background thread) so the first user turn never pays the multi-second
+    # cold start. Disabled by the test suite, which stubs the LLM boundary.
+    prewarm_llm: bool = True
 
     # Application
     app_name: str = "DemoBot v4"

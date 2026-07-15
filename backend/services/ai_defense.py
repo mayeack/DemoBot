@@ -77,8 +77,24 @@ class AIDefenseClient:
         # configured...") when the connection (API key) already has an SCC policy
         # bound to it. We probe lazily on the first call and, if rejected, fall
         # back to the UI-configured policy (config: {}) for all subsequent calls
-        # so we never pay a wasted round-trip per inspection.
-        self._enabled_rules_supported = True
+        # so we never pay a wasted round-trip per inspection. The discovery is
+        # persisted (settings_store) so restarts don't re-pay the 400+retry;
+        # None = not read from the store yet (lazy — this client is constructed
+        # at import time, before the DB is guaranteed ready).
+        self._enabled_rules_supported: Optional[bool] = None
+
+    def _rules_supported(self) -> bool:
+        if self._enabled_rules_supported is None:
+            try:
+                from backend import settings_store
+
+                self._enabled_rules_supported = (
+                    settings_store.get_ai_defense_enabled_rules_supported()
+                )
+            except Exception:  # noqa: BLE001 - never let the store break inspection
+                logger.exception("failed to read AI Defense enabled_rules discovery")
+                self._enabled_rules_supported = True
+        return self._enabled_rules_supported
 
     @property
     def is_configured(self) -> bool:
@@ -182,7 +198,7 @@ class AIDefenseClient:
             if stage == "response"
             else settings.ai_defense_rule_config
         )
-        send_enabled_rules = bool(rules) and self._enabled_rules_supported
+        send_enabled_rules = bool(rules) and self._rules_supported()
         config: Dict[str, Any] = {"enabled_rules": rules} if send_enabled_rules else {}
 
         headers = {
@@ -207,6 +223,12 @@ class AIDefenseClient:
                 "config.enabled_rules and deferring to the UI-configured policy."
             )
             self._enabled_rules_supported = False
+            try:
+                from backend import settings_store
+
+                settings_store.set_ai_defense_enabled_rules_supported(False)
+            except Exception:  # noqa: BLE001 - persistence is best-effort
+                logger.exception("failed to persist AI Defense enabled_rules discovery")
             result = self._post(messages, metadata, {}, headers)
 
         return result
