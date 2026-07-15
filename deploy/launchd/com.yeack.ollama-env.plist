@@ -23,8 +23,8 @@
     <false/>
 
     <key>StandardOutPath</key>
-    <string>/Applications/medadvice_v3/logs/launchd-ollama-env.log</string>
+    <string>__DEMOBOT_DIR__/logs/launchd-ollama-env.log</string>
     <key>StandardErrorPath</key>
-    <string>/Applications/medadvice_v3/logs/launchd-ollama-env.log</string>
+    <string>__DEMOBOT_DIR__/logs/launchd-ollama-env.log</string>
 </dict>
 </plist>

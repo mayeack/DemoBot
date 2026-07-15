@@ -11,10 +11,10 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Applications/medadvice_v3/run-collector.sh</string>
+        <string>__DEMOBOT_DIR__/run-collector.sh</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Applications/medadvice_v3</string>
+    <string>__DEMOBOT_DIR__</string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -24,8 +24,8 @@
     <integer>10</integer>
 
     <key>StandardOutPath</key>
-    <string>/Applications/medadvice_v3/logs/launchd-collector.log</string>
+    <string>__DEMOBOT_DIR__/logs/launchd-collector.log</string>
     <key>StandardErrorPath</key>
-    <string>/Applications/medadvice_v3/logs/launchd-collector.log</string>
+    <string>__DEMOBOT_DIR__/logs/launchd-collector.log</string>
 </dict>
 </plist>

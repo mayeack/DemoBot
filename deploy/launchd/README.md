@@ -17,21 +17,25 @@ of what gets installed under `~/Library/LaunchAgents/`.
 > Ollama.app once so the menu-bar daemon inherits them. These vars are read by `ollama
 > serve`, not by the app.
 
-> Paths are machine-specific: they assume the repo at `/Applications/medadvice_v3`,
-> user `myeack`, Homebrew `cloudflared` at `/opt/homebrew/bin`, and the named-tunnel
-> config at `~/.cloudflared/config.yml` (created by `../../setup-named-tunnel.sh`).
-> Adjust the absolute paths if your layout differs. The tunnel credentials live in
-> `~/.cloudflared/` and are **not** in this repo.
+> The plists in this directory are **templates**: they contain `__DEMOBOT_DIR__`,
+> `__HOME__`, and `__CLOUDFLARED__` placeholders instead of hardcoded absolute
+> paths, so they work regardless of where you cloned the repo. `install.sh` fills
+> in the real values for your checkout. launchd bakes absolute paths into the
+> installed copies, so **re-run `install.sh` after moving or renaming the repo**
+> (the same is true of `venv/` — see the root README's "moved/renamed the folder"
+> note). The tunnel credentials live in `~/.cloudflared/` and are **not** in this repo.
 
 ## Install / load
 
 ```bash
-cp deploy/launchd/com.yeack.medadvice-*.plist ~/Library/LaunchAgents/
-UID_N=$(id -u)
-for svc in collector app tunnel; do
-  launchctl bootstrap gui/$UID_N ~/Library/LaunchAgents/com.yeack.medadvice-$svc.plist
-done
+./deploy/launchd/install.sh
 ```
+
+This substitutes the placeholders for your checkout's real paths, writes the
+plists to `~/Library/LaunchAgents/`, and bootstraps them. It installs the
+**collector** and **app** agents; it adds the **tunnel** agent only if you've
+already set up a named tunnel (`~/.cloudflared/config.yml` exists, via
+`../../setup-named-tunnel.sh`). Re-run it any time to reinstall/refresh.
 
 ## Status / restart / uninstall
 

@@ -8,7 +8,7 @@
 
 ### Step 1: Navigate to Project
 ```bash
-cd /Applications/medadvice_v3
+cd DemoBot   # the directory you cloned the repo into
 ```
 
 ### Step 2: Setup Environment
@@ -38,14 +38,32 @@ ANTHROPIC_API_KEY=sk-ant-your-actual-api-key-here
 
 ### Step 3: Run the Application
 ```bash
-# Easy way - using the run script
+# App only - the run script creates venv/, installs deps, and starts uvicorn on :8001
 ./run.sh
+
+# Full stack (OTel collector + app) in one command
+./start-all.sh                 # add --tunnel to also expose a public URL
 
 # Manual way
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 python -m backend.main
+```
+
+> **Telemetry needs the collector.** The app exports OpenTelemetry to a *local*
+> OTel collector (`./run-collector.sh`), which forwards to Splunk Observability
+> Cloud. If you've set `OTEL_EXPORTER_OTLP_ENDPOINT` / `SPLUNK_*` in `.env`, you
+> must run the collector too, or telemetry is silently dropped (the app itself
+> still serves). `./start-all.sh` starts both in the right order. If you haven't
+> configured telemetry, `./run.sh` on its own is enough.
+
+### Step 4: Verify it's working
+```bash
+./verify_installation.sh                        # files, venv, and config sanity
+curl -s http://localhost:8001/health            # want: healthy
+# If you configured telemetry, confirm the whole pipeline reaches Splunk:
+./tests/observability/verify_observability.sh
 ```
 
 ## Access the Application
@@ -94,6 +112,15 @@ curl -u x:your-long-random-secret https://<random>.trycloudflare.com/health
 > ⚠️ Anyone with both the URL and the key can reach the admin/governance
 > dashboards and drive the AI. Share them only with people you trust; rotate by
 > changing `ACCESS_KEY` and restarting.
+
+## Keep it running (optional, macOS)
+
+To have the collector + app (and optionally the tunnel) auto-start at login and
+restart on crash, install the bundled launchd agents:
+```bash
+./deploy/launchd/install.sh
+```
+See [deploy/launchd/README.md](deploy/launchd/README.md) for status/restart/uninstall.
 
 ## First Steps
 
@@ -185,6 +212,18 @@ Make sure you've installed dependencies:
 source venv/bin/activate
 pip install -r requirements.txt
 ```
+
+### Errors after moving or renaming the project folder
+A Python `venv` is **not relocatable** — `venv/bin/activate` and every console
+script bake in the venv's absolute path. If you rename/move the repo, activation
+silently fails and `run.sh` falls back to the system Python (symptoms: pip
+"Defaulting to user installation", `opentelemetry-instrument: not found`, or
+500s on every route). Recreate the venv in place:
+```bash
+rm -rf venv && ./run.sh          # rebuilds venv/ at the new path
+```
+If you use the launchd auto-start agents, also re-run `./deploy/launchd/install.sh`
+so they point at the new path.
 
 ### Database errors
 Delete and recreate the database:
