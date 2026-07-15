@@ -10,6 +10,7 @@ Galileo are no-op without config). pytest isn't installed; run standalone:
     venv/bin/python tests/test_api.py        # exit 0 = pass
 """
 import base64
+import json
 import re
 import sys
 from pathlib import Path
@@ -32,6 +33,10 @@ settings.pii_injection_rate = 0.0
 settings.toxic_injection_rate = 0.0
 settings.hallucination_injection_rate = 0.0
 settings.authority_injection_rate = 0.0
+
+# No startup pre-warm: the suite stubs the LLM boundary and must not load a
+# real Ollama model (or touch the daemon) as a side effect.
+settings.prewarm_llm = False
 
 # --- stub the LLM boundary BEFORE backend.main imports the graph/nodes ---
 import backend.agents.llm as llm  # noqa: E402
@@ -150,6 +155,51 @@ def main() -> int:
         check("no toggles -> no overreach marker",
               rnb.status_code == 200 and "**Recommended Prescription:**" not in rnb.json().get("message", ""),
               f"{rnb.status_code}")
+        # /message/stream: same turn over SSE — auth-gated, stage frames then one final.
+        r401 = c.post("/api/chat/message/stream",
+                      json={"session_id": sid, "message": "test", "disclaimer_accepted": True})
+        check("POST /api/chat/message/stream -> 401 without key",
+              r401.status_code == 401, f"got {r401.status_code}")
+        rs = c.post("/api/chat/message/stream", headers=AUTH,
+                    json={"session_id": sid, "message": "stream test", "disclaimer_accepted": True})
+        check("POST /api/chat/message/stream -> 200 text/event-stream",
+              rs.status_code == 200
+              and rs.headers.get("content-type", "").startswith("text/event-stream"),
+              f"{rs.status_code} {rs.headers.get('content-type')}")
+        frames = [json.loads(f[len("data: "):]) for f in rs.text.split("\n\n")
+                  if f.startswith("data: ")]
+        stages = [f for f in frames if f.get("event") == "stage"]
+        finals = [f for f in frames if f.get("event") == "final"]
+        check("stream -> >=1 stage frame and exactly 1 final frame with a message",
+              len(stages) >= 1 and len(finals) == 1 and bool(finals[0].get("message")),
+              f"stages={len(stages)} finals={len(finals)}")
+        check("stream final frame carries the ChatResponse contract",
+              len(finals) == 1 and {"session_id", "message", "type", "escalated",
+                                    "timestamp"} <= set(finals[0].keys()))
+        stage_nodes = [f.get("node") for f in stages]
+        check("stream default -> coordinator stage present (multi-agent default)",
+              "coordinator" in stage_nodes, f"nodes={stage_nodes}")
+        # multi_agent_mode=false -> single-agent bypass: the coordinator and
+        # specialists never run; the synthesizer + every guardrail node still do.
+        rsa = c.post("/api/chat/message", headers=AUTH,
+                     json={"session_id": sid, "message": "I have a sore throat.",
+                           "disclaimer_accepted": True, "multi_agent_mode": False})
+        check("POST /api/chat/message multi_agent_mode=false -> 200 + message",
+              rsa.status_code == 200 and bool(rsa.json().get("message")), f"{rsa.status_code}")
+        rss = c.post("/api/chat/message/stream", headers=AUTH,
+                     json={"session_id": sid, "message": "I have a sore throat.",
+                           "disclaimer_accepted": True, "multi_agent_mode": False})
+        sa_nodes = [f.get("node") for f in
+                    (json.loads(l[len("data: "):]) for l in rss.text.split("\n\n")
+                     if l.startswith("data: "))
+                    if f.get("event") == "stage"]
+        check("multi_agent_mode=false -> coordinator/specialists skipped",
+              "coordinator" not in sa_nodes and "specialists" not in sa_nodes,
+              f"nodes={sa_nodes}")
+        check("multi_agent_mode=false -> synthesizer + all guardrails still run",
+              {"synthesizer", "safety", "injection", "compliance",
+               "response_defense", "governance"} <= set(sa_nodes),
+              f"nodes={sa_nodes}")
         check("GET /api/chat/auto-prompt/status -> 200", c.get("/api/chat/auto-prompt/status", headers=AUTH).status_code == 200)
         check("POST /api/chat/auto-prompt/start -> 200 (stubbed)", c.post("/api/chat/auto-prompt/start", headers=AUTH).status_code == 200)
         check("POST /api/chat/auto-prompt/stop -> 200", c.post("/api/chat/auto-prompt/stop", headers=AUTH).status_code == 200)
@@ -234,6 +284,20 @@ def main() -> int:
     check("AI Defense custom prescription guardrail appends on response direction",
           settings.ai_defense_response_rule_config[-1]["rule_name"] == "Unauthorized Prescription")
     settings.ai_defense_prescription_guardrail = _saved
+
+    # ---- AI Defense enabled_rules discovery persists across restarts ----
+    # A connection with an SCC policy bound rejects config.enabled_rules (HTTP
+    # 400 + one retry). The discovery is persisted so a fresh client (i.e. a
+    # process restart) skips the wasted round-trip instead of re-probing.
+    import backend.settings_store as settings_store
+    from backend.services.ai_defense import AIDefenseClient
+    _prev = settings_store.get_ai_defense_enabled_rules_supported()
+    settings_store.set_ai_defense_enabled_rules_supported(False)
+    check("AI Defense enabled_rules discovery persists (set False -> read False)",
+          settings_store.get_ai_defense_enabled_rules_supported() is False)
+    check("fresh AIDefenseClient honors the persisted discovery (no re-probe)",
+          AIDefenseClient()._rules_supported() is False)
+    settings_store.set_ai_defense_enabled_rules_supported(_prev)
 
     print(f"RESULT: {'ok' if not _fails else str(_fails) + ' failed'}")
     return 1 if _fails else 0

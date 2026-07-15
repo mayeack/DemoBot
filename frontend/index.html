@@ -266,6 +266,25 @@
                     </div>
                 </div>
 
+                <!-- Multi-Agent Mode (pipeline control: coordinator + specialists vs. domain agent alone) -->
+                <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="multiAgentToggle" class="sr-only peer" onchange="toggleMultiAgent()" checked>
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                            </label>
+                            <div>
+                                <span class="text-sm font-semibold text-indigo-700">Multi-Agent Mode</span>
+                                <p class="text-xs text-indigo-500">ON = coordinator → specialists → synthesizer pipeline. OFF = the domain agent answers directly (all guardrails still run)</p>
+                            </div>
+                        </div>
+                        <div id="multiAgentStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700">
+                            ON
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Include Synthetic PII/PHI in Responses -->
                 <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
                     <div class="flex items-center justify-between">
@@ -498,7 +517,7 @@
 
                 <div id="loadingIndicator" class="hidden mt-4 flex items-center justify-center space-x-2">
                     <div class="spinner"></div>
-                    <span class="text-gray-600">Processing your message...</span>
+                    <span id="loadingStatus" class="text-gray-600">Processing your message...</span>
                 </div>
             </div>
 
@@ -514,6 +533,6 @@
         </div>
     </div>
 
-    <script src="/static/js/chat.js?v=16"></script>
+    <script src="/static/js/chat.js?v=18"></script>
 </body>
 </html>

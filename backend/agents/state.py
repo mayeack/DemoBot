@@ -32,11 +32,16 @@ class DemoBotState(TypedDict, total=False):
     force_boundary_injection: Optional[bool]
     ai_defense_review: Optional[bool]
     internal_policy_review: Optional[bool]
+    multi_agent_mode: Optional[bool]
 
     # ---- Correlation / timing (set by the router node) ----
     request_id: str
     trace_id: str
     start_time: float
+    # Wall-clock per non-LLM stage (e.g. AI Defense inspections), reported in
+    # the governance event's performance_data for latency triage. Keys are
+    # ``{stage}_ms``. Per-agent LLM timing lives in agent_trace.duration_ms.
+    stage_timings: Dict[str, float]
     system_prompt: str
     agent_name: str
     conversational: bool
@@ -111,6 +116,7 @@ def build_initial_state(
     force_boundary_injection: Optional[bool] = None,
     ai_defense_review: Optional[bool] = None,
     internal_policy_review: Optional[bool] = None,
+    multi_agent_mode: Optional[bool] = None,
 ) -> DemoBotState:
     """Build the initial graph state from an inbound chat request.
 
@@ -131,5 +137,6 @@ def build_initial_state(
         force_boundary_injection=force_boundary_injection,
         ai_defense_review=ai_defense_review,
         internal_policy_review=internal_policy_review,
+        multi_agent_mode=multi_agent_mode,
         terminal=False,
     )
