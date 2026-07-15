@@ -385,8 +385,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const savedInternalPolicyEnabled = localStorage.getItem('medadvice_internal_policy_enabled');
     const savedMultiAgentEnabled = localStorage.getItem('medadvice_multi_agent_enabled');
 
-    if (savedSessionId && savedDisclaimerAccepted === 'true') {
-        sessionId = savedSessionId;
+    // Always start a fresh chat session on page load/reload (and browser restart):
+    // if the disclaimer was previously accepted, skip the modal and restore prefs,
+    // but mint a brand-new session instead of reusing the saved one.
+    if (savedDisclaimerAccepted === 'true') {
         disclaimerAccepted = true;
         piiEnabled = savedPiiEnabled === 'true';
         toxicEnabled = savedToxicEnabled === 'true';
@@ -397,7 +399,9 @@ document.addEventListener('DOMContentLoaded', function() {
         internalPolicyEnabled = savedInternalPolicyEnabled !== 'false';
         // Multi-agent mode defaults ON unless explicitly turned off.
         multiAgentEnabled = savedMultiAgentEnabled !== 'false';
-        showMainApp();
+        // Mint a fresh session (clears the old transcript) rather than reusing
+        // savedSessionId; createNewSession() also calls showMainApp() when done.
+        createNewSession();
         
         // Set toggle state
         const toggle = document.getElementById('piiToggle');
