@@ -3,7 +3,7 @@
 
 Guards the Settings "Model" dropdown's data source: discovery must (1) populate a
 per-provider available-model cache, (2) be best-effort — a failing/unconfigured
-provider yields [] without breaking the others, and (3) expose all four providers.
+provider yields [] without breaking the others, and (3) expose all five providers.
 Network-free: the provider probes are stubbed so the test is deterministic.
 
 Run:  venv/bin/python tests/test_model_catalog.py    # exit 0 = pass
@@ -39,10 +39,11 @@ def test_refresh_populates_and_is_best_effort() -> None:
             "anthropic": _boom,
             "openai": lambda _s: [],
             "bedrock": lambda _s: [],
+            "nvidia": lambda _s: [],
         }
         av = model_catalog.refresh()
-        check("refresh returns all four providers",
-              set(av.keys()) == {"anthropic", "bedrock", "openai", "ollama"})
+        check("refresh returns all five providers",
+              set(av.keys()) == {"anthropic", "bedrock", "openai", "ollama", "nvidia"})
         check("a working probe populates its list", av["ollama"] == ["dolphin3:8b", "llama3.2:latest"])
         check("a failing probe degrades to [] (best-effort)", av["anthropic"] == [])
         check("ensure_loaded marks discovery loaded", model_catalog._loaded is True)

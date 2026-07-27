@@ -63,6 +63,14 @@ elif [ "$AI_PROVIDER" = "openai" ]; then
         echo "The application will not work without a valid API key"
         echo ""
     fi
+elif [ "$AI_PROVIDER" = "nvidia" ]; then
+    echo "🔧 AI Provider: NVIDIA NIM (hosted API)"
+    # Warn-only: the nvapi- key may also arrive via the Settings UI store.
+    if ! grep -q "^NVIDIA_API_KEY=nvapi-" .env 2>/dev/null; then
+        echo "⚠️  WARNING: NVIDIA_API_KEY not configured in .env (expected nvapi-… key)"
+        echo "The application will not work without a valid API key"
+        echo ""
+    fi
 elif [ "$AI_PROVIDER" = "ollama" ]; then
     echo "🔧 AI Provider: Ollama (local uncensored model)"
     # Preflight the local Ollama daemon: warn (don't block) if it's down or the
@@ -86,7 +94,7 @@ elif [ "$AI_PROVIDER" = "ollama" ]; then
     fi
 else
     echo "⚠️  WARNING: Unknown AI_PROVIDER: $AI_PROVIDER"
-    echo "Valid options: anthropic, bedrock, openai, ollama"
+    echo "Valid options: anthropic, bedrock, openai, ollama, nvidia"
     echo ""
 fi
 

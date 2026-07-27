@@ -30,8 +30,8 @@ def check(name: str, cond: bool) -> None:
 
 
 def test_choices_and_get_shape() -> None:
-    check("AI_PROVIDER_CHOICES == the 4 supported providers",
-          settings_store.AI_PROVIDER_CHOICES == ["anthropic", "bedrock", "openai", "ollama"])
+    check("AI_PROVIDER_CHOICES == the 5 supported providers",
+          settings_store.AI_PROVIDER_CHOICES == ["anthropic", "bedrock", "openai", "ollama", "nvidia"])
     d = settings_store.get_ai_provider()
     check("get_ai_provider exposes provider/model/choices/models",
           all(k in d for k in ("provider", "model", "choices", "models")))
@@ -78,6 +78,10 @@ def test_provider_fields_no_secret_leak() -> None:
           any(it["key"] == "api_key" and it["secret"] for it in f["anthropic"]))
     check("non-secret fields (ollama base_url) do carry a value",
           any(it["key"] == "base_url" and "value" in it for it in f["ollama"]))
+    check("nvidia surfaces a secret api_key field",
+          any(it["key"] == "api_key" and it["secret"] for it in f["nvidia"]))
+    check("nvidia base_url is non-secret and carries a value",
+          any(it["key"] == "base_url" and "value" in it for it in f["nvidia"]))
 
 
 def test_secret_apply_mask_and_blank_keep() -> None:

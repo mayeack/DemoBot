@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # "anthropic" = Direct Anthropic API (local development)
     # "bedrock" = AWS Bedrock (production on AWS)
     # "openai" = OpenAI-compatible APIs (OpenAI, DeepSeek, etc.)
+    # "nvidia" = NVIDIA NIM (hosted build.nvidia.com or self-hosted container)
     ai_provider: str = "anthropic"
 
     # Anthropic API Configuration (used when ai_provider="anthropic")
@@ -55,6 +56,14 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"
     openai_base_url: str = "https://api.openai.com/v1"
+
+    # NVIDIA NIM Configuration (used when ai_provider="nvidia")
+    # Hosted NVIDIA API catalog (build.nvidia.com) by default; the endpoint is
+    # OpenAI-compatible, so a self-hosted NIM container works by pointing
+    # nvidia_base_url at it (e.g. http://localhost:8000/v1).
+    nvidia_api_key: str = ""  # nvapi-... bearer key from build.nvidia.com
+    nvidia_model: str = "meta/llama-3.1-8b-instruct"
+    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
 
     # Ollama Configuration (used when ai_provider="ollama")
     # Local, UNCENSORED open-source model served by a local `ollama serve` daemon

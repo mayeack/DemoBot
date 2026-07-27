@@ -41,12 +41,13 @@ _ID_RE = re.compile(r"[^a-z0-9-]+")
 # Supported LLM providers and the ``settings`` attribute that holds each one's
 # model id. Keep in sync with backend/agents/llm.py::get_chat_model and
 # backend/services/ai_client.py::get_ai_client.
-AI_PROVIDER_CHOICES: List[str] = ["anthropic", "bedrock", "openai", "ollama"]
+AI_PROVIDER_CHOICES: List[str] = ["anthropic", "bedrock", "openai", "ollama", "nvidia"]
 _PROVIDER_MODEL_ATTR: Dict[str, str] = {
     "anthropic": "anthropic_model",
     "bedrock": "bedrock_model_id",
     "openai": "openai_model",
     "ollama": "ollama_model",
+    "nvidia": "nvidia_model",
 }
 
 
@@ -89,6 +90,12 @@ _PROVIDER_FIELDS: Dict[str, List[_CredField]] = {
     "ollama": [
         _CredField("base_url", "Base URL", settings_attr="ollama_base_url",
                    placeholder="http://localhost:11434"),
+    ],
+    "nvidia": [
+        _CredField("api_key", "API key", secret=True, settings_attr="nvidia_api_key",
+                   placeholder="nvapi-…"),
+        _CredField("base_url", "Base URL", settings_attr="nvidia_base_url",
+                   placeholder="https://integrate.api.nvidia.com/v1"),
     ],
 }
 

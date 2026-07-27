@@ -35,6 +35,8 @@ def _active_provider_info():
         name, model = provider, settings.bedrock_model_id
     elif provider == "openai":
         name, model = provider, settings.openai_model
+    elif provider == "nvidia":
+        name, model = provider, settings.nvidia_model
     elif provider == "ollama":
         name, model = provider, settings.ollama_model
     else:
