@@ -43,6 +43,8 @@ logs/*.log
 logs/*.log.*
 logs/*.json
 logs/*.json.*
+# Captured stdout/stderr from backgrounded run.sh / eval / tunnel invocations
+logs/*.out
 !logs/.gitkeep
 
 # IDE

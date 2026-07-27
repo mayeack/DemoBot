@@ -119,6 +119,11 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
   Cloudflare URL (ephemeral; needs the app running).
 - Access gate: `ACCESS_KEY` in `.env` (currently word-style). Log in at `/login`,
   or `curl -u x:$ACCESS_KEY`. `/health` is the only open route.
+- **Rotate ACCESS_KEY:** edit `.env`, then `launchctl kickstart -k gui/501/com.yeack.medadvice-app`
+  (key is read at startup — no hot reload). Rotation logs out every browser
+  (cookie = sha256 of key). The OpenClaw gateway bakes the key in at container
+  start — rerun `./run-openclaw.sh` if `demobot-openclaw` is up. Verify old→401 /
+  new→200 on both :8001 and medadvice.yeackbot.com.
 
 ## OpenClaw agentic surface (Mode C — opt-in demo)
 - Gives an OpenClaw agent real tools so the demo can show agentic tool abuse
