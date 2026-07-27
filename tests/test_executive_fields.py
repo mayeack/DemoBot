@@ -156,6 +156,36 @@ check("perf: trace_entry keeps the pre-existing field set (additive contract)",
       {"name", "role", "model", "input_tokens", "output_tokens", "output_text",
        "status"} <= set(log_t["agent_trace"][0].keys()))
 
+# 9c. Agentic tool-call event (OpenClaw tool guard) --------------------------
+# A blocked exfiltration attempt: operation_name=="tool_call" must map to the
+# tool_exploitation category, a blocked_tool_call outcome, and stacked risk.
+tc = create_governance_log(
+    operation_name="tool_call", request_model="llama3.2:3b",
+    conversation_id="S9", session_id="S9", input_messages=[], token_type="tool_call",
+    request_id="R9", trace_id="T9", tool_call_id="call-9",
+    tool_name="web_fetch", tool_decision="block",
+    tool_denied_reason="unapproved egress host: evil.example",
+    agent_surface="openclaw", policy_blocked=True, guardrail_triggered=True,
+    guardrail_ids=["openclaw_tool_guard"], theme="medadvice",
+)
+check("toolcall: category tool_exploitation", tc["prompt_category"] == "tool_exploitation", tc["prompt_category"])
+check("toolcall: action=block", tc["policy_action"] == "block", tc["policy_action"])
+check("toolcall: outcome blocked_tool_call", tc["business_outcome"] == "blocked_tool_call", tc["business_outcome"])
+check("toolcall: tool_name surfaced", tc["tool_name"] == "web_fetch", tc.get("tool_name"))
+check("toolcall: audit complete on id chain (no tokens)", tc["audit_status"] == "complete", tc["audit_status"])
+# policy_blocked (30) + tool_call escalation (20) puts this well above a chat block.
+check("toolcall: risk stacked above chat block", tc["risk_score"] >= 55, tc["risk_score"])
+
+# 9d. Unenforced tool-call (control run) still categorizes honestly ----------
+tc_allow = create_governance_log(
+    operation_name="tool_call", request_model="llama3.2:3b",
+    conversation_id="S10", session_id="S10", input_messages=[], token_type="tool_call",
+    request_id="R10", trace_id="T10", tool_call_id="call-10",
+    tool_name="read", tool_decision="allow", agent_surface="openclaw",
+)
+check("toolcall-allow: category still tool_exploitation", tc_allow["prompt_category"] == "tool_exploitation")
+check("toolcall-allow: action=allow", tc_allow["policy_action"] == "allow", tc_allow["policy_action"])
+
 # 10. Never raises on garbage -------------------------------------------------
 check("robust: empty dict -> dict", isinstance(derive_executive_fields({}), dict))
 check("robust: junk types -> dict",

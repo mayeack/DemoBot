@@ -190,6 +190,53 @@ class GovernanceLogger:
 
         self._write_log(log_data, "governance")
 
+    def log_tool_call(
+        self,
+        session_id: str,
+        request_id: str,
+        tool_name: str,
+        tool_decision: str,
+        *,
+        tool_call_id: Optional[str] = None,
+        tool_arguments: Optional[str] = None,
+        tool_denied_reason: Optional[str] = None,
+        agent_surface: str = "openclaw",
+        **kwargs
+    ):
+        """Log a governed agent tool call (the OpenClaw tool guard).
+
+        Written to the governance JSON file, SQLite, and any HEC destinations —
+        the same fan-out as ``log_response`` — so a blocked/allowed tool action
+        shows up alongside chat turns in the governance UI and Splunk. The
+        executive overlay maps ``operation_name == "tool_call"`` to a
+        ``blocked_tool_call`` business outcome when denied.
+        """
+        _provider_name, _model = _active_provider_info()
+        log_data = create_governance_log(
+            operation_name="tool_call",
+            request_model=_model,
+            conversation_id=session_id,
+            session_id=session_id,
+            request_id=request_id,
+            input_messages=[],
+            token_type="tool_call",
+            provider_name=_provider_name,
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+            tool_arguments=tool_arguments,
+            tool_decision=tool_decision,
+            tool_denied_reason=tool_denied_reason,
+            agent_surface=agent_surface,
+            policy_blocked=(tool_decision == "block"),
+            guardrail_triggered=(tool_decision == "block"),
+            **kwargs
+        )
+
+        self._write_log(log_data, "governance")
+
+        if self.db_logging:
+            self._write_to_database(log_data)
+
     def log_error(
         self,
         session_id: str,
@@ -363,6 +410,11 @@ class GovernanceLogger:
                     hallucination_types=log_data.get("hallucination_types"),
                     authority_violation_detected=log_data.get("authority_violation_detected", False),
                     authority_violation_types=log_data.get("authority_violation_types"),
+                    tool_name=log_data.get("tool_name"),
+                    tool_call_id=log_data.get("tool_call_id"),
+                    tool_decision=log_data.get("tool_decision"),
+                    tool_denied_reason=log_data.get("tool_denied_reason"),
+                    agent_surface=log_data.get("agent_surface"),
                     error_type=log_data.get("error_type"),
                     enduser_id=log_data.get("enduser_id"),
                     service_name=log_data.get("service_name"),

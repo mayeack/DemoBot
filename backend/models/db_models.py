@@ -96,6 +96,14 @@ class AIGovernanceLog(Base):
     server_address = Column(String, nullable=True)
     server_port = Column(Integer, nullable=True)
 
+    # Agentic tool guard (operation_name == "tool_call"). Added additively by
+    # reconcile_schema() at startup — no manual migration.
+    tool_name = Column(String, nullable=True, index=True)
+    tool_call_id = Column(String, nullable=True)
+    tool_decision = Column(String, nullable=True, index=True)
+    tool_denied_reason = Column(Text, nullable=True)
+    agent_surface = Column(String, nullable=True, index=True)
+
     # Actor / application context
     enduser_id = Column(String, nullable=True, index=True)
     service_name = Column(String, default="demobot-v3")

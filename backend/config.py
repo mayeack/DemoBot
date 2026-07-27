@@ -305,6 +305,35 @@ class Settings(BaseSettings):
             names.append(prescription)
         return [{"rule_name": name} for name in names if name]
 
+    @property
+    def tool_guard_sensitive_tools_set(self) -> set:
+        """Lowercased set parsed from ``tool_guard_sensitive_tools``."""
+        return {
+            name.strip().lower()
+            for name in (self.tool_guard_sensitive_tools or "").split(",")
+            if name.strip()
+        }
+
+    @property
+    def tool_guard_egress_hosts_set(self) -> set:
+        """Lowercased host[:port] allowlist parsed from
+        ``tool_guard_egress_allow_hosts``. Empty set = deny all egress."""
+        return {
+            host.strip().lower()
+            for host in (self.tool_guard_egress_allow_hosts or "").split(",")
+            if host.strip()
+        }
+
+    @property
+    def tool_guard_workspace_roots_list(self) -> list[str]:
+        """Normalized workspace roots parsed from ``tool_guard_workspace_roots``
+        (trailing slashes stripped; empty entries dropped)."""
+        return [
+            root.strip().rstrip("/") or "/"
+            for root in (self.tool_guard_workspace_roots or "").split(",")
+            if root.strip()
+        ]
+
 # Global settings instance
 settings = Settings()
 
