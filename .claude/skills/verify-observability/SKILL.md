@@ -31,6 +31,15 @@ Run the regression test after editing any of:
 - the OpenTelemetry / `splunk-*` packages in `requirements.txt`
 - `.env` `OTEL_*` / `SPLUNK_*` keys (or the Python version of `venv/`)
 
+For the **OpenClaw agentic surface** (`gen_ai` `execute_tool` spans), also run
+`./tests/observability/verify_openclaw_observability.sh` after editing any of:
+- `backend/telemetry/otel.py` `tool_span` / `record_tool_result`
+- `backend/routers/toolguard.py`, `backend/services/tool_policy.py`
+- `run-openclaw.sh` (the generated `diagnostics.otel` config)
+- `openclaw/plugins/demobot-toolguard/*` (the gateway plugin)
+It SKIPs its live-gateway tiers when the gateway is down, so it is safe to run
+without Mode C up (Tier 0 config/selftest still runs).
+
 ## How to run
 
 ```bash
