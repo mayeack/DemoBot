@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multi-Server Observability Fan-Out — Config &amp; Secret Distribution Design</title>
+<style>
+  :root{--fg:#1b2430;--muted:#5a6675;--accent:#0b6b5b;--line:#dfe4ea;--bg:#ffffff;--code:#f4f6f8;--warn:#b3541e;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:960px;margin:0 auto;padding:40px 24px 80px;}
+  h1{font-size:1.8rem;line-height:1.25;margin:0 0 .3em;}
+  h2{font-size:1.3rem;margin:2.2em 0 .5em;padding-bottom:.25em;border-bottom:2px solid var(--accent);}
+  h3{font-size:1.06rem;margin:1.6em 0 .4em;color:#12313a;}
+  p{margin:.6em 0;}
+  a{color:var(--accent);}
+  code{background:var(--code);padding:.12em .38em;border-radius:4px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em;}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;line-height:1.45;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82rem;}
+  pre code{background:none;padding:0;}
+  table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.9rem;display:block;overflow-x:auto;}
+  th,td{border:1px solid var(--line);padding:8px 11px;text-align:left;vertical-align:top;}
+  th{background:#eef6f4;font-weight:600;}
+  tr:nth-child(even) td{background:#fafbfc;}
+  .meta{color:var(--muted);font-size:.92rem;border-left:3px solid var(--accent);padding:.4em 0 .4em 14px;margin:1em 0;background:#f7fbfa;}
+  .meta div{margin:.15em 0;}
+  .warn{color:var(--warn);font-weight:600;}
+  .ok{color:var(--accent);font-weight:600;}
+  strong{color:#0c1a24;}
+  hr{border:none;border-top:1px solid var(--line);margin:2em 0;}
+  ol,ul{padding-left:1.4em;}
+  li{margin:.3em 0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Multi-Server Observability Fan-Out — Config &amp; Secret Distribution Design</h1>
+
+<div class="meta">
+  <div><strong>Status:</strong> Design (not implemented — recommended next phase)</div>
+  <div><strong>Scope:</strong> distribute the identical set of API keys / endpoints / HEC targets to <strong>every</strong> server in a DemoBot fleet, so all servers fan <strong>all</strong> telemetry/guardrail traffic out to <strong>all</strong> four backends, preserving per-host identity.</div>
+  <div><strong>Context date:</strong> 2026-07-27. Live baseline: single EC2 host <code><EC2_INSTANCE_ID></code> (<code>main@edfcb88</code>, <code>AI_PROVIDER=ollama</code>) behind the named Cloudflare tunnel <code><TUNNEL_HOSTNAME></code>.</div>
+</div>
+
+<h2>1. The four backends and how data reaches them</h2>
+<table>
+<thead><tr><th>Backend</th><th>Transport</th><th>Trigger</th><th>Configured by</th></tr></thead>
+<tbody>
+<tr><td><strong>Splunk Observability Cloud</strong></td><td>app → OTLP → <strong>local OTel collector</strong> → APM (traces) + signalfx (metrics)</td><td>every turn (passive)</td><td><code>.env</code> <code>SPLUNK_REALM</code>/<code>SPLUNK_ACCESS_TOKEN</code> + <code>OTEL_*</code></td></tr>
+<tr><td><strong>Galileo</strong></td><td>(a) SDK per turn; (b) collector <code>otlphttp/galileo</code> (GenAI spans)</td><td>every turn (passive)</td><td><code>.env</code> <code>GALILEO_*</code></td></tr>
+<tr><td><strong>Splunk Core</strong></td><td>app → <strong>HEC</strong> (<code>backend/hec/</code>), multi-destination fan-out</td><td>every governance/audit log</td><td><strong>SQLite</strong> <code>app_settings.hec_destinations</code> (no env var)</td></tr>
+<tr><td><strong>Cisco AI Defense</strong></td><td>app → Inspection API (<code>inspect_prompt</code>/<code>inspect_response</code>)</td><td><strong>per-request opt-in</strong> (<code>ai_defense_review</code>)</td><td><code>.env</code> <code>AI_DEFENSE_*</code></td></tr>
+</tbody>
+</table>
+
+<p>Two telemetry planes:</p>
+<ul>
+<li><strong>Plane A (OTLP):</strong> <code>app → localhost:4317 collector → Splunk O11y + Galileo</code>. The collector YAML is <strong>host-generic</strong> and reads <code>${env:SPLUNK_REALM|SPLUNK_ACCESS_TOKEN|GALILEO_*}</code>.</li>
+<li><strong>Plane B (governance logs):</strong> one chokepoint — <code>backend/logging/governance_logger.py::_write_log</code> → <code>hec_runtime.submit()</code> (fans to <strong>all enabled HEC destinations</strong>) <strong>+</strong> Galileo SDK.</li>
+</ul>
+
+<pre><code>                                   ┌────────────► Splunk O11y Cloud (APM + metrics)
+   app ──OTLP──► local collector ──┤
+    │                              └────────────► Galileo (GenAI spans)
+    │
+    ├─ governance_logger._write_log ─┬─► HEC ──► Splunk Core  (all enabled destinations)
+    │                                └─► Galileo SDK (governance verdicts)
+    │
+    └─ defense nodes ──(opt-in)──► Cisco AI Defense Inspection API</code></pre>
+
+<h2>2. The distribution problem — three config planes, only one travels with <code>.env</code></h2>
+<table>
+<thead><tr><th>Plane</th><th>Holds</th><th>Travels by copying <code>.env</code>?</th></tr></thead>
+<tbody>
+<tr><td><strong>1. <code>.env</code> / process env</strong></td><td>O11y (<code>SPLUNK_*</code>,<code>OTEL_*</code>), Galileo (<code>GALILEO_*</code>), AI Defense (<code>AI_DEFENSE_*</code>), provider keys, <code>ACCESS_KEY</code></td><td class="ok">✅ yes</td></tr>
+<tr><td><strong>2. SQLite <code>app_settings.data</code></strong></td><td><strong>HEC destinations (Splunk Core)</strong>, UI provider creds, active-provider override</td><td class="warn">❌ no — per-host only</td></tr>
+<tr><td><strong>3. Collector env</strong></td><td>realm/token, Galileo headers</td><td class="ok">✅ yes (host-generic YAML, from <code>.env</code>)</td></tr>
+</tbody>
+</table>
+
+<p><strong>Key insight:</strong> copying one canonical <code>.env</code> to every host distributes three of the four backends' config automatically. It does <strong>not</strong> carry <strong>Splunk Core HEC destinations</strong>, which live only in each host's SQLite blob and are entered by hand through the Settings UI. Worse, that same SQLite plane can hold an <strong>active-provider override that silently wins over <code>.env</code></strong> at startup (observed live: the Mac DB forces <code>provider=nvidia</code> while its <code>.env</code> says <code>ollama</code>). Any fleet design must therefore address Plane 2 explicitly, not just ship <code>.env</code>.</p>
+
+<h2>3. Design</h2>
+
+<h3>3.1 Plane 1 — one canonical <code>.env</code>, pushed by config management</h3>
+<p>Chosen substrate: <strong>shared canonical <code>.env</code> distributed via config management</strong> (Ansible / <code>scp</code> / <code>rsync</code>). This works cleanly because <code>backend/config.py</code> and the shell launchers honor <strong>already-exported env vars over <code>.env</code></strong> (<code>config.py:30</code>), and the collector YAML is host-generic.</p>
+<p><strong>Identical across every server</strong> (the "distribute to all" set): <code>SPLUNK_REALM</code>, <code>SPLUNK_ACCESS_TOKEN</code> (ingest), <code>SPLUNK_API_TOKEN</code> (API), <code>GALILEO_API_KEY</code>, <code>GALILEO_PROJECT</code>, <code>GALILEO_LOG_STREAM</code>, <code>GALILEO_CONSOLE_URL</code>, <code>AI_DEFENSE_API_KEY</code>, <code>AI_DEFENSE_REGION</code>/<code>AI_DEFENSE_ENDPOINT</code> + rule lists, provider keys (<code>ANTHROPIC_API_KEY</code>, <code>NVIDIA_API_KEY</code>, …), <code>ACCESS_KEY</code>, <code>AI_PROVIDER</code> + <code>*_MODEL</code>, all safety/injection/session flags, <code>OTEL_SERVICE_NAME=demobot-v3</code>, <code>OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317</code>.</p>
+<p><strong>Per-host (must differ / be templated):</strong> <code>OTEL_RESOURCE_ATTRIBUTES</code> (<code>deployment.environment</code> + host id — how O11y/Galileo split one shared service by box), <code>SERVER_HOSTNAME</code>, <code>DATABASE_URL</code> (unless a shared DB — see 3.5). <code>OLLAMA_BASE_URL</code> stays <code>localhost</code> (identical string, host-local runtime).</p>
+
+<h3>3.2 Plane 2 — a startup <strong>seed loader</strong> for the SQLite config (the missing piece)</h3>
+<p>This is the core new capability. Add a boot-time loader that reads the SQLite-only config from a distributable source and upserts it into the store — so HEC destinations travel exactly like <code>.env</code>.</p>
+<ul>
+<li><strong>Source:</strong> an env var <code>HEC_DESTINATIONS_JSON</code> (a JSON array of destinations) <strong>or</strong> a gitignored <code>hec_destinations.json</code> file dropped next to <code>.env</code>.</li>
+<li><strong>Action on startup</strong> (before <code>hec_runtime</code> starts): parse → for each entry call the existing <code>settings_store.add_destination()</code> / update, then <code>reconfigure_hec()</code>. Reuses the machinery already in <code>backend/settings_store.py</code> + <code>backend/hec/runtime.py</code> (which already fans one event to all enabled destinations).</li>
+<li><strong>Idempotent:</strong> match on destination <code>name</code>/<code>id</code>; update in place so re-provisioning is safe.</li>
+<li><strong>Optional:</strong> the same loader can seed provider creds to remove reliance on UI entry (see 3.4).</li>
+</ul>
+<p><em>Alternatives considered:</em> (a) a post-deploy script that <code>POST</code>s <code>/api/hec/destinations</code> per host (no code change, but an extra imperative step and secrets in shell history); (b) a shared <strong>Postgres</strong> <code>DATABASE_URL</code> so all hosts share one <code>app_settings</code> row (simplest conceptually, but turns the DB into shared infra and a single point of failure). The seed loader is recommended because it keeps the "config as data, pushed to each host" model consistent with Plane 1.</p>
+
+<h3>3.3 Per-host identity</h3>
+<p>Template only three fields at provision time: <code>OTEL_RESOURCE_ATTRIBUTES=deployment.environment=demobot-ec2-&lt;n&gt;,host.name=&lt;hostname&gt;</code>, <code>SERVER_HOSTNAME=&lt;hostname&gt;</code>, and <code>DATABASE_URL</code>. Everything else is byte-identical — this is what makes "one shared service, split by host" work in O11y/Galileo.</p>
+
+<h3>3.4 Divergence guardrail (provider selection)</h3>
+<p>The SQLite active-provider override silently beating <code>.env</code> is a fleet foot-gun. Options: (a) make <code>.env</code> authoritative — ignore/clear the SQLite provider override on managed hosts; or (b) fold provider selection + creds into the seed (3.2) so they're distributed deterministically. Recommend documenting provider selection as <strong><code>.env</code>-only</strong> on fleet hosts and having provisioning clear any stale SQLite override.</p>
+
+<h3>3.5 Provisioning (systemd)</h3>
+<p>The live EC2 box runs systemd units <code>demobot-app</code> / <code>demobot-collector</code> / <code>demobot-tunnel</code> created out-of-band; the repo ships <strong>launchd-only</strong> templates (<code>deploy/launchd/</code>). Add a parallel <strong>systemd</strong> provisioning path mirroring <code>deploy/launchd/install.sh</code>: unit files + an <code>EnvironmentFile</code> (or the canonical <code>.env</code> in <code>WorkingDirectory</code>). A new server becomes turnkey:</p>
+<pre><code>clone repo → drop canonical .env + hec_destinations.json → systemctl enable/start demobot-* → self-verify</code></pre>
+
+<h3>3.6 Secret hygiene</h3>
+<p>Two secrets were remediated on the baseline host while writing this design; both belong in the canonical set:</p>
+<ul>
+<li><strong><code>SPLUNK_API_TOKEN</code></strong> — was returning <span class="warn">401</span> (an ingest token had been used where an O11y <strong>API</strong> token is required). Replaced; <code>verify_observability.sh</code> now passes <span class="ok">9/9</span>. Note a healthy ingest pipeline does <strong>not</strong> imply a valid API token — they are separate.</li>
+<li><strong>Splunk Core HEC token</strong> — was not configured at all, so no governance logs reached Splunk Core. Now provisioned against a local Splunk Enterprise, writing to index <code>gen_ai_log</code> (sourcetype <code>medadvice:governance</code>); include it in the Plane-2 seed.</li>
+</ul>
+<p>Rotate from one canonical source, and treat any token pasted into a chat/ticket as compromised. Never bake tokens into the repo (<code>.env</code> and <code>*.db</code> are gitignored — keep it that way). See the <code>provision-tokens</code> skill for generation, population and validation.</p>
+
+<h2>4. Target fan-out topology</h2>
+<pre><code>   ┌── server-1 (app+collector) ──┐
+   ├── server-2 (app+collector) ──┤        ┌─► Splunk O11y Cloud (realm us1)
+   ├── server-3 (app+collector) ──┼────────┼─► Galileo (project DemoBot)
+   └── server-N (app+collector) ──┘        ├─► Splunk Core (HEC destination[s])
+        each identical config,             └─► Cisco AI Defense (inspection)
+        each fans out to ALL four</code></pre>
+<p>Every server carries the same keys/endpoints (Plane 1) <strong>and</strong> the same HEC destination list (Plane 2 seed), differing only in host-identity fields — so all four backends receive every server's data, tagged by host.</p>
+
+<h2>5. Implementation checklist (next phase — not done this session)</h2>
+<ol>
+<li>Add the Plane-2 <strong>seed loader</strong> (<code>HEC_DESTINATIONS_JSON</code> / <code>hec_destinations.json</code> → <code>add_destination</code> + <code>reconfigure_hec</code>) with idempotent upsert. Optionally seed provider creds.</li>
+<li>Establish the <strong>canonical secret source</strong> (config-mgmt repo / vault / SSM) and the push mechanism (Ansible/<code>scp</code>).</li>
+<li>Add the <strong>systemd</strong> provisioning analog to <code>deploy/launchd/install.sh</code> (units + <code>EnvironmentFile</code> + per-host identity templating).</li>
+<li>Fix/rotate <strong><code>SPLUNK_API_TOKEN</code></strong>; add the <strong>HEC</strong> destination to the canonical seed.</li>
+<li>Add a per-host <strong>self-verify</strong> hook (<code>tests/observability/verify_observability.sh</code> + HEC stats + AI Defense toggle test) run at the end of provisioning.</li>
+</ol>
+
+<h2>6. Per-host verification (definition of done for each server)</h2>
+<ul>
+<li><code>verify_observability.sh</code> → Tier 1–3 pass (needs a valid <code>SPLUNK_API_TOKEN</code>).</li>
+<li><code>GET /api/hec/stats</code> → <code>events_sent&gt;0</code>, <code>failed=0</code>; the Splunk Core search finds the events.</li>
+<li>Galileo shows the host's turns (project <code>DemoBot</code>).</li>
+<li>One chat turn with <code>ai_defense_review=true</code> → AI Defense <code>200</code> + governance flags.</li>
+<li>O11y/Galileo split the fleet by <code>host.name</code> / <code>deployment.environment</code>.</li>
+</ul>
+
+</div>
+</body>
+</html>
