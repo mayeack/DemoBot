@@ -10,6 +10,7 @@ configuration is required:
     anthropic -> ChatAnthropic            (local development)
     bedrock   -> ChatBedrockConverse      (AWS production)
     openai    -> ChatOpenAI               (OpenAI-compatible APIs)
+    nvidia    -> ChatOpenAI               (NVIDIA NIM, OpenAI-compatible)
 
 ``invoke_chat`` normalizes the LangChain response into a small dataclass with the
 same fields the governance contract needs (id, model, token usage, stop reason),
@@ -119,6 +120,19 @@ def get_chat_model(settings, *, max_tokens: int = 2048, temperature: float = 0.7
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
+        elif provider == "nvidia":
+            from langchain_openai import ChatOpenAI
+
+            # NVIDIA NIM (hosted integrate.api.nvidia.com or a self-hosted
+            # container) speaks the OpenAI chat-completions protocol, so
+            # ChatOpenAI is reused with the NVIDIA base_url + nvapi- bearer key.
+            model = ChatOpenAI(
+                model=model_override or settings.nvidia_model,
+                api_key=settings.nvidia_api_key,
+                base_url=settings.nvidia_base_url,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
         elif provider == "ollama":
             from langchain_ollama import ChatOllama
 
@@ -140,7 +154,7 @@ def get_chat_model(settings, *, max_tokens: int = 2048, temperature: float = 0.7
         else:
             raise ChatModelError(
                 f"Unknown AI provider: {provider}. "
-                "Valid options are 'anthropic', 'bedrock', 'openai', or 'ollama'."
+                "Valid options are 'anthropic', 'bedrock', 'openai', 'nvidia', or 'ollama'."
             )
     except ImportError as exc:  # pragma: no cover - depends on optional deps
         raise ChatModelError(
@@ -249,6 +263,8 @@ def invoke_chat(
         if provider == "bedrock"
         else settings.openai_model
         if provider == "openai"
+        else settings.nvidia_model
+        if provider == "nvidia"
         else settings.ollama_model
     )
     # Demo override: report a static/random model name instead of the real one
@@ -364,6 +380,8 @@ def invoke_agent(
         if provider == "bedrock"
         else settings.openai_model
         if provider == "openai"
+        else settings.nvidia_model
+        if provider == "nvidia"
         else settings.ollama_model
     )
     # Demo override: report a static/random model name instead of the real one

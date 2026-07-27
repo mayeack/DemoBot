@@ -223,6 +223,10 @@ def main() -> int:
               c.put("/api/settings/emit-model", headers=AUTH, json={"enabled": False, "model_name": "gpt-4o", "random": False}).status_code == 200)
         check("PUT /api/settings/emit-model unknown model -> 422",
               c.put("/api/settings/emit-model", headers=AUTH, json={"enabled": True, "model_name": "not-a-real-model", "random": False}).status_code == 422)
+        rsi = c.get("/api/server-info", headers=AUTH)
+        check("GET /api/server-info -> 200 + non-empty hostname",
+              rsi.status_code == 200 and bool(rsi.json().get("hostname")), f"{rsi.status_code}")
+        check("GET /api/server-info -> 401 without key", c.get("/api/server-info").status_code == 401)
 
         # ---- HEC destinations CRUD ----
         rd = c.get("/api/hec/destinations", headers=AUTH)

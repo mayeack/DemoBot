@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # "anthropic" = Direct Anthropic API (local development)
     # "bedrock" = AWS Bedrock (production on AWS)
     # "openai" = OpenAI-compatible APIs (OpenAI, DeepSeek, etc.)
+    # "nvidia" = NVIDIA NIM (hosted build.nvidia.com or self-hosted container)
     ai_provider: str = "anthropic"
 
     # Anthropic API Configuration (used when ai_provider="anthropic")
@@ -55,6 +56,14 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"
     openai_base_url: str = "https://api.openai.com/v1"
+
+    # NVIDIA NIM Configuration (used when ai_provider="nvidia")
+    # Hosted NVIDIA API catalog (build.nvidia.com) by default; the endpoint is
+    # OpenAI-compatible, so a self-hosted NIM container works by pointing
+    # nvidia_base_url at it (e.g. http://localhost:8000/v1).
+    nvidia_api_key: str = ""  # nvapi-... bearer key from build.nvidia.com
+    nvidia_model: str = "meta/llama-3.1-8b-instruct"
+    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
 
     # Ollama Configuration (used when ai_provider="ollama")
     # Local, UNCENSORED open-source model served by a local `ollama serve` daemon
@@ -92,6 +101,12 @@ class Settings(BaseSettings):
     # Server
     host: str = "0.0.0.0"
     port: int = 8001
+
+    # Identity of the box serving this instance, shown in the UI footer so a
+    # multi-server deployment (Mac vs EC2 vs …) is distinguishable at a glance.
+    # Empty = fall back to the OS hostname. Set SERVER_HOSTNAME in .env for a
+    # friendlier label (e.g. "prod-us-east-1").
+    server_hostname: str = ""
 
     # Public access gate. When set, every request (except /health) must send
     # this value as the HTTP Basic Auth password. Empty = gate disabled (local
@@ -179,6 +194,37 @@ class Settings(BaseSettings):
 
     # Session
     session_timeout_minutes: int = 30
+
+    # -------------------------------------------------------------------------
+    # Agentic tool guard (OpenClaw surface -> /api/toolguard/inspect)
+    # -------------------------------------------------------------------------
+    # The OpenClaw gateway's demobot-toolguard plugin submits every proposed
+    # agent tool call here before execution. Evaluation always runs (policy +
+    # optional AI Defense) so telemetry/governance stay honest either way;
+    # tool_guard_enabled only controls whether a "block" verdict actually
+    # denies the call. False = observe-only (the unguarded control run).
+    tool_guard_enabled: bool = False
+    # Comma-separated CONTAINER-side workspace roots the agent's file paths
+    # must stay inside (the decoy workspace as the gateway container sees it).
+    # Empty = containment check disabled.
+    tool_guard_workspace_roots: str = "/home/node/.openclaw/workspace,/tmp"
+    # Tools capable of side effects (exec / write / egress / channel actions).
+    # Sensitive calls are escalated to AI Defense; benign ones short-circuit
+    # locally so the guard adds no latency to reads.
+    tool_guard_sensitive_tools: str = (
+        "exec,bash,process,write,edit,apply_patch,web_fetch,browser,"
+        "message,canvas,nodes,cron,gateway,sessions_spawn"
+    )
+    # Egress allowlist for URLs found in tool arguments (host or host:port).
+    # Empty = deny-by-default: every egress host is unapproved.
+    tool_guard_egress_allow_hosts: str = ""
+    # Submit rendered sensitive/suspicious calls to Cisco AI Defense (when the
+    # inspection client is configured). Error handling honors the existing
+    # ai_defense_fail_open policy — there is deliberately no second flag.
+    tool_guard_ai_defense: bool = True
+    # Rendered tool-call text is truncated to this many characters before
+    # inspection/logging.
+    tool_guard_max_arg_chars: int = 4000
 
     # -------------------------------------------------------------------------
     # Agentic orchestration (LangChain + LangGraph)

@@ -23,7 +23,9 @@ _SDK_TIMEOUT = 6.0    # anthropic / openai cloud APIs
 
 _lock = threading.Lock()
 _loaded = False
-_AVAILABLE: Dict[str, List[str]] = {"anthropic": [], "bedrock": [], "openai": [], "ollama": []}
+_AVAILABLE: Dict[str, List[str]] = {
+    "anthropic": [], "bedrock": [], "openai": [], "ollama": [], "nvidia": [],
+}
 # Monotonic timestamp of the last probe attempt per provider — throttles the
 # heal_if_empty() re-probe so the periodic settings poll can't hammer a provider.
 _last_probe: Dict[str, float] = {}
@@ -77,6 +79,24 @@ def _openai_models(settings) -> List[str]:
     return sorted(m.id for m in client.models.list().data if getattr(m, "id", None))
 
 
+def _nvidia_models(settings) -> List[str]:
+    if not settings.nvidia_api_key:
+        return []
+    from openai import OpenAI
+
+    # NVIDIA NIM is OpenAI-compatible, so the openai SDK lists its catalog too.
+    # Sorted grouping by publisher prefix (meta/, mistralai/, ...) reads well in
+    # the dropdown; the ~150-model hosted list carries no capability metadata to
+    # filter on reliably, so return it whole.
+    client = OpenAI(
+        api_key=settings.nvidia_api_key,
+        base_url=settings.nvidia_base_url,
+        timeout=_SDK_TIMEOUT,
+        max_retries=0,  # _SDK_TIMEOUT is the real ceiling (see _anthropic_models)
+    )
+    return sorted(m.id for m in client.models.list().data if getattr(m, "id", None))
+
+
 def _bedrock_models(settings) -> List[str]:
     import boto3
     from botocore.config import Config
@@ -95,6 +115,7 @@ _PROBES: Dict[str, Callable] = {
     "anthropic": _anthropic_models,
     "openai": _openai_models,
     "bedrock": _bedrock_models,
+    "nvidia": _nvidia_models,
 }
 
 
