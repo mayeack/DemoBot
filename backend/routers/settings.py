@@ -6,12 +6,14 @@ accepted on write but never returned — reads surface only token_present/last4.
 from __future__ import annotations
 
 import asyncio
+import socket
 from typing import Dict, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from backend import settings_store
+from backend.config import settings
 from backend.hec.runtime import hec_runtime
 from backend.model_emitter import MODEL_CHOICES, model_emitter
 
@@ -262,3 +264,19 @@ async def hec_stats_for(dest_id: str):
     if snap is None:
         raise HTTPException(status_code=404, detail="destination not found")
     return vars(snap)
+
+
+# ---------------------------------------------------------------------------
+# Server identity
+# ---------------------------------------------------------------------------
+@router.get("/server-info")
+async def get_server_info():
+    """Identity of the host serving this process, for the UI footer.
+
+    Lives behind the access-key gate rather than on the public /health so a
+    tunnelled deployment doesn't hand out its hostname unauthenticated.
+    """
+    return {
+        "hostname": settings.server_hostname or socket.gethostname(),
+        "environment": settings.environment,
+    }

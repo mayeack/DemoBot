@@ -482,6 +482,22 @@ function showMainApp() {
     document.getElementById('sessionId').textContent = sessionId;
     document.getElementById('messageInput').focus();
     startProviderPolling();
+    refreshServerInfo();
+}
+
+// Which box is serving this page — one-shot, since it can't change for the
+// life of the process. Rendered in the footer for multi-server deployments.
+async function refreshServerInfo() {
+    const el = document.getElementById('serverHostname');
+    if (!el) return;
+    try {
+        const res = await fetch('/api/server-info');
+        if (!res.ok) { el.textContent = 'unavailable'; return; }
+        const data = await res.json();
+        el.textContent = data.hostname || 'unknown';
+    } catch (e) {
+        el.textContent = 'unavailable';
+    }
 }
 
 // ---- Active LLM controls (Provider / Model / Static emission) — interactive ----
