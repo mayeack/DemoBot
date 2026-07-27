@@ -20,7 +20,12 @@ CONTAINER="demobot-openclaw"
 GATEWAY_PORT=18789
 STATE_DIR="$HOME/.demobot-openclaw"          # gateway config+state (persisted)
 DECOY_DIR="$HOME/DemoBotDecoy"               # agent workspace (decoy data only)
-PLUGIN_DIR="$PWD/openclaw/plugins/demobot-toolguard"
+PLUGIN_SRC="$PWD/openclaw/plugins/demobot-toolguard"   # source of truth (in git)
+# The podman VM only shares $HOME, and this repo lives outside it
+# (/Applications/DemoBot), so a bind mount straight from the repo fails with
+# "statfs ...: no such file or directory". Stage a copy under $HOME instead,
+# refreshed on every start so plugin edits still take effect on restart.
+PLUGIN_DIR="$STATE_DIR/plugins/demobot-toolguard"
 AGENT_MODEL="ollama/llama3.2:3b"             # tool-capable; dolphin3 has no tools template
 
 ACCESS_KEY=$(grep '^ACCESS_KEY=' .env 2>/dev/null | cut -d= -f2- || true)
@@ -49,9 +54,11 @@ if ! curl -s --max-time 3 http://localhost:4318 >/dev/null 2>&1; then
   echo "WARN: OTel collector not detected on :4318 — gateway telemetry will not" >&2
   echo "      reach Splunk/Galileo until ./run-collector.sh is running." >&2
 fi
-[ -f "$PLUGIN_DIR/index.js" ] || { echo "ERROR: $PLUGIN_DIR missing (git restore openclaw/)." >&2; exit 1; }
+[ -f "$PLUGIN_SRC/index.js" ] || { echo "ERROR: $PLUGIN_SRC missing (git restore openclaw/)." >&2; exit 1; }
 
-mkdir -p "$STATE_DIR" "$DECOY_DIR"
+mkdir -p "$STATE_DIR" "$DECOY_DIR" "$PLUGIN_DIR"
+# Refresh the staged plugin copy (see PLUGIN_DIR note above).
+cp "$PLUGIN_SRC"/* "$PLUGIN_DIR"/
 if [ ! -e "$DECOY_DIR/inbox" ]; then
   echo "NOTE: decoy workspace $DECOY_DIR is unseeded — run:" >&2
   echo "      venv/bin/python scripts/demo/seed_agentic_decoy.py" >&2
@@ -137,9 +144,15 @@ PYCONF
 
 # ---------- run ----------
 echo "Starting OpenClaw gateway on http://127.0.0.1:${GATEWAY_PORT} (podman: $CONTAINER)"
+# --userns=keep-id maps the container user to the host uid that owns the bind
+# mounts. Without it the image's `node` user (uid 1000) cannot write to
+# $STATE_DIR (owned by the host user) and the gateway dies on startup with
+# EACCES creating /home/node/.openclaw/state.
 podman run -d --replace --name "$CONTAINER" \
+  --userns=keep-id \
   -p "127.0.0.1:${GATEWAY_PORT}:${GATEWAY_PORT}" \
   -e OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental \
+  -e HOME=/home/node \
   -v "$STATE_DIR:/home/node/.openclaw" \
   -v "$DECOY_DIR:/home/node/.openclaw/workspace" \
   -v "$PLUGIN_DIR:/opt/demobot-plugins/demobot-toolguard:ro" \
