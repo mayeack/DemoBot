@@ -41,6 +41,7 @@ _STATE: Dict[str, Any] = {
 OP_WORKFLOW = "workflow"
 OP_AGENT = "invoke_agent"
 OP_CHAT = "chat"
+OP_EXECUTE_TOOL = "execute_tool"
 
 
 def _build_exporter():
@@ -197,6 +198,52 @@ def agent_span(agent_name: str, *, theme: Optional[str] = None, attributes: Opti
     if attributes:
         attrs.update(attributes)
     return _span(f"invoke_agent {agent_name}", OP_AGENT, attrs)
+
+
+def tool_span(
+    tool_name: str,
+    *,
+    tool_call_id: Optional[str] = None,
+    agent_surface: Optional[str] = None,
+    attributes: Optional[Dict[str, Any]] = None,
+):
+    """Execute-tool span for a governed agent tool call (the tool guard).
+
+    Carries gen_ai.operation.name=execute_tool + gen_ai.tool.* so the span
+    survives the collector's Galileo genai_only filter and groups with the
+    other GenAI operations in Splunk AI Agent Monitoring.
+    """
+    attrs = {
+        "gen_ai.tool.name": tool_name,
+        "gen_ai.tool.call.id": tool_call_id,
+        "tool_name": tool_name,
+        "demobot.agent_surface": agent_surface,
+    }
+    if attributes:
+        attrs.update(attributes)
+    return _span(f"execute_tool {tool_name}", OP_EXECUTE_TOOL, attrs)
+
+
+def record_tool_result(
+    span,
+    *,
+    decision: str,
+    denied_reason: Optional[str] = None,
+    rule_names: Optional[list] = None,
+    event_id: Optional[str] = None,
+) -> None:
+    """Attach the tool-guard verdict to an execute_tool span."""
+    if span is None:
+        return
+    _set_attrs(
+        span,
+        {
+            "demobot.tool.decision": decision,
+            "demobot.tool.denied_reason": denied_reason,
+            "demobot.guardrail.rule_names": rule_names,
+            "demobot.ai_defense.event_id": event_id,
+        },
+    )
 
 
 def llm_span(*, request_model: str, provider: str, attributes: Optional[Dict[str, Any]] = None):

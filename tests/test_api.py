@@ -213,6 +213,25 @@ def main() -> int:
         check("POST /api/incident/stop -> 200 + inactive",
               c.post("/api/incident/stop", headers=AUTH).json().get("active") is False)
 
+        # ---- agentic tool guard ----
+        # 401 without the key (auth gate), 200 with it. Use a benign read whose
+        # path is inside the workspace so tool_policy short-circuits locally and
+        # no live AI Defense call is made (AI Defense is not stubbed here).
+        check("POST /api/toolguard/inspect -> 401 without key",
+              c.post("/api/toolguard/inspect",
+                     json={"tool_name": "read", "arguments": {}}).status_code == 401)
+        roots = settings.tool_guard_workspace_roots_list
+        safe_path = (roots[0] if roots else "/tmp") + "/inbox/note.md"
+        rtg = c.post("/api/toolguard/inspect", headers=AUTH,
+                     json={"tool_name": "read", "arguments": {"path": safe_path},
+                           "session_id": "api-test", "tool_call_id": "c1"})
+        check("POST /api/toolguard/inspect (benign read) -> 200 allow",
+              rtg.status_code == 200 and rtg.json().get("decision") == "allow"
+              and rtg.json().get("block") is False, f"{rtg.status_code} {rtg.text[:120]}")
+        check("GET /api/toolguard/policy -> 200 + sensitive_tools",
+              (rpol := c.get("/api/toolguard/policy", headers=AUTH)).status_code == 200
+              and "sensitive_tools" in rpol.json(), f"{rpol.status_code}")
+
         # ---- settings ----
         rs = c.get("/api/settings", headers=AUTH)
         check("GET /api/settings -> 200 + logs_directory", rs.status_code == 200 and "logs_directory" in rs.json())

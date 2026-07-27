@@ -10,15 +10,17 @@ activates `venv/`, then runs `python -m backend.main` → uvicorn on
 **`0.0.0.0:8001`**. It serves a chat UI at `/app`, admin/governance UIs, `/docs`,
 and the `/api/chat` + `/admin` JSON APIs.
 
-There are **two launch modes** — pick based on what the user asked for:
+There are **three launch modes** — pick based on what the user asked for:
 
 | Mode | Reach | Use when |
 |------|-------|----------|
 | **A — Local** | `localhost` + your LAN | Day-to-day dev, testing a change |
 | **B — Public tunnel** | A public HTTPS URL | Sharing the app over the internet |
+| **C — Agentic surface** | Local + OpenClaw gateway | Demoing agentic tool-abuse governance |
 
-Both modes run the *same* server (Mode B just adds a tunnel in front). The
-access-key gate (below) applies identically to both.
+Modes A/B run the *same* server (Mode B just adds a tunnel in front). Mode C
+adds the OpenClaw gateway on top of A. The access-key gate (below) applies
+identically to all.
 
 **Launching the app means bringing up ALL its services, not just the web server:**
 1. the **OTel collector** (`./run-collector.sh`) — forwards telemetry to Splunk
@@ -27,12 +29,15 @@ access-key gate (below) applies identically to both.
    when the laptop sleeps.
 2. the **app** (`./run.sh`).
 3. (Mode B only) the **public tunnel** (`./tunnel.sh`).
+4. (Mode C only) the **OpenClaw gateway** (`./run-openclaw.sh`) — a *fourth*
+   forgettable service. It is **off by default** (starting it is the opt-in).
 
 One command brings up collector + app: **`./start-all.sh`** (add `--tunnel` for
-the tunnel). When launching as the agent, start `./run-collector.sh` and
-`./run.sh` as separate background tasks (plus `./tunnel.sh` for Mode B). After
-launch, confirm the whole pipeline with
-`./tests/observability/verify_observability.sh`.
+the tunnel, `--agentic` for the OpenClaw gateway). When launching as the agent,
+start `./run-collector.sh` and `./run.sh` as separate background tasks (plus
+`./tunnel.sh` for Mode B, `./run-openclaw.sh` for Mode C). After launch, confirm
+the whole pipeline with `./tests/observability/verify_observability.sh` (and
+`./tests/observability/verify_openclaw_observability.sh` for Mode C).
 
 ## Prerequisites (both modes)
 
@@ -95,6 +100,47 @@ To stop sharing, Ctrl+C the tunnel (terminal 2). The app keeps running.
 
 ---
 
+## Mode C — Agentic surface (OpenClaw gateway)
+
+Adds an OpenClaw agent with **real tools** (read/write/exec/web_fetch) so the
+demo can show agentic tool abuse — indirect prompt injection, exfiltration —
+being governed at the tool boundary by `/api/toolguard/inspect` (Cisco AI
+Defense + the deterministic tool policy). Every tool call becomes an
+`execute_tool` span and a `tool_call` governance event.
+
+The gateway runs in **podman** (Cisco Secure Endpoint quarantines a host npm
+install — see the napkin), against local **Ollama `llama3.2:3b`** (tool-capable;
+`dolphin3:8b` has no tools template), workspace pinned to the decoy `~/DemoBotDecoy`.
+
+```bash
+podman machine start                          # if not already running
+venv/bin/python scripts/demo/seed_agentic_decoy.py   # one-time: seed the decoy workspace
+./run.sh &  ./run-collector.sh &              # app + collector MUST be up first
+./run-openclaw.sh                             # start the gateway (builds the image on first run)
+# or all at once:  ./start-all.sh --agentic
+```
+
+`run-openclaw.sh` flags: `--no-telemetry` (don't export gateway spans while
+iterating on the plugin), `--foreground` (block on the container for launchd
+supervision). Auto-start at login is opt-in: `./deploy/launchd/install.sh --with-openclaw`.
+
+**Toggling the integration off:** nothing in the app calls the gateway, so
+`podman stop demobot-openclaw` fully removes it — Modes A/B are unaffected.
+`TOOL_GUARD_ENABLED` (default False) is a *separate* switch: it only controls
+whether a block is *enforced*, not whether the integration runs (False = the
+unguarded control run — telemetry still flows, blocks are computed but not
+applied). The demo contrast is `False` (agent exfiltrates) vs `True` (blocked).
+
+**⚠️ The guard is a hard dependency.** With `TOOL_GUARD_ENABLED=True` the guard
+is **fail-closed**: if the app (`:8001`) is down, EVERY agent tool call is
+denied. That presents as a *broken agent*, not a broken app — so if the agent
+suddenly can't do anything, check that `./run.sh` is up before debugging the gateway.
+
+Stop it: `podman stop demobot-openclaw`. Logs: `podman logs -f demobot-openclaw`.
+Gateway port **18789**.
+
+---
+
 ## Verify it's serving
 
 ```bash
@@ -110,6 +156,7 @@ For Mode B, swap `http://localhost:8001` for the printed `trycloudflare.com` URL
 
 ```bash
 lsof -ti:8001 | xargs kill          # stop the app (add -9 if it lingers)
+podman stop demobot-openclaw        # Mode C only: stop the OpenClaw gateway
 ```
 If launched in the foreground, Ctrl+C in that terminal instead.
 

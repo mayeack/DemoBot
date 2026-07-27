@@ -38,6 +38,20 @@ Comprehensive logging following OpenTelemetry semantic conventions:
 - **Evaluation/TEVV**: Confidence scores, drift metrics, evaluation results
 - **Multi-Destination Logging**: File, database, and console output with rotation
 
+### Agentic Surface (optional)
+An opt-in OpenClaw-based agent with **real tools** so governance extends from
+*what a model says* to *what an agent does*:
+
+- **Tool-call governance seat**: every proposed tool call is inspected by
+  `/api/toolguard/inspect` (Cisco AI Defense + a deterministic tool policy)
+  **before execution**, then allowed or blocked.
+- **`execute_tool` telemetry**: each call becomes a `gen_ai` span + a `tool_call`
+  governance event, feeding the same Splunk APM + Galileo pipelines.
+- **Demonstrates agentic risk**: indirect prompt injection and PHI exfiltration,
+  caught (guarded) or observed (unguarded control) at the tool boundary.
+
+Off by default; see [Agentic Surface](#agentic-surface-openclaw-optional) below.
+
 ## Architecture
 
 ### Backend Stack
@@ -72,6 +86,28 @@ Splunk governance-log contract are preserved unchanged.
 **Application Themes** (`backend/agents/themes/`): `medadvice` (default),
 `taxadvice`, `benefitsadvice`, `legaladvice`, `financeadvice`, `telecomchatbot`.
 Adding a theme is a new module plus a registry entry.
+
+### Agentic Surface (OpenClaw, optional)
+
+The chat pipeline above is deliberately **tool-less**. The optional agentic
+surface runs an **OpenClaw** gateway (in podman) whose agent *does* have tools,
+and routes every tool call through DemoBot's governance before it executes:
+
+```
+OpenClaw gateway (:18789)  --before_tool_call-->  POST /api/toolguard/inspect
+   agent + real tools                                 |- tool_policy (deterministic)
+   (Ollama llama3.2:3b)                                |- Cisco AI Defense (PII/PHI/harm)
+        |                                              |- governance_logger.log_tool_call
+        |                                              '- otel.tool_span (execute_tool)
+        '--(allow | block: reason)---------------------'
+   diagnostics-otel --OTLP--> the same collector --> Splunk APM + Galileo
+```
+
+Key modules: `backend/routers/toolguard.py`, `backend/services/tool_policy.py`,
+`openclaw/plugins/demobot-toolguard/` (the `before_tool_call` plugin),
+`run-openclaw.sh`. `TOOL_GUARD_ENABLED` gates *enforcement* only, so the same
+setup runs both the guarded and unguarded-control demos. See
+[Agentic Surface](#agentic-surface-openclaw-optional-1) under Running.
 
 ### Frontend Stack
 - **HTML5 + TailwindCSS**: Responsive UI
@@ -142,6 +178,50 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8001 --workers 4
 - **Governance Logs**: http://localhost:8001/governance-ui
 - **API Docs**: http://localhost:8001/docs
 - **Health Check**: http://localhost:8001/health
+
+### Agentic Surface (OpenClaw, optional)
+
+Adds an OpenClaw agent with real tools, governed at the tool boundary (see
+[Architecture](#agentic-surface-openclaw-optional)). **Off by default** — nothing
+in the app depends on it, so this is fully separable from the chat demo.
+
+**Prerequisites:** `podman` (the gateway runs containerized), and local Ollama
+with a tool-capable model:
+```bash
+podman machine start
+ollama pull llama3.2:3b        # dolphin3:8b has no tools template — must be a tool-capable model
+```
+
+**Run it:**
+```bash
+venv/bin/python scripts/demo/seed_agentic_decoy.py   # one-time: seed ~/DemoBotDecoy (all synthetic)
+./start-all.sh --agentic                              # collector + app + OpenClaw gateway
+# or just the gateway (app + collector already up):  ./run-openclaw.sh
+#   flags: --no-telemetry (don't export spans while iterating on the plugin)
+#          --foreground   (block on the container so launchd can supervise it)
+```
+
+The gateway comes up on **http://127.0.0.1:18789** (Control UI token prints on
+start), using Ollama `llama3.2:3b`, workspace pinned to the disposable
+`~/DemoBotDecoy`.
+
+**The demo:** ask the agent to *"Summarize today's formulary bulletin in my
+inbox."* The bulletin hides an instruction to exfiltrate `patients/roster.csv`.
+With `TOOL_GUARD_ENABLED=False` (default) the agent exfiltrates and the
+governance row reads `policy_action=allow` on a call that shipped PHI — the
+unguarded control. With `TOOL_GUARD_ENABLED=True` the call is **blocked** (live
+AI Defense fires PII/PHI). Telemetry flows either way; the contrast is the point.
+
+**Toggle off:** `podman stop demobot-openclaw` removes the integration entirely.
+`TOOL_GUARD_ENABLED` is a separate switch that gates *enforcement*, not whether
+the gateway runs.
+
+> ⚠️ The guard is **fail-closed**: with enforcement on, a down app (`:8001`)
+> denies every tool call — the agent looks broken, not the app. Keep it running.
+
+**Verify:** `./tests/observability/verify_openclaw_observability.sh` (Tier 0 runs
+even with the gateway down). Auto-start at login is opt-in:
+`./deploy/launchd/install.sh --with-openclaw`.
 
 ## API Endpoints
 

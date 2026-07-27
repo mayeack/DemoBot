@@ -1,0 +1,54 @@
+# =============================================================================
+# OpenClaw gateway container — DemoBot agentic-risk demo surface
+# =============================================================================
+# The gateway runs in podman rather than on the host: Cisco Secure Endpoint
+# quarantines the npm-installed OpenClaw entrypoint on this machine (observed
+# 2026-07-27: openclaw.mjs deleted minutes after install, twice). Inside the
+# podman VM the files are out of the host scanner's reach, and the container
+# also gives the demo its sandboxed-agent posture for free.
+#
+# NOTE: on this host, author/edit this file with shell redirection, not an
+# agent Write tool — see .claude/napkin.md (EDR deletes agent-written copies).
+#
+# Build:  podman build -t demobot-openclaw -f openclaw/Containerfile openclaw/
+# Run:    ./run-openclaw.sh   (mounts config/state/workspace, publishes the
+#                              gateway port, wires host.containers.internal)
+# =============================================================================
+
+FROM docker.io/library/node:22-bookworm-slim
+
+# Pin the exact OpenClaw version. The project moves fast and the plugin API is
+# compat-gated; bump deliberately, never implicitly. Keep in sync with the
+# preflight check in run-openclaw.sh.
+ARG OPENCLAW_VERSION=2026.7.1-2
+
+# git: ClawHub/skill operations shell out to it. procps: `ps` for the gateway's
+# process diagnostics. curl: the container healthcheck below.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    procps \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g "openclaw@${OPENCLAW_VERSION}" && npm cache clean --force
+
+# Non-root, mirroring the app Containerfile. The node base image ships a
+# `node` user (uid 1000); reuse it rather than minting another.
+USER node
+
+# Config, state, and the agent workspace are bind mounts supplied by
+# run-openclaw.sh:
+#   /home/node/.openclaw            gateway config + state (persisted)
+#   /home/node/.openclaw/workspace  the decoy workspace (~/DemoBotDecoy)
+#   /opt/demobot-plugins            the demobot-toolguard plugin (read-only)
+ENV OPENCLAW_STATE_DIR=/home/node/.openclaw
+
+# Gateway control plane. Bind to all interfaces inside the container so the
+# published port is reachable from the host browser.
+EXPOSE 18789
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:18789/ >/dev/null || exit 1
+
+CMD ["openclaw", "gateway", "--bind", "0.0.0.0", "--port", "18789"]

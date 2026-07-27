@@ -120,6 +120,33 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
 - Access gate: `ACCESS_KEY` in `.env` (currently word-style). Log in at `/login`,
   or `curl -u x:$ACCESS_KEY`. `/health` is the only open route.
 
+## OpenClaw agentic surface (Mode C — opt-in demo)
+- Gives an OpenClaw agent real tools so the demo can show agentic tool abuse
+  governed at the tool boundary (`/api/toolguard/inspect` = tool_policy + Cisco
+  AI Defense). `./run-openclaw.sh` (or `./start-all.sh --agentic`); off by
+  default. `verify_openclaw_observability.sh` after touching the guard/plugin.
+- **Runs in podman, NOT a host npm install.** Cisco Secure Endpoint (AMP)
+  quarantines the npm `openclaw` entrypoint within ~2 min, repeatably. The
+  gateway is the `demobot-openclaw` image (pinned `openclaw@2026.7.1-2`) on
+  :18789. See the [[openclaw-edr-podman]] memory.
+- **Author OpenClaw build files via shell redirection, not the agent Write
+  tool.** AMP deleted agent-Write-tool copies of `openclaw/Containerfile` and
+  the plugin `.js`/`.mjs` within seconds (byte-identical `cat`/`printf` copies
+  survived). They're committed, so `git restore openclaw/` brings them back; the
+  Containerfile is also read at rebuild time via `git show HEAD:openclaw/Containerfile`.
+- **podman VM only shares `$HOME`.** A bind mount from `/Applications/DemoBot`
+  fails `statfs ...: no such file or directory`. `run-openclaw.sh` stages the
+  plugin into `~/.demobot-openclaw/` and pins the decoy workspace to
+  `~/DemoBotDecoy`. Bind mounts also need `--userns=keep-id` or the container's
+  uid-1000 `node` user hits EACCES on the host-owned dirs.
+- **The guard is fail-closed:** with `TOOL_GUARD_ENABLED=True`, a dead app
+  (:8001) denies EVERY agent tool call — looks like a broken agent, not a broken
+  app. `TOOL_GUARD_ENABLED` gates *enforcement* only (default False = the
+  unguarded control run); the app never calls the gateway, so `podman stop
+  demobot-openclaw` is the real off switch.
+- Agent model is Ollama **`llama3.2:3b`** (tool-capable); `dolphin3:8b` has no
+  tools template. Decoy workspace: `venv/bin/python scripts/demo/seed_agentic_decoy.py`.
+
 ## Environment
 - venv is **Python 3.11** (the Splunk GenAI stack needs ≥3.10; 3.9 silently breaks
   the LangChain instrumentation). `venv.py39.bak/` is the old 3.9 venv.

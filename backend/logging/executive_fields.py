@@ -65,6 +65,8 @@ _DEFAULT_PRICE = (3.00, 15.00)  # fall back to a Sonnet-class estimate
 _BLOCK_GUARDRAILS = {
     "cisco_ai_defense": ("Cisco AI Defense policy", "blocked_by_ai_defense"),
     "policy_block": ("Self-harm safety policy", "blocked_unsafe"),
+    "tool_policy": ("Agentic tool policy", "blocked_tool_call"),
+    "openclaw_tool_guard": ("OpenClaw tool guard", "blocked_tool_call"),
 }
 
 # PII types that are also Protected Health Information in a medical context.
@@ -169,8 +171,14 @@ def _prompt_category(
     *, severity: Optional[str], policy_blocked: bool, guardrail_ids: List[str],
     contains_phi: bool, contains_pii: bool, safety_categories: List[str],
     confidence: Optional[float], toxic_detected: bool,
+    operation_name: str = "chat",
 ) -> str:
     cats_text = " ".join(safety_categories).lower()
+    # Agentic tool calls are a distinct risk category from chat prompts — a
+    # governed tool action (exfiltration attempt, unapproved egress) is
+    # "tool_exploitation" regardless of what PHI/PII rode in its arguments.
+    if operation_name == "tool_call":
+        return "tool_exploitation"
     if "policy_block" in guardrail_ids or "self-harm" in cats_text:
         return "self_harm_crisis"
     if (severity or "").upper() == "EMERGENCY" or "emergency" in cats_text:
@@ -188,6 +196,12 @@ def _prompt_category(
 
 def _audit_status(log: Dict[str, Any]) -> str:
     """Evidence completeness: is the full audit chain present on this event?"""
+    # Tool-call events have no token usage or eval score (they are not model
+    # calls), so the chat completeness contract would always read "partial".
+    # Their audit chain is the correlation identity of the governed action.
+    if log.get("operation_name") == "tool_call":
+        required = ("request_id", "trace_id", "session_id", "tool_call_id")
+        return "complete" if all(log.get(k) for k in required) else "partial"
     required = ("request_id", "trace_id", "session_id", "response_id")
     have_ids = all(log.get(k) for k in required)
     have_usage = log.get("usage_total_tokens") is not None
@@ -201,11 +215,17 @@ def _risk_score(
     toxic_detected: bool, hallucination_detected: bool,
     authority_violation_detected: bool,
     confidence: Optional[float], latency_ms: Optional[float],
+    operation_name: str = "chat",
 ) -> int:
     score = 5
     score += _severity_points(severity)
     if policy_blocked:
         score += 30
+    if operation_name == "tool_call" and policy_blocked:
+        # A blocked *action* is materially worse than a blocked prompt: the
+        # agent actually tried to exfiltrate/execute. Stack on top of the
+        # policy_blocked points above.
+        score += 20
     if safety_violated or guardrail_triggered:
         score += 20
     if contains_phi:
@@ -263,13 +283,16 @@ def derive_executive_fields(log: Dict[str, Any]) -> Dict[str, Any]:
             or ("patient" if theme in _MEDICAL_THEMES else "customer"),
             "model_name": model_name,
             "agent_name": log.get("agent_name") or log.get("workflow_name"),
-            "tool_name": log.get("tool_name"),  # DemoBot domain agent makes no tool calls
+            # The chat pipeline is tool-less, but the OpenClaw agentic surface
+            # makes governed tool calls logged with operation_name=="tool_call".
+            "tool_name": log.get("tool_name"),
             "session_id": log.get("session_id"),
             "prompt_category": _prompt_category(
                 severity=severity, policy_blocked=policy_blocked,
                 guardrail_ids=guardrail_ids, contains_phi=contains_phi,
                 contains_pii=contains_pii, safety_categories=safety_categories,
                 confidence=confidence, toxic_detected=toxic_detected,
+                operation_name=log.get("operation_name", "chat"),
             ),
             "contains_pii": contains_pii,
             "contains_phi": contains_phi,
@@ -304,6 +327,7 @@ def derive_executive_fields(log: Dict[str, Any]) -> Dict[str, Any]:
             toxic_detected=toxic_detected, hallucination_detected=hallucination_detected,
             authority_violation_detected=authority_violation_detected,
             confidence=confidence, latency_ms=latency_ms,
+            operation_name=log.get("operation_name", "chat"),
         )
         return fields
     except Exception:  # noqa: BLE001 - enrichment must never break logging

@@ -12,7 +12,13 @@ Queries the SignalFx metric-timeseries metadata API for the service and checks:
 Retries for a few minutes to absorb ingest/processing lag.
 
 Usage:
-    check_o11y_metadata.py <realm> <api_token> <service_name> [environment]
+    check_o11y_metadata.py <realm> <api_token> <service_name> [environment] [--no-agent]
+
+    --no-agent  relax the gen_ai.agent.name assertion. OpenClaw's GenAI metrics
+                (service openclaw-gateway) carry gen_ai.token.type / provider /
+                operation / request.model but NOT gen_ai.agent.name, so its
+                "AI agents" view is legitimately empty — token+duration+model
+                are still asserted.
 
 Exit 0 = all present, non-zero = missing/incomplete.
 """
@@ -36,11 +42,14 @@ def mts(realm: str, token: str, query: str) -> dict:
 
 
 def main() -> int:
-    if len(sys.argv) < 4:
-        print("usage: check_o11y_metadata.py <realm> <api_token> <service> [env]")
+    args = list(sys.argv[1:])
+    require_agent = "--no-agent" not in args
+    args = [a for a in args if a != "--no-agent"]
+    if len(args) < 3:
+        print("usage: check_o11y_metadata.py <realm> <api_token> <service> [env] [--no-agent]")
         return 2
-    realm, token, service = sys.argv[1], sys.argv[2], sys.argv[3]
-    env = sys.argv[4] if len(sys.argv) > 4 else None
+    realm, token, service = args[0], args[1], args[2]
+    env = args[3] if len(args) > 3 else None
     svc = f'service.name:{service}' + (f' AND deployment.environment:{env}' if env else "")
     queries = {
         "gen_ai.client.token.usage": f"sf_metric:gen_ai.client.token.usage AND {svc}",
@@ -75,7 +84,8 @@ def main() -> int:
 
     print(f"  gen_ai.client.token.usage MTS: {counts.get('gen_ai.client.token.usage', 0)} "
           f"| token.types={sorted(ttypes)} | models={sorted(models)}")
-    print(f"  gen_ai.agent.name(s): {sorted(agents) or '(none -> AI agents view is empty!)'}")
+    _agent_note = "" if require_agent else " (not required: --no-agent)"
+    print(f"  gen_ai.agent.name(s): {sorted(agents) or '(none -> AI agents view is empty!)'}{_agent_note}")
     print(f"  gen_ai.client.operation.duration MTS: {counts.get('gen_ai.client.operation.duration', 0)}")
 
     ok = (
@@ -83,7 +93,9 @@ def main() -> int:
         and counts.get("gen_ai.client.operation.duration", 0) > 0
         and {"input", "output"} <= ttypes
         and any(m != "unknown_model" for m in models)
-        and len(agents) > 0  # named agent reaches the "AI agents" view (the core fix)
+        # named agent reaches the "AI agents" view (the core fix for demobot-v3);
+        # OpenClaw's GenAI metrics don't carry it, so --no-agent relaxes this.
+        and (len(agents) > 0 or not require_agent)
     )
     return 0 if ok else 1
 

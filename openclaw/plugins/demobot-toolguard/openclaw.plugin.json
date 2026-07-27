@@ -1,0 +1,34 @@
+{
+  "id": "demobot-toolguard",
+  "name": "DemoBot Tool Guard",
+  "description": "Governed before_tool_call: DemoBot tool policy + Cisco AI Defense inspect every agent tool call before execution",
+  "version": "1.0.0",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "guardUrl": {
+        "type": "string",
+        "description": "Base URL of the DemoBot app as seen from the gateway container, e.g. http://host.containers.internal:8001"
+      },
+      "accessKey": {
+        "type": "string",
+        "description": "DemoBot ACCESS_KEY (sent as HTTP Basic password)"
+      },
+      "failOpen": {
+        "type": "boolean",
+        "description": "true = allow tool calls when the guard is unreachable; false (default) = fail closed and block",
+        "default": false
+      },
+      "timeoutMs": {
+        "type": "number",
+        "description": "HTTP timeout for the guard call in milliseconds (keep under the hook timeoutMs of 10000)",
+        "default": 8000
+      }
+    },
+    "required": ["guardUrl"]
+  }
+}

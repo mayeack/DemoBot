@@ -60,6 +60,9 @@ async def get_interaction_logs(
                 "guardrail_triggered": log.guardrail_triggered,
                 "hallucination_detected": log.hallucination_detected,
                 "authority_violation_detected": log.authority_violation_detected,
+                "tool_name": log.tool_name,
+                "tool_decision": log.tool_decision,
+                "agent_surface": log.agent_surface,
                 "error_type": log.error_type
             }
             for log in logs

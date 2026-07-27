@@ -115,6 +115,13 @@ def create_governance_log(
         "theme": kwargs.get("theme"),
         "severity": kwargs.get("severity"),
         "tool_name": kwargs.get("tool_name"),
+        # Agentic tool-guard fields (operation_name == "tool_call"). Populated
+        # by governance_logger.log_tool_call; None (and dropped) on chat events.
+        "tool_call_id": kwargs.get("tool_call_id"),
+        "tool_arguments": kwargs.get("tool_arguments"),
+        "tool_decision": kwargs.get("tool_decision"),
+        "tool_denied_reason": kwargs.get("tool_denied_reason"),
+        "agent_surface": kwargs.get("agent_surface"),
         "user_type": kwargs.get("user_type"),
 
         # Error and infra fields
