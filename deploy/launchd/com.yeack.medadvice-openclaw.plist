@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.yeack.medadvice-openclaw</string>
+
+    <!-- OpenClaw gateway (agentic-risk demo surface). run-openclaw.sh starts the
+         podman container detached, then blocks on "podman wait" (foreground mode)
+         so launchd has a process to KeepAlive. This agent is OPT-IN: installed
+         only by "install.sh with the openclaw flag", never by default, so the
+         agentic surface stays off unless you ask for it. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__DEMOBOT_DIR__/run-openclaw.sh</string>
+        <string>--foreground</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__DEMOBOT_DIR__</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- podman is on the Homebrew path; launchd agents get a minimal PATH. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__DEMOBOT_DIR__/logs/launchd-openclaw.log</string>
+    <key>StandardErrorPath</key>
+    <string>__DEMOBOT_DIR__/logs/launchd-openclaw.log</string>
+</dict>
+</plist>

@@ -6,11 +6,22 @@
 #
 #   ./deploy/launchd/install.sh            # install app + collector agents
 #                                          # (+ tunnel, only if ~/.cloudflared/config.yml exists)
+#   ./deploy/launchd/install.sh --with-openclaw   # also install the OpenClaw
+#                                          # agentic-surface gateway (opt-in)
 #
 # The plists in this directory are TEMPLATES containing __DEMOBOT_DIR__ /
 # __HOME__ / __CLOUDFLARED__ placeholders; this script substitutes real values
 # and writes the result to ~/Library/LaunchAgents/.
 set -euo pipefail
+
+WITH_OPENCLAW=false
+for arg in "$@"; do
+  case "$arg" in
+    --with-openclaw) WITH_OPENCLAW=true ;;
+    -h|--help) echo "Usage: install.sh [--with-openclaw]"; exit 0 ;;
+    *) echo "Unknown option: $arg (try --help)" >&2; exit 2 ;;
+  esac
+done
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 DEST="$HOME/Library/LaunchAgents"
@@ -25,6 +36,17 @@ services=(collector app)
 if [ -f "$HOME/.cloudflared/config.yml" ]; then
   [ -n "$CLOUDFLARED" ] || { echo "warning: cloudflared not found on PATH; skipping tunnel"; }
   [ -n "$CLOUDFLARED" ] && services+=(tunnel)
+fi
+# The OpenClaw gateway is EXPLICIT opt-in (never auto-detected): a built image
+# just means the demo ran once, not that it should boot on every login. The
+# fail-closed tool guard also means a running gateway with the app down denies
+# every tool call, so we don't want it starting by surprise.
+if [ "$WITH_OPENCLAW" = true ]; then
+  if command -v podman >/dev/null; then
+    services+=(openclaw)
+  else
+    echo "warning: --with-openclaw given but podman not found on PATH; skipping openclaw"
+  fi
 fi
 
 for svc in "${services[@]}"; do
@@ -51,6 +73,12 @@ for svc in "${services[@]}"; do
 done
 
 echo
+if [ "$WITH_OPENCLAW" = true ]; then
+  echo "OpenClaw gateway agent installed (opt-in). It starts the podman container"
+  echo "at login; the agentic tool guard is fail-closed, so keep the app running."
+  echo "Remove it with: launchctl bootout gui/$UID_N/com.yeack.medadvice-openclaw"
+  echo
+fi
 echo "Done. The app + collector now auto-start at login and restart on crash."
 echo "Check status:   launchctl print gui/$UID_N/com.yeack.medadvice-app | grep state"
 echo "Verify serving: curl -s -o /dev/null -w '%{http_code}\\n' http://localhost:8001/health   # want 200"

@@ -15,6 +15,25 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# ---------- options ----------
+# --no-telemetry: run without exporting gateway spans/metrics/logs to the
+#   collector (Splunk + Galileo). Use while iterating on the plugin so dev
+#   noise doesn't land in dashboards you're about to present from.
+# --foreground:   run the gateway attached (podman run without -d) so a
+#   process supervisor (launchd KeepAlive) can own its lifecycle. Default is
+#   detached/on-demand.
+OTEL_ENABLED=true
+FOREGROUND=false
+for arg in "$@"; do
+  case "$arg" in
+    --no-telemetry) OTEL_ENABLED=false ;;
+    --foreground)   FOREGROUND=true ;;
+    -h|--help)
+      echo "Usage: run-openclaw.sh [--no-telemetry] [--foreground]"; exit 0 ;;
+    *) echo "Unknown option: $arg (try --help)" >&2; exit 2 ;;
+  esac
+done
+
 IMAGE="demobot-openclaw"
 CONTAINER="demobot-openclaw"
 GATEWAY_PORT=18789
@@ -73,8 +92,9 @@ GATEWAY_TOKEN=$(cat "$TOKEN_FILE")
 
 # ---------- gateway config (regenerated each start; state dir persists the rest) ----------
 STATE_DIR="$STATE_DIR" ACCESS_KEY="$ACCESS_KEY" GATEWAY_TOKEN="$GATEWAY_TOKEN" \
-AGENT_MODEL="$AGENT_MODEL" python3 - <<'PYCONF'
+AGENT_MODEL="$AGENT_MODEL" OTEL_ENABLED="$OTEL_ENABLED" python3 - <<'PYCONF'
 import json, os
+otel_on = os.environ.get("OTEL_ENABLED", "true") == "true"
 cfg = {
     "gateway": {
         # "lan" bind: inside the container the default loopback bind is
@@ -123,7 +143,7 @@ cfg = {
     "diagnostics": {
         "enabled": True,
         "otel": {
-            "enabled": True,
+            "enabled": otel_on,   # --no-telemetry sets this False
             "endpoint": "http://host.containers.internal:4318",
             "protocol": "http/protobuf",   # grpc silently kills all export
             "serviceName": "openclaw-gateway",
@@ -144,12 +164,21 @@ PYCONF
 
 # ---------- run ----------
 echo "Starting OpenClaw gateway on http://127.0.0.1:${GATEWAY_PORT} (podman: $CONTAINER)"
+# Always start DETACHED so the health-wait and one-time plugin bootstrap below
+# can run. The launchd/foreground case blocks on `podman wait` at the end
+# instead — that hands the supervisor a foreground process to KeepAlive while
+# the container itself runs detached.
+#
 # --userns=keep-id maps the container user to the host uid that owns the bind
 # mounts. Without it the image's `node` user (uid 1000) cannot write to
 # $STATE_DIR (owned by the host user) and the gateway dies on startup with
 # EACCES creating /home/node/.openclaw/state.
+# --restart=on-failure:3 recovers a transient crash mid-demo but never
+# resurrects after a clean `podman stop` or a machine reboot — so "off" stays
+# the default state when you're not demoing.
 podman run -d --replace --name "$CONTAINER" \
   --userns=keep-id \
+  --restart=on-failure:3 \
   -p "127.0.0.1:${GATEWAY_PORT}:${GATEWAY_PORT}" \
   -e OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental \
   -e HOME=/home/node \
@@ -171,9 +200,19 @@ if ! podman exec "$CONTAINER" openclaw plugins list 2>/dev/null | grep -q "diagn
     && podman restart "$CONTAINER" >/dev/null
 fi
 
+TELEMETRY_STATE=$([ "$OTEL_ENABLED" = true ] && echo "on -> :4318" || echo "OFF (--no-telemetry)")
 echo ""
 echo "OpenClaw gateway up:  http://127.0.0.1:${GATEWAY_PORT}"
 echo "  Control UI token:   $GATEWAY_TOKEN"
 echo "  Agent model:        $AGENT_MODEL   Workspace: $DECOY_DIR"
 echo "  Tool guard:         http://host.containers.internal:8001/api/toolguard/inspect (fail-closed)"
+echo "  Telemetry:          $TELEMETRY_STATE"
 echo "  Logs:               podman logs -f $CONTAINER"
+
+# Foreground/launchd supervision: block on the container so a KeepAlive plist
+# has a process to watch. When the container stops, this returns and launchd
+# restarts the unit.
+if [ "$FOREGROUND" = true ]; then
+  echo "  (foreground: waiting on container for process supervision)"
+  exec podman wait "$CONTAINER" >/dev/null
+fi
