@@ -167,9 +167,16 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
 - **podman VM only shares `$HOME`.** A bind mount from `/Applications/DemoBot`
   fails `statfs ...: no such file or directory` — which is why the plugin is
   baked into the image rather than mounted. The remaining mounts are the state
-  dir (`~/.demobot-openclaw`) and the decoy workspace (`~/DemoBotDecoy`); both
-  need `--userns=keep-id` or the container's uid-1000 `node` user hits EACCES on
-  the host-owned dirs.
+  dir (`~/.demobot-openclaw`) and the decoy workspace (`~/DemoBotDecoy`).
+- **KNOWN BROKEN (pre-existing, 2026-07-28): the gateway does not start.** It
+  dies with `EACCES ... mkdir '/home/node/.openclaw/state'` — the image runs as
+  `node` (uid 1000) but the mounts are host-owned (uid 501), and `--userns=keep-id`
+  does NOT bridge that (nor does `keep-id:uid=1000,gid=1000`; verified on macOS
+  podman). This was masked because `run-openclaw.sh` printed "gateway up"
+  unconditionally after its health-wait; it now reports the real state and exits
+  non-zero. Fixing it is a posture call (container root — which rootless podman
+  already maps to the unprivileged host user — vs. loosening `$STATE_DIR`), so
+  it is deliberately not folded into the sparse-checkout change.
 - **The guard is fail-closed:** with `TOOL_GUARD_ENABLED=True`, a dead app
   (:8001) denies EVERY agent tool call — looks like a broken agent, not a broken
   app. `TOOL_GUARD_ENABLED` gates *enforcement* only (default False = the
