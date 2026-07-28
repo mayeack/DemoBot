@@ -139,7 +139,10 @@ def _new_session(client: httpx.Client, base: str, auth) -> Optional[str]:
 
 def _send(client, base, auth, session_id, message, flags) -> Dict[str, Any]:
     body = {"session_id": session_id, "message": message,
-            "disclaimer_accepted": True, **flags}
+            "disclaimer_accepted": True,
+            # Full coordinator/specialists pipeline (single-agent is the API
+            # default); a scenario flag can still override.
+            "multi_agent_mode": True, **flags}
     r = client.post(f"{base}/api/chat/message", auth=auth, json=body)
     out: Dict[str, Any] = {"status": r.status_code}
     if r.status_code == 200:

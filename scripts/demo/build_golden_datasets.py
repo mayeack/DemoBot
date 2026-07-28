@@ -155,7 +155,10 @@ def _capture_one(client: httpx.Client, base: str, auth, theme: str, prompt: str)
         if rs.status_code == 200:
             sid = rs.json().get("session_id")
         body = {"session_id": sid, "message": prompt, "theme": theme,
-                "disclaimer_accepted": True}
+                "disclaimer_accepted": True,
+                # Full pipeline (single-agent is the API default) to match the
+                # provenance of previously built golden datasets.
+                "multi_agent_mode": True}
         r = client.post(f"{base}/api/chat/message", auth=auth, json=body, timeout=180.0)
         if r.status_code == 200:
             return r.json().get("message", "") or ""

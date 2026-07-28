@@ -207,7 +207,11 @@ class AutoPrompterService:
             "disclaimer_accepted": True,
             "force_pii_injection": force_pii,
             "force_toxic_injection": force_toxic,
-            "force_hallucination_injection": force_hallucination
+            "force_hallucination_injection": force_hallucination,
+            # Auto-prompted demo traffic exists to populate AI Agent Monitoring
+            # with multi-agent traces, so opt in explicitly (single-agent is the
+            # API default).
+            "multi_agent_mode": True
         }
         
         response = await client.post(

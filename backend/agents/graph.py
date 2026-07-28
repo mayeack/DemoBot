@@ -6,22 +6,21 @@ Topology:
 
     START -> router -> {theme}_subgraph -> END
 
-Each ``{theme}_subgraph`` is the decomposed multi-agent pipeline:
+Each ``{theme}_subgraph`` is the decomposed pipeline (default path):
 
-    policy -> prompt_defense -> intake -> coordinator -> specialists
-          -> synthesizer -> safety -> injection -> compliance
-          -> response_defense -> governance
+    policy -> prompt_defense -> intake -> synthesizer -> safety
+          -> injection -> compliance -> response_defense -> governance
 
-The multi-agent core is coordinator -> specialists -> synthesizer: the
-coordinator selects 1-N themed specialists for the query, each specialist runs
-as its own themed agent, and the synthesizer fuses their findings into the
-final answer. Every agent emits its own GenAI AgentInvocation span, so the turn
-produces a multi-agent trace.
+By default the edge after ``intake`` routes straight to the synthesizer, which
+answers alone as the theme's ``*_domain_agent`` (one LLM call per turn).
 
-When the request sets ``multi_agent_mode`` to False (the sidecar "Multi-Agent
-Mode" toggle turned off), the edge after ``intake`` bypasses the coordinator
-and specialists and routes straight to the synthesizer, which answers alone as
-the theme's ``*_domain_agent``. Every guardrail node still runs in both modes.
+When the request sets ``multi_agent_mode`` to True (the sidecar "Multi-Agent
+Mode" toggle turned on), that edge instead runs the multi-agent core
+coordinator -> specialists -> synthesizer: the coordinator selects 1-N themed
+specialists for the query, each specialist runs as its own themed agent, and
+the synthesizer fuses their findings into the final answer. Every agent emits
+its own GenAI AgentInvocation span, so the turn produces a multi-agent trace.
+Every guardrail node still runs in both modes.
 
 There are conditional short-circuits to END whenever a node sets ``terminal``
 (policy block, AI Defense block, clarifying question, agent generation error).
@@ -66,15 +65,15 @@ def _terminal_router(state: Dict[str, Any]) -> str:
 
 
 def _route_after_intake(state: Dict[str, Any]) -> str:
-    """End if short-circuited; else run the multi-agent core (default) or
-    bypass it to the synthesizer when ``multi_agent_mode`` is False.
+    """End if short-circuited; else route straight to the synthesizer (default)
+    or run the multi-agent core when ``multi_agent_mode`` is explicitly True.
 
-    None/absent defaults to multi-agent here — the single place the default is
-    applied (mirrors ``internal_policy_review`` in nodes/policy.py).
+    None/absent/False defaults to single-agent here — the single place the
+    default is applied (mirrors ``internal_policy_review`` in nodes/policy.py).
     """
     if state.get("terminal"):
         return "end"
-    return "synthesizer" if state.get("multi_agent_mode") is False else "coordinator"
+    return "coordinator" if state.get("multi_agent_mode") is True else "synthesizer"
 
 
 def build_theme_subgraph(theme_config):

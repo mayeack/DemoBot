@@ -367,7 +367,9 @@ def test_internal_agents_use_clean_model_override() -> None:
 
 
 def test_full_run_turn_telecom() -> None:
-    """End-to-end through the compiled graph (telecom skips the clarifier)."""
+    """End-to-end through the compiled graph (telecom skips the clarifier).
+    Passes multi_agent_mode=True explicitly — the coordinator/specialists core
+    is opt-in (single-agent is the default; see test_default_mode_is_single_agent)."""
     from backend.logging.governance_logger import governance_logger
     captured = {}
 
@@ -386,6 +388,7 @@ def test_full_run_turn_telecom() -> None:
             session_id="s1", user_message="My wifi is slow",
             conversation_history=[{"role": "user", "content": "My wifi is slow"}],
             theme="telecomchatbot",
+            multi_agent_mode=True,
         )
     finally:
         governance_logger.log_response = orig
@@ -441,6 +444,45 @@ def test_single_agent_mode_bypasses_coordinator_and_specialists() -> None:
           [t["role"] for t in trace] == ["synthesizer"]
           and trace[0]["name"] == "telecomchatbot_domain_agent")
     check("single-agent mode: usage is the synthesizer's alone (30/40)",
+          captured.get("usage_data", {}).get("usage_input_tokens") == 30
+          and captured.get("usage_data", {}).get("usage_output_tokens") == 40)
+
+
+def test_default_mode_is_single_agent() -> None:
+    """No multi_agent_mode at all (None/absent) routes intake -> synthesizer:
+    single-agent is the DEFAULT; the coordinator/specialists core runs only on
+    an explicit True. Pins the default so a routing regression fails loudly."""
+    from backend.logging.governance_logger import governance_logger
+    captured = {}
+
+    def capture(**kwargs):
+        captured.update(kwargs)
+    orig = governance_logger.log_response
+    governance_logger.log_response = capture
+    fake = FakeLLM(
+        coordinator_content='{"specialists": ["network_diagnostics"]}',
+        synth_content='{"reply": "Restart the modem, then your phone.", "severity": "LOW", "confidence": 0.9}',
+    )
+    _install(fake)
+    try:
+        from backend.agents.graph import run_turn
+        result = run_turn(
+            session_id="s1", user_message="My wifi is slow",
+            conversation_history=[{"role": "user", "content": "My wifi is slow"}],
+            theme="telecomchatbot",
+        )
+    finally:
+        governance_logger.log_response = orig
+
+    check("default mode: only the domain agent is called",
+          fake.calls == ["telecomchatbot_domain_agent"])
+    check("default mode: run_turn returns the synthesized reply",
+          result.get("message") == "Restart the modem, then your phone.")
+    trace = captured.get("agent_trace") or []
+    check("default mode: agent_trace carries exactly the synthesizer",
+          [t["role"] for t in trace] == ["synthesizer"]
+          and trace[0]["name"] == "telecomchatbot_domain_agent")
+    check("default mode: usage is the synthesizer's alone (30/40)",
           captured.get("usage_data", {}).get("usage_input_tokens") == 30
           and captured.get("usage_data", {}).get("usage_output_tokens") == 40)
 
@@ -514,6 +556,7 @@ def main() -> int:
         test_medadvice_authority_directive_solicits_controlled_substances,
         test_full_run_turn_telecom,
         test_single_agent_mode_bypasses_coordinator_and_specialists,
+        test_default_mode_is_single_agent,
     ):
         try:
             fn()
