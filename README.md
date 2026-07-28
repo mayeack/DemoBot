@@ -115,6 +115,13 @@ Key modules: `backend/routers/toolguard.py`, `backend/services/tool_policy.py`,
 setup runs both the guarded and unguarded-control demos. See
 [Agentic Surface](#agentic-surface-openclaw-optional-1) under Running.
 
+> **`openclaw/` is tracked but not checked out on the demo Mac.** Endpoint
+> security deletes OpenClaw files from the working tree, so the directory is
+> sparse-checkout-excluded there and the container image is built straight from
+> git. Remote clones are unaffected and get the full tree. Browse or change it
+> with `scripts/openclaw-edit.sh` (`--list` / `--show <path>` / `<path>`) rather
+> than checking it out.
+
 ### Frontend Stack
 - **HTML5 + TailwindCSS**: Responsive UI
 - **Vanilla JavaScript**: Real-time chat interface with streaming

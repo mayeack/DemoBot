@@ -5,9 +5,13 @@
 #   - the local OTel collector (:4318) via the diagnostics-otel plugin
 #
 # Podman, not host npm: Cisco Secure Endpoint quarantines OpenClaw installed on
-# the host. It also deletes working-tree copies of openclaw/Containerfile, so
-# that file is read from git (git show) when a rebuild is needed — the image
-# normally already exists in the podman VM. See .claude/napkin.md.
+# the host, and deletes OpenClaw files left in the working tree. So openclaw/ is
+# tracked in git but sparse-checkout-excluded from this Mac — nothing on disk
+# for AMP to delete. The image (recipe AND plugin) is built straight from a
+# `git archive HEAD:openclaw` stream, and rebuilt whenever that tree's hash
+# changes. Consequence: a plugin edit reaches the gateway once COMMITTED, not
+# once staged. Read/edit openclaw/ with scripts/openclaw-edit.sh.
+# See .claude/napkin.md.
 #
 # Run alongside ./run.sh (app) and ./run-collector.sh (collector).
 # Stop:  podman stop demobot-openclaw
@@ -39,12 +43,6 @@ CONTAINER="demobot-openclaw"
 GATEWAY_PORT=18789
 STATE_DIR="$HOME/.demobot-openclaw"          # gateway config+state (persisted)
 DECOY_DIR="$HOME/DemoBotDecoy"               # agent workspace (decoy data only)
-PLUGIN_SRC="$PWD/openclaw/plugins/demobot-toolguard"   # source of truth (in git)
-# The podman VM only shares $HOME, and this repo lives outside it
-# (/Applications/DemoBot), so a bind mount straight from the repo fails with
-# "statfs ...: no such file or directory". Stage a copy under $HOME instead,
-# refreshed on every start so plugin edits still take effect on restart.
-PLUGIN_DIR="$STATE_DIR/plugins/demobot-toolguard"
 AGENT_MODEL="ollama/llama3.2:3b"             # tool-capable; dolphin3 has no tools template
 
 ACCESS_KEY=$(grep '^ACCESS_KEY=' .env 2>/dev/null | cut -d= -f2- || true)
@@ -53,10 +51,25 @@ ACCESS_KEY=$(grep '^ACCESS_KEY=' .env 2>/dev/null | cut -d= -f2- || true)
 command -v podman >/dev/null || { echo "ERROR: podman not found." >&2; exit 1; }
 podman info >/dev/null 2>&1 || { echo "ERROR: podman machine not running (podman machine start)." >&2; exit 1; }
 
-if ! podman image exists "$IMAGE"; then
-  echo "Image $IMAGE missing — rebuilding from the tracked recipe in git..."
-  git show HEAD:openclaw/Containerfile | podman build -t "$IMAGE" -f - . || {
-    echo "ERROR: rebuild failed. Recipe source: git show HEAD:openclaw/Containerfile" >&2
+# openclaw/ is not on disk (sparse-excluded), so git IS the source: `git archive`
+# streams the tree — Containerfile at the top, plugins/ beneath it — to podman as
+# the build context, no temp files. The tree hash is stamped on the image as a
+# label, so a committed change to the recipe or the plugin triggers a rebuild by
+# itself; an unchanged tree reuses the image and this is a no-op.
+OPENCLAW_TREE=$(git rev-parse HEAD:openclaw)
+IMAGE_TREE=$(podman image inspect "$IMAGE" --format '{{index .Labels "demobot.openclaw.tree"}}' 2>/dev/null || true)
+if [ "$IMAGE_TREE" != "$OPENCLAW_TREE" ]; then
+  if [ -n "$IMAGE_TREE" ]; then
+    echo "openclaw/ changed in git (${IMAGE_TREE:0:12} -> ${OPENCLAW_TREE:0:12}) — rebuilding $IMAGE..."
+  else
+    echo "Building $IMAGE from the tracked recipe in git (tree ${OPENCLAW_TREE:0:12})..."
+    echo "  (first build installs openclaw via npm — expect a few minutes)"
+  fi
+  git archive "HEAD:openclaw" \
+    | podman build -t "$IMAGE" -f Containerfile \
+        --label "demobot.openclaw.tree=$OPENCLAW_TREE" - || {
+    echo "ERROR: build failed. Recipe source: git archive HEAD:openclaw" >&2
+    echo "       Inspect it with: scripts/openclaw-edit.sh --show openclaw/Containerfile" >&2
     exit 1
   }
 fi
@@ -73,11 +86,14 @@ if ! curl -s --max-time 3 http://localhost:4318 >/dev/null 2>&1; then
   echo "WARN: OTel collector not detected on :4318 — gateway telemetry will not" >&2
   echo "      reach Splunk/Galileo until ./run-collector.sh is running." >&2
 fi
-[ -f "$PLUGIN_SRC/index.js" ] || { echo "ERROR: $PLUGIN_SRC missing (git restore openclaw/)." >&2; exit 1; }
 
-mkdir -p "$STATE_DIR" "$DECOY_DIR" "$PLUGIN_DIR"
-# Refresh the staged plugin copy (see PLUGIN_DIR note above).
-cp "$PLUGIN_SRC"/* "$PLUGIN_DIR"/
+mkdir -p "$STATE_DIR" "$DECOY_DIR"
+# Earlier versions staged a host copy of the plugin here to bind-mount it. It is
+# baked into the image now; leaving the copy behind would keep OpenClaw .js/.mjs
+# on the disk AMP watches, which is the whole point of the change. Targeted at
+# our plugin only — the gateway keeps its own installed plugins under $STATE_DIR.
+rm -rf "$STATE_DIR/plugins/demobot-toolguard"
+
 if [ ! -e "$DECOY_DIR/inbox" ]; then
   echo "NOTE: decoy workspace $DECOY_DIR is unseeded — run:" >&2
   echo "      venv/bin/python scripts/demo/seed_agentic_decoy.py" >&2
@@ -184,7 +200,6 @@ podman run -d --replace --name "$CONTAINER" \
   -e HOME=/home/node \
   -v "$STATE_DIR:/home/node/.openclaw" \
   -v "$DECOY_DIR:/home/node/.openclaw/workspace" \
-  -v "$PLUGIN_DIR:/opt/demobot-plugins/demobot-toolguard:ro" \
   "$IMAGE" >/dev/null
 
 for i in $(seq 1 30); do

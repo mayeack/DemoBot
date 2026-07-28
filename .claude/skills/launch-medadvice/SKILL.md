@@ -124,6 +124,14 @@ venv/bin/python scripts/demo/seed_agentic_decoy.py   # one-time: seed the decoy 
 iterating on the plugin), `--foreground` (block on the container for launchd
 supervision). Auto-start at login is opt-in: `./deploy/launchd/install.sh --with-openclaw`.
 
+`openclaw/` is tracked but **not checked out on this Mac** (endpoint security
+deletes OpenClaw files from the working tree). The image is built from
+`git archive HEAD:openclaw`, so the build needs no files on disk — but it also
+means a rebuild is triggered by a **commit** to `openclaw/`, not by staged edits,
+and that rebuild costs a few minutes. Do it before a demo, not during one. Read
+or change the directory with `scripts/openclaw-edit.sh`; never `git restore
+openclaw/`.
+
 **Toggling the integration off:** nothing in the app calls the gateway, so
 `podman stop demobot-openclaw` fully removes it — Modes A/B are unaffected.
 `TOOL_GUARD_ENABLED` (default False) is a *separate* switch: it only controls
