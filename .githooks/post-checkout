@@ -1,0 +1,32 @@
+#!/bin/bash
+# post-checkout — keep openclaw/ out of the working tree on this Mac.
+#
+# openclaw/ is tracked, but Cisco Secure Endpoint (AMP) deletes OpenClaw
+# artifacts from the host, so it is excluded via sparse-checkout. Sparse state
+# is per-worktree and is NOT inherited, so every `git worktree add` (including
+# the agent worktrees under .claude/worktrees/) would otherwise re-materialise
+# the directory and hand AMP a fresh target. This re-applies the exclusion.
+#
+# Enabled with:  git config core.hooksPath .githooks
+# core.hooksPath lives in the shared .git/config, so worktrees inherit it. It is
+# local config and is never cloned, so remote boxes (EC2 clones from GitHub) get
+# a full checkout of openclaw/ exactly as before.
+set -e
+
+# Linux/CI has no EDR problem and may genuinely need the files checked out.
+[ "$(uname)" = "Darwin" ] || exit 0
+
+# Already sparse (the normal case on subsequent checkouts) — nothing to do.
+[ "$(git config --get core.sparseCheckout || true)" = "true" ] && exit 0
+
+# Nothing materialised, nothing to protect (e.g. a branch without openclaw/).
+[ -d openclaw ] || exit 0
+
+if [ -x scripts/openclaw-edit.sh ]; then
+  echo "post-checkout: excluding openclaw/ from this worktree (EDR; see .claude/napkin.md)"
+  # Never fail a checkout over this — worst case the files sit there and AMP
+  # deletes them, which is the status quo we are moving away from.
+  scripts/openclaw-edit.sh --apply-sparse >/dev/null || \
+    echo "post-checkout: WARN could not apply sparse-checkout; openclaw/ is exposed to AMP" >&2
+fi
+exit 0

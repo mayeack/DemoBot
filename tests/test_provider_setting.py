@@ -141,6 +141,124 @@ def test_creds_only_never_switches_active_provider() -> None:
         settings.ai_provider, settings.openai_api_key = orig_provider, orig_key
 
 
+def _capture_blocked_events():
+    """Run every blocked-turn governance emitter, returning their log_response kwargs.
+
+    Stubs governance_logger.log_response (and log_escalation, which the policy
+    node also calls) so nothing is written; no LLM or AI Defense call is made."""
+    from backend.agents.nodes import policy as policy_node
+    from backend.agents.nodes.shared import content_engine
+    from backend.logging import governance_logger as gl
+    from backend.services.ai_defense import InspectionResult
+
+    captured = {}
+    orig_log, orig_esc = gl.governance_logger.log_response, gl.governance_logger.log_escalation
+    try:
+        gl.governance_logger.log_escalation = lambda **kw: None
+        inspection = InspectionResult(is_safe=False, severity="HIGH", event_id="evt-1")
+
+        gl.governance_logger.log_response = lambda **kw: captured.__setitem__("prompt_block", kw)
+        content_engine._handle_ai_defense_block(
+            session_id="S1", request_id="R1", trace_id="T1", user_message="hi",
+            conversation_history=[], inspection=inspection, start_time=0.0,
+            client_address=None, enduser_id=None,
+        )
+
+        # Response block, graph caller: the model already answered, so the real
+        # model id and token usage are passed through.
+        gl.governance_logger.log_response = lambda **kw: captured.__setitem__("response_block", kw)
+        content_engine._handle_ai_defense_response_block(
+            session_id="S1", request_id="R1", trace_id="T1", conversation_messages=[],
+            inspection=inspection, start_time=0.0, client_address=None, enduser_id=None,
+            llm_model="real-model-that-answered",
+            usage_data={"usage_input_tokens": 11, "usage_output_tokens": 7,
+                        "usage_total_tokens": 18},
+        )
+
+        # Response block, legacy caller: no model/usage on hand -> fallbacks.
+        gl.governance_logger.log_response = lambda **kw: captured.__setitem__("response_block_legacy", kw)
+        content_engine._handle_ai_defense_response_block(
+            session_id="S1", request_id="R1", trace_id="T1", conversation_messages=[],
+            inspection=inspection, start_time=0.0, client_address=None, enduser_id=None,
+        )
+    finally:
+        gl.governance_logger.log_response = orig_log
+        gl.governance_logger.log_escalation = orig_esc
+
+    captured["policy_node_model"] = policy_node._response_model()
+    return captured
+
+
+def test_blocked_events_report_the_active_provider_model() -> None:
+    """Blocked turns must not be misattributed to another provider's model.
+
+    These paths never see a real ``response.model`` (nothing was called, or the
+    answer was withheld), and they used to hardcode ``settings.anthropic_model``
+    -- so on Ollama every blocked event landed in Splunk as a Claude turn while
+    ``provider_name``/``request_model`` said ollama. Executive fields and Galileo
+    both prefer ``response_model``, so the wrong value won."""
+    from backend.logging.governance_logger import active_response_model
+    from backend.model_emitter import model_emitter
+
+    orig_provider, orig_ollama = settings.ai_provider, settings.ollama_model
+    orig_enabled = model_emitter.enabled
+    try:
+        model_emitter.enabled = False  # deterministic: no demo name override
+        settings.ai_provider, settings.ollama_model = "ollama", "dolphin3:8b"
+
+        check("active_response_model follows the active provider",
+              active_response_model() == "dolphin3:8b")
+        check("active_response_model is not the anthropic default",
+              active_response_model() != settings.anthropic_model)
+
+        ev = _capture_blocked_events()
+        check("policy block node reports the ollama model",
+              ev["policy_node_model"] == "dolphin3:8b")
+        check("AI Defense prompt block reports the ollama model",
+              ev["prompt_block"]["response_model"] == "dolphin3:8b")
+        check("AI Defense response block echoes the model that actually answered",
+              ev["response_block"]["response_model"] == "real-model-that-answered")
+        check("AI Defense response block falls back to the active model",
+              ev["response_block_legacy"]["response_model"] == "dolphin3:8b")
+
+        # Token spend: the response block happens *after* the call completed.
+        check("response block reports the real token usage",
+              ev["response_block"]["usage_data"]["usage_total_tokens"] == 18)
+        check("response block without usage still defaults to zeros",
+              ev["response_block_legacy"]["usage_data"]["usage_total_tokens"] == 0)
+        # The prompt block genuinely precedes any model call -> zeros are correct.
+        check("prompt block reports zero tokens (nothing was called)",
+              ev["prompt_block"]["usage_data"]["usage_total_tokens"] == 0)
+
+        # Switching providers must move the reported model with it.
+        settings.ai_provider = "anthropic"
+        check("switching to anthropic moves the blocked-event model",
+              active_response_model() == settings.anthropic_model)
+    finally:
+        settings.ai_provider, settings.ollama_model = orig_provider, orig_ollama
+        model_emitter.enabled = orig_enabled
+
+
+def test_model_emitter_override_reaches_blocked_events() -> None:
+    """The demo model-name override applies to request_model; blocked events now
+    route response_model through the same helper, so it can no longer disagree."""
+    from backend.logging.governance_logger import active_response_model
+    from backend.model_emitter import model_emitter
+
+    orig_provider = settings.ai_provider
+    orig_enabled, orig_name, orig_rand = (
+        model_emitter.enabled, model_emitter.model_name, model_emitter.random)
+    try:
+        settings.ai_provider = "ollama"
+        model_emitter.configure(enabled=True, model_name="gpt-4o-mini", random_emit=False)
+        check("blocked events honor the demo model-name override",
+              active_response_model() == "gpt-4o-mini")
+    finally:
+        settings.ai_provider = orig_provider
+        model_emitter.enabled, model_emitter.model_name, model_emitter.random = (
+            orig_enabled, orig_name, orig_rand)
+
+
 def main() -> int:
     for fn in (
         test_choices_and_get_shape,
@@ -149,6 +267,8 @@ def main() -> int:
         test_provider_fields_no_secret_leak,
         test_secret_apply_mask_and_blank_keep,
         test_creds_only_never_switches_active_provider,
+        test_blocked_events_report_the_active_provider_model,
+        test_model_emitter_override_reaches_blocked_events,
     ):
         try:
             fn()

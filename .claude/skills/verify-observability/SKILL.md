@@ -36,9 +36,13 @@ For the **OpenClaw agentic surface** (`gen_ai` `execute_tool` spans), also run
 - `backend/telemetry/otel.py` `tool_span` / `record_tool_result`
 - `backend/routers/toolguard.py`, `backend/services/tool_policy.py`
 - `run-openclaw.sh` (the generated `diagnostics.otel` config)
-- `openclaw/plugins/demobot-toolguard/*` (the gateway plugin)
+- `openclaw/plugins/demobot-toolguard/*` (the gateway plugin — sparse-excluded
+  from the working tree; edit via `scripts/openclaw-edit.sh` and **commit**, or
+  the rebuild will not pick the change up)
 It SKIPs its live-gateway tiers when the gateway is down, so it is safe to run
-without Mode C up (Tier 0 config/selftest still runs).
+without Mode C up (Tier 0 config/selftest still runs). Tier 0 runs the plugin
+selftest inside the `demobot-openclaw` image, so it SKIPs until that image has
+been built once by `./run-openclaw.sh`.
 
 ## How to run
 

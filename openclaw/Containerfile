@@ -7,10 +7,14 @@
 # podman VM the files are out of the host scanner's reach, and the container
 # also gives the demo its sandboxed-agent posture for free.
 #
-# NOTE: on this host, author/edit this file with shell redirection, not an
-# agent Write tool — see .claude/napkin.md (EDR deletes agent-written copies).
+# The whole openclaw/ directory — this file and the plugin it bakes in — is
+# tracked in git but sparse-checkout-excluded from this Mac's working tree, so
+# there is nothing on disk for AMP to delete. Read or change it with
+# `scripts/openclaw-edit.sh`; do NOT check it out to edit it.
 #
-# Build:  podman build -t demobot-openclaw -f openclaw/Containerfile openclaw/
+# Build:  git archive HEAD:openclaw | podman build -t demobot-openclaw -f Containerfile -
+#         (run-openclaw.sh does this automatically when HEAD:openclaw changes;
+#          the git stream IS the build context, so nothing is written to disk)
 # Run:    ./run-openclaw.sh   (mounts config/state/workspace, publishes the
 #                              gateway port, wires host.containers.internal)
 # =============================================================================
@@ -33,6 +37,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN npm install -g "openclaw@${OPENCLAW_VERSION}" && npm cache clean --force
 
+# The demobot-toolguard plugin (the before_tool_call governance seat) is baked
+# in rather than bind-mounted: a mount would need a copy staged somewhere under
+# $HOME on the host, which is exactly the disk AMP watches. Copied as root, so
+# it lands read-only for the `node` user — same posture as the old :ro mount.
+# run-openclaw.sh rebuilds whenever the openclaw/ tree hash changes, so a
+# committed plugin edit still takes effect on the next start.
+COPY plugins/demobot-toolguard/ /opt/demobot-plugins/demobot-toolguard/
+
 # Non-root, mirroring the app Containerfile. The node base image ships a
 # `node` user (uid 1000); reuse it rather than minting another.
 USER node
@@ -41,7 +53,7 @@ USER node
 # run-openclaw.sh:
 #   /home/node/.openclaw            gateway config + state (persisted)
 #   /home/node/.openclaw/workspace  the decoy workspace (~/DemoBotDecoy)
-#   /opt/demobot-plugins            the demobot-toolguard plugin (read-only)
+# The plugin at /opt/demobot-plugins is baked in above, not mounted.
 ENV OPENCLAW_STATE_DIR=/home/node/.openclaw
 
 # Gateway control plane. Bind to all interfaces inside the container so the

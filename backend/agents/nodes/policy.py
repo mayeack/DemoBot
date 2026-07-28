@@ -12,7 +12,7 @@ import time
 from typing import Any, Dict
 
 from backend.agents.nodes.shared import clarifying_service, escalation_rules
-from backend.logging.governance_logger import governance_logger
+from backend.logging.governance_logger import active_response_model, governance_logger
 from backend.models.schemas import MessageType, SeverityLevel
 from backend.services.escalation_rules import EscalationRules
 from backend.telemetry import otel
@@ -110,6 +110,4 @@ def policy_block_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
 def _response_model() -> str:
     """Active model id for governance logging (matches legacy behavior)."""
-    from backend.config import settings
-
-    return settings.anthropic_model
+    return active_response_model()

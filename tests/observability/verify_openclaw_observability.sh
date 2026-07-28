@@ -32,14 +32,18 @@ KEY=$(grep '^ACCESS_KEY=' .env 2>/dev/null | cut -d= -f2)
 sum() { curl -s "$CMETRICS" 2>/dev/null | grep -vE '^#' | grep -E "$1" | awk '{s+=$2} END{print s+0}'; }
 
 echo "== Tier 0: plugin selftest + config sanity (code-level; no gateway) =="
-if command -v node >/dev/null 2>&1; then
-  if node openclaw/plugins/demobot-toolguard/selftest.mjs >/tmp/oc_selftest.txt 2>&1; then
-    ok "demobot-toolguard selftest (allow/block/timeout/fail-policy)"
-  else
-    bad "demobot-toolguard selftest FAILED (see /tmp/oc_selftest.txt)"
-  fi
+# openclaw/ is sparse-excluded from this Mac's working tree (AMP deletes it), so
+# the selftest runs from the image, where the plugin is baked in. Still no
+# gateway needed — `podman run` on a stopped image is enough.
+if ! command -v podman >/dev/null 2>&1; then
+  skip "podman not on PATH -> cannot run plugin selftest"
+elif ! podman image exists demobot-openclaw 2>/dev/null; then
+  skip "image demobot-openclaw not built yet -> run ./run-openclaw.sh once"
+elif podman run --rm demobot-openclaw \
+       node /opt/demobot-plugins/demobot-toolguard/selftest.mjs >/tmp/oc_selftest.txt 2>&1; then
+  ok "demobot-toolguard selftest (allow/block/timeout/fail-policy)"
 else
-  skip "node not on PATH -> cannot run plugin selftest"
+  bad "demobot-toolguard selftest FAILED (see /tmp/oc_selftest.txt)"
 fi
 # The generated gateway config is the source of the silent-failure traps.
 if [ -f "$CONF" ]; then

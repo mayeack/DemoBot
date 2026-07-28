@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 /**
- * Selftest for guard-core.mjs — runs with plain `node` on the host, no
- * OpenClaw SDK required. Exercises allow / block / timeout / fail policy
- * against a stubbed fetch. Invoked by
- * tests/observability/verify_openclaw_observability.sh (Tier 0).
+ * Selftest for guard-core.mjs — no OpenClaw SDK required, just `node`.
+ * Exercises allow / block / timeout / fail policy against a stubbed fetch.
+ * Invoked by tests/observability/verify_openclaw_observability.sh (Tier 0).
  *
- *   node openclaw/plugins/demobot-toolguard/selftest.mjs
+ * It runs from the image, not the working tree: openclaw/ is sparse-excluded
+ * on the Mac (AMP deletes it), and the plugin is baked in at /opt.
+ *
+ *   podman run --rm demobot-openclaw node /opt/demobot-plugins/demobot-toolguard/selftest.mjs
  */
 import { decideFromGuardResponse, inspectToolCall } from "./guard-core.mjs";
 

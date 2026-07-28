@@ -65,6 +65,13 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
   `gen_ai.*`/governance fields (Splunk props alias them). Inputs come from
   `governance_node`/`policy.py` passing `severity/theme/agent_name/workflow_name/
   hallucination_*`. Regression: `venv/bin/python tests/test_executive_fields.py`.
+- **Blocked turns have no `response.model` to echo** — use
+  `governance_logger.active_response_model()` (never `settings.anthropic_model`,
+  the old bug: on Ollama every blocked event read as a Claude turn, and
+  `executive_fields`/Galileo both prefer `response_model` over `request_model`,
+  so the wrong value won). Response-side blocks *do* have a real model + token
+  usage — pass `llm_model`/`usage_data` (`nodes/defense.py`) or they report
+  zeros. Regression: `venv/bin/python tests/test_provider_setting.py`.
 - `estimated_cost` is an app-side estimate (Splunk prices Claude to $0); price map
   is in `executive_fields._PRICES_PER_MTOK`. Real `hallucination_score`/
   `groundedness_score` come from Splunk GenAI Scoring (`gen_ai_log` sourcetype
@@ -141,16 +148,28 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
   quarantines the npm `openclaw` entrypoint within ~2 min, repeatably. The
   gateway is the `demobot-openclaw` image (pinned `openclaw@2026.7.1-2`) on
   :18789. See the [[openclaw-edr-podman]] memory.
-- **Author OpenClaw build files via shell redirection, not the agent Write
-  tool.** AMP deleted agent-Write-tool copies of `openclaw/Containerfile` and
-  the plugin `.js`/`.mjs` within seconds (byte-identical `cat`/`printf` copies
-  survived). They're committed, so `git restore openclaw/` brings them back; the
-  Containerfile is also read at rebuild time via `git show HEAD:openclaw/Containerfile`.
+- **`openclaw/` is tracked but NOT checked out on this Mac.** AMP deletes
+  OpenClaw files from the working tree, so the directory is excluded via
+  sparse-checkout — nothing on disk to delete, and `git status` stays clean.
+  Everything is still in `HEAD` and on GitHub, so a remote `git clone` gets it
+  all. **Never `git restore openclaw/`** — that just hands AMP a target again.
+  - Read/edit it with `scripts/openclaw-edit.sh` (`--list`, `--show <path>`, or
+    `<path>` to edit): it round-trips through git object storage, so the repo
+    path is never written. Edits land **staged** — commit them.
+  - Setup, once per clone: `scripts/openclaw-edit.sh --apply-sparse` and
+    `git config core.hooksPath .githooks`. The hook re-applies the exclusion in
+    new worktrees (sparse state is per-worktree and is not inherited).
+- **The image is built from git, plugin baked in.** `run-openclaw.sh` pipes
+  `git archive HEAD:openclaw` into `podman build` as the build context and
+  stamps the tree hash as the `demobot.openclaw.tree` label; a mismatch triggers
+  a rebuild. So a plugin change takes effect once **committed**, not once staged,
+  and the first build after a change costs a few minutes (npm install).
 - **podman VM only shares `$HOME`.** A bind mount from `/Applications/DemoBot`
-  fails `statfs ...: no such file or directory`. `run-openclaw.sh` stages the
-  plugin into `~/.demobot-openclaw/` and pins the decoy workspace to
-  `~/DemoBotDecoy`. Bind mounts also need `--userns=keep-id` or the container's
-  uid-1000 `node` user hits EACCES on the host-owned dirs.
+  fails `statfs ...: no such file or directory` — which is why the plugin is
+  baked into the image rather than mounted. The remaining mounts are the state
+  dir (`~/.demobot-openclaw`) and the decoy workspace (`~/DemoBotDecoy`); both
+  need `--userns=keep-id` or the container's uid-1000 `node` user hits EACCES on
+  the host-owned dirs.
 - **The guard is fail-closed:** with `TOOL_GUARD_ENABLED=True`, a dead app
   (:8001) denies EVERY agent tool call — looks like a broken agent, not a broken
   app. `TOOL_GUARD_ENABLED` gates *enforcement* only (default False = the
