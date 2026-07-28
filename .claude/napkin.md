@@ -91,8 +91,15 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
   The `galileo` pkg bumped `httpx`→0.28.1 + `pydantic-settings`→2.14.1 (in requirements.txt).
 
 ## Chat latency (2026-07-15 remediation — where the time goes)
-- A turn = 3-4 sequential Ollama calls (coordinator → 1-2 specialists →
-  synthesizer). Per-agent wall-clock is in the governance event
+- **Multi-Agent Mode defaults OFF (2026-07-28):** a default turn = 1 Ollama
+  call (the theme's domain agent / synthesizer). The 3-4 sequential calls
+  (coordinator → 1-2 specialists → synthesizer) run only with the drawer
+  toggle ON (`multi_agent_mode=true`); non-UI callers must opt in explicitly
+  (auto-prompter + demo/eval scripts already do). Guard tests:
+  `test_default_mode_is_single_agent` + the stream-default checks in
+  `tests/test_api.py`.
+- A multi-agent turn = 3-4 sequential Ollama calls (coordinator → 1-2
+  specialists → synthesizer). Per-agent wall-clock is in the governance event
   (`agent_trace[].duration_ms`) and AI Defense time in `stage_timings` — check
   `logs/ai_governance.json` FIRST when "latency is high"; no log archaeology.
 - **Host memory pressure rules Ollama.** With Splunk ES resident, system_free

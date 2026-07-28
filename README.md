@@ -78,6 +78,12 @@ policy -> prompt_defense -> intake -> domain(theme) -> safety
       -> injection -> compliance -> response_defense -> governance
 ```
 
+The `domain(theme)` step is the single-agent default: the theme's domain agent
+answers directly (one LLM call). Toggling **Multi-Agent Mode** ON in the chat
+drawer (per-request `multi_agent_mode: true`) expands that step to
+`coordinator -> specialists -> synthesizer` for the turn; every guardrail node
+runs in both modes.
+
 Any node can short-circuit to the end of the pipeline (policy block, AI Defense
 block, clarifying question, or generation error). Specialist nodes
 (`backend/agents/nodes/`) wrap the existing services so business logic and the

@@ -6,7 +6,7 @@ let hallucinationEnabled = false;
 let boundaryEnabled = false;
 let aiDefenseEnabled = false;
 let internalPolicyEnabled = true;
-let multiAgentEnabled = true;
+let multiAgentEnabled = false;
 let autoPromptEnabled = false;
 let autoPromptStatusInterval = null;
 let currentTheme = 'medadvice';
@@ -397,8 +397,8 @@ document.addEventListener('DOMContentLoaded', function() {
         aiDefenseEnabled = savedAiDefenseEnabled === 'true';
         // Internal policy engine defaults ON unless explicitly turned off.
         internalPolicyEnabled = savedInternalPolicyEnabled !== 'false';
-        // Multi-agent mode defaults ON unless explicitly turned off.
-        multiAgentEnabled = savedMultiAgentEnabled !== 'false';
+        // Multi-agent mode defaults OFF unless explicitly turned on.
+        multiAgentEnabled = savedMultiAgentEnabled === 'true';
         // Mint a fresh session (clears the old transcript) rather than reusing
         // savedSessionId; createNewSession() also calls showMainApp() when done.
         createNewSession();

@@ -66,7 +66,11 @@ def _prewarm_llm_stack() -> None:
     if (settings.ai_provider or "").lower() == "ollama":
         import httpx
 
-        for model in sorted({settings.ollama_model, settings.ollama_model_internal}):
+        # Internal model first, user-facing synthesizer model LAST: on hosts
+        # where both can't co-reside, the one warmed last stays resident, and
+        # it's the only model the first turn needs under the single-agent
+        # default.
+        for model in dict.fromkeys([settings.ollama_model_internal, settings.ollama_model]):
             if not model:
                 continue
             try:

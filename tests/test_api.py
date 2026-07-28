@@ -177,8 +177,23 @@ def main() -> int:
               len(finals) == 1 and {"session_id", "message", "type", "escalated",
                                     "timestamp"} <= set(finals[0].keys()))
         stage_nodes = [f.get("node") for f in stages]
-        check("stream default -> coordinator stage present (multi-agent default)",
-              "coordinator" in stage_nodes, f"nodes={stage_nodes}")
+        check("stream default -> coordinator/specialists absent (single-agent default)",
+              "coordinator" not in stage_nodes and "specialists" not in stage_nodes,
+              f"nodes={stage_nodes}")
+        check("stream default -> synthesizer + all guardrails run",
+              {"synthesizer", "safety", "injection", "compliance",
+               "response_defense", "governance"} <= set(stage_nodes),
+              f"nodes={stage_nodes}")
+        # multi_agent_mode=true -> opt-in to the full coordinator/specialists core.
+        rma = c.post("/api/chat/message/stream", headers=AUTH,
+                     json={"session_id": sid, "message": "I have a sore throat.",
+                           "disclaimer_accepted": True, "multi_agent_mode": True})
+        ma_nodes = [f.get("node") for f in
+                    (json.loads(l[len("data: "):]) for l in rma.text.split("\n\n")
+                     if l.startswith("data: "))
+                    if f.get("event") == "stage"]
+        check("multi_agent_mode=true -> coordinator stage present",
+              "coordinator" in ma_nodes, f"nodes={ma_nodes}")
         # multi_agent_mode=false -> single-agent bypass: the coordinator and
         # specialists never run; the synthesizer + every guardrail node still do.
         rsa = c.post("/api/chat/message", headers=AUTH,

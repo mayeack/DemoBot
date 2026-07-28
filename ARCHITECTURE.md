@@ -395,6 +395,10 @@ single source of truth.
    ↓
 9. domain(theme)     → LLM call (Agent + LLM spans); parse assessment,
                        guidance, severity, token usage
+                       (single-agent default; with the "Multi-Agent Mode"
+                       toggle ON — multi_agent_mode=true — this step expands
+                       to coordinator → specialists → synthesizer, each with
+                       its own Agent span)
    ↓
 10. safety           → Escalation Rules evaluate; flag case if needed
    ↓

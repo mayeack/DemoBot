@@ -271,7 +271,7 @@
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-3">
                             <label class="relative inline-flex items-center cursor-pointer">
-                                <input type="checkbox" id="multiAgentToggle" class="sr-only peer" onchange="toggleMultiAgent()" checked>
+                                <input type="checkbox" id="multiAgentToggle" class="sr-only peer" onchange="toggleMultiAgent()">
                                 <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
                             </label>
                             <div>
@@ -279,8 +279,8 @@
                                 <p class="text-xs text-indigo-500">ON = coordinator → specialists → synthesizer pipeline. OFF = the domain agent answers directly (all guardrails still run)</p>
                             </div>
                         </div>
-                        <div id="multiAgentStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700">
-                            ON
+                        <div id="multiAgentStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
+                            OFF
                         </div>
                     </div>
                 </div>

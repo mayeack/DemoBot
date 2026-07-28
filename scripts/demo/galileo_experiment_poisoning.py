@@ -176,7 +176,10 @@ def _make_runner(client: httpx.Client, base: str, auth, model: str, theme: str):
         if rs.status_code == 200:
             sid = rs.json().get("session_id")
         body = {"session_id": sid, "message": prompt, "theme": theme,
-                "disclaimer_accepted": True}
+                "disclaimer_accepted": True,
+                # Full pipeline (single-agent is the API default) so the
+                # clean-vs-poisoned A/B keeps the same shape across runs.
+                "multi_agent_mode": True}
         r = client.post(f"{base}/api/chat/message", auth=auth, json=body)
         text = r.json().get("message", "") if r.status_code == 200 else \
             f"(error {r.status_code}: {r.text[:160]})"
