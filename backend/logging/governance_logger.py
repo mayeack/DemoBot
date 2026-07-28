@@ -44,6 +44,16 @@ def _active_provider_info():
     return name, _emit_model(model)
 
 
+def active_response_model() -> str:
+    """Model id to report as ``response_model`` when no real model reply exists.
+
+    Blocked turns (policy pre-block, AI Defense prompt block) never reach the
+    provider, so there is no ``response.model`` to echo. Reporting the *active*
+    provider's configured model keeps the event internally consistent with the
+    ``provider_name``/``request_model`` fields, which come from the same helper."""
+    return _active_provider_info()[1]
+
+
 class GovernanceLogger:
     """Centralized AI governance logging with multi-destination support"""
 

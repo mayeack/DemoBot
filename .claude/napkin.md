@@ -65,6 +65,13 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
   `gen_ai.*`/governance fields (Splunk props alias them). Inputs come from
   `governance_node`/`policy.py` passing `severity/theme/agent_name/workflow_name/
   hallucination_*`. Regression: `venv/bin/python tests/test_executive_fields.py`.
+- **Blocked turns have no `response.model` to echo** — use
+  `governance_logger.active_response_model()` (never `settings.anthropic_model`,
+  the old bug: on Ollama every blocked event read as a Claude turn, and
+  `executive_fields`/Galileo both prefer `response_model` over `request_model`,
+  so the wrong value won). Response-side blocks *do* have a real model + token
+  usage — pass `llm_model`/`usage_data` (`nodes/defense.py`) or they report
+  zeros. Regression: `venv/bin/python tests/test_provider_setting.py`.
 - `estimated_cost` is an app-side estimate (Splunk prices Claude to $0); price map
   is in `executive_fields._PRICES_PER_MTOK`. Real `hallucination_score`/
   `groundedness_score` come from Splunk GenAI Scoring (`gen_ai_log` sourcetype

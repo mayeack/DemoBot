@@ -68,6 +68,11 @@ def response_defense_node(state: Dict[str, Any]) -> Dict[str, Any]:
         if not inspection.should_block:
             return {"stage_timings": _stage_timing(state, "response_defense", started)}
 
+        # The model already answered here (that answer is what got blocked), so
+        # report its real id and token spend rather than the zeros/active-model
+        # fallback the handler uses for callers that don't track them.
+        input_tokens = state.get("llm_input_tokens", 0) or 0
+        output_tokens = state.get("llm_output_tokens", 0) or 0
         result = content_engine._handle_ai_defense_response_block(
             session_id=state["session_id"],
             request_id=state["request_id"],
@@ -77,6 +82,12 @@ def response_defense_node(state: Dict[str, Any]) -> Dict[str, Any]:
             start_time=state["start_time"],
             client_address=state.get("client_address"),
             enduser_id=state.get("enduser_id"),
+            llm_model=state.get("llm_model"),
+            usage_data={
+                "usage_input_tokens": input_tokens,
+                "usage_output_tokens": output_tokens,
+                "usage_total_tokens": input_tokens + output_tokens,
+            },
         )
 
     return {

@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from backend.config import settings
 from backend.models.schemas import SeverityLevel, MessageType
-from backend.logging.governance_logger import governance_logger
+from backend.logging.governance_logger import active_response_model, governance_logger
 from backend.services.escalation_rules import EscalationRules
 from backend.services.clarifying_questions import ClarifyingQuestionsService
 from backend.services.ai_client import get_ai_client, AIClientError
@@ -1770,13 +1770,15 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             input_messages=[{"role": "user", "content": user_message}],
             output_messages=[{"role": "assistant", "content": blocked_message}],
             response_text=f"⚠️ POLICY BLOCKED (Cisco AI Defense)\n{blocked_message}",
+            # The prompt never reached the provider, so there is no real token
+            # usage or model reply to report -- only the active model id.
             usage_data={
                 "usage_input_tokens": 0,
                 "usage_output_tokens": 0,
                 "usage_total_tokens": 0,
             },
             performance_data={"client_operation_duration": duration},
-            response_model=settings.anthropic_model,
+            response_model=active_response_model(),
             response_finish_reasons=["policy_blocked"],
             safety_violated=True,
             safety_categories=reasons,
@@ -1826,11 +1828,18 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         start_time: float,
         client_address: Optional[str],
         enduser_id: Optional[str],
+        llm_model: Optional[str] = None,
+        usage_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Withhold a model response that AI Defense flagged (or that errored
         under fail-closed policy), logging the verdict to the governance
         pipeline. Unlike the prompt handler, the model was already called, so
-        the user-facing message explains the *response* was withheld."""
+        the user-facing message explains the *response* was withheld.
+
+        Because the call did complete, callers that have the real model id and
+        token usage on hand should pass them (``llm_model``/``usage_data``) so
+        the blocked event reports actual spend instead of zeros. Both stay
+        optional for callers that don't track them."""
         duration = time.time() - start_time
 
         if inspection.errored:
@@ -1869,13 +1878,14 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             input_messages=conversation_messages,
             output_messages=[{"role": "assistant", "content": blocked_message}],
             response_text=f"⚠️ POLICY BLOCKED (Cisco AI Defense - response)\n{blocked_message}",
-            usage_data={
+            usage_data=usage_data
+            or {
                 "usage_input_tokens": 0,
                 "usage_output_tokens": 0,
                 "usage_total_tokens": 0,
             },
             performance_data={"client_operation_duration": duration},
-            response_model=settings.anthropic_model,
+            response_model=llm_model or active_response_model(),
             response_finish_reasons=["policy_blocked"],
             safety_violated=True,
             safety_categories=reasons,
@@ -1989,7 +1999,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
                         "usage_total_tokens": 0,
                     },
                     performance_data={"client_operation_duration": duration},
-                    response_model=settings.anthropic_model,
+                    response_model=active_response_model(),
                     response_finish_reasons=["policy_blocked"],
                     safety_violated=True,
                     safety_categories=block_reasons,
