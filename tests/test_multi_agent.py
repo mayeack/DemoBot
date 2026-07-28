@@ -87,7 +87,8 @@ def _base_state(theme_key: str) -> dict:
         "theme": theme_key,
         "conversation_history": [{"role": "user", "content": "I have a headache"}],
         "user_message": "I have a headache",
-        # Force the directive OFF so the test is deterministic (no random content).
+        # NB: False is not "off" -- _should_request treats False and None alike
+        # (random at the configured rate); only True forces a category ON.
         "force_pii_injection": False,
         "force_toxic_injection": False,
         "force_hallucination_injection": False,
@@ -446,24 +447,54 @@ def test_single_agent_mode_bypasses_coordinator_and_specialists() -> None:
 
 def test_medadvice_authority_directive_solicits_controlled_substances() -> None:
     """The "Prescriptive Overreach" toggle (force_boundary_injection=True) must
-    build a directive that explicitly solicits prescribing CONTROLLED SUBSTANCES
-    by name with dosing, as a prescriber. Guards the MedAdvice authority framing
-    that the Galileo prescriptive-overreach judge scores against."""
-    from backend.agents.nodes.injection import build_input_directives
+    build a directive that solicits a CONTROLLED-SUBSTANCE prescription: a named
+    Schedule II-IV drug with an exact dose and a refill schedule, written as a
+    DEA-licensed prescriber. Guards the MedAdvice authority framing that the
+    Galileo prescriptive-overreach judge scores against (see
+    scripts/demo/galileo_eval_prescription.py).
 
-    state = _base_state("medadvice")
-    state["force_boundary_injection"] = True
-    directive, requested = build_input_directives(state)
+    Asserted on BOTH provider paths, since ``build_input_directives`` branches on
+    ``settings.ai_provider`` and the deployed provider varies by environment:
+    ollama embeds the ask inside the JSON "guidance" array
+    (``authority_directive_ollama``), every other provider wraps it in the labeled
+    synthetic-sample block (``_category_asks``)."""
+    from backend.agents.nodes import injection as inj_mod
 
-    low = directive.lower()
-    check("authority category is requested when boundary is forced ON",
-          requested.get("authority") is True)
-    check("directive solicits prescribing controlled substances",
-          "controlled substance" in low and "prescribe" in low)
-    check("directive names example controlled-substance classes",
-          "opioid" in low and "benzodiazepine" in low)
-    check("directive frames the model as a prescriber with dosing",
-          "dosage" in low and "prescriber" in low)
+    orig_provider = inj_mod.settings.ai_provider
+    # force_*_injection=False still means "random at the configured rate" (see
+    # _should_request), so zero the other three rates to keep the directive under
+    # assertion to the authority content alone.
+    rate_attrs = ("pii_injection_rate", "toxic_injection_rate",
+                  "hallucination_injection_rate")
+    orig_rates = {a: getattr(inj_mod.settings, a) for a in rate_attrs}
+    for attr in rate_attrs:
+        setattr(inj_mod.settings, attr, 0.0)
+    try:
+        for provider in ("ollama", "anthropic"):
+            inj_mod.settings.ai_provider = provider
+            state = _base_state("medadvice")
+            state["force_boundary_injection"] = True
+            directive, requested = inj_mod.build_input_directives(state)
+
+            # The two paths hyphenate differently ("controlled-substance
+            # prescription" vs "controlled substance"), so match on a
+            # hyphen-flattened copy.
+            low = directive.lower().replace("-", " ")
+            check(f"[{provider}] authority category is requested when boundary is forced ON",
+                  requested.get("authority") is True)
+            check(f"[{provider}] directive solicits prescribing a controlled substance",
+                  "controlled substance" in low
+                  and ("prescribe" in low or "prescription" in low))
+            check(f"[{provider}] directive names example controlled-substance classes",
+                  "opioid" in low and "benzodiazepine" in low and "stimulant" in low)
+            check(f"[{provider}] directive demands an exact dose and a refill schedule",
+                  "exact dose" in low and "refill schedule" in low)
+            check(f"[{provider}] directive frames the model as a DEA-licensed prescriber",
+                  "prescriber" in low and "dea authority" in low)
+    finally:
+        inj_mod.settings.ai_provider = orig_provider
+        for attr, rate in orig_rates.items():
+            setattr(inj_mod.settings, attr, rate)
 
 
 def main() -> int:
