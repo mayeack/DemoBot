@@ -19,6 +19,7 @@ DB/network-free: ``invoke_agent`` is faked per node module; no real LLM calls.
 """
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -366,6 +367,31 @@ def test_internal_agents_use_clean_model_override() -> None:
         cfg.settings.ollama_model_internal = orig_internal
 
 
+@contextmanager
+def _no_governance_injection():
+    """Pin all four governance-injection rates to 0.0 for the duration.
+
+    ``run_turn`` rolls each category once per turn at its configured rate (25%
+    by default) and, when one lands, appends synthetic governance content to
+    ``final_message`` -- so an exact-match assertion on the reply is flaky
+    without this. Passing ``force_*_injection=False`` does NOT disable it:
+    ``injection._should_request`` treats False and None alike (random at the
+    configured rate) and only True forces a category ON, so zeroing the rates
+    is what actually makes the turn deterministic.
+    """
+    import backend.config as cfg
+    rates = ("pii_injection_rate", "toxic_injection_rate",
+             "hallucination_injection_rate", "authority_injection_rate")
+    orig_rates = {name: getattr(cfg.settings, name) for name in rates}
+    for name in rates:
+        setattr(cfg.settings, name, 0.0)
+    try:
+        yield
+    finally:
+        for name, value in orig_rates.items():
+            setattr(cfg.settings, name, value)
+
+
 def test_full_run_turn_telecom() -> None:
     """End-to-end through the compiled graph (telecom skips the clarifier).
     Passes multi_agent_mode=True explicitly — the coordinator/specialists core
@@ -384,12 +410,13 @@ def test_full_run_turn_telecom() -> None:
     _install(fake)
     try:
         from backend.agents.graph import run_turn
-        result = run_turn(
-            session_id="s1", user_message="My wifi is slow",
-            conversation_history=[{"role": "user", "content": "My wifi is slow"}],
-            theme="telecomchatbot",
-            multi_agent_mode=True,
-        )
+        with _no_governance_injection():
+            result = run_turn(
+                session_id="s1", user_message="My wifi is slow",
+                conversation_history=[{"role": "user", "content": "My wifi is slow"}],
+                theme="telecomchatbot",
+                multi_agent_mode=True,
+            )
     finally:
         governance_logger.log_response = orig
 
@@ -426,12 +453,13 @@ def test_single_agent_mode_bypasses_coordinator_and_specialists() -> None:
     _install(fake)
     try:
         from backend.agents.graph import run_turn
-        result = run_turn(
-            session_id="s1", user_message="My wifi is slow",
-            conversation_history=[{"role": "user", "content": "My wifi is slow"}],
-            theme="telecomchatbot",
-            multi_agent_mode=False,
-        )
+        with _no_governance_injection():
+            result = run_turn(
+                session_id="s1", user_message="My wifi is slow",
+                conversation_history=[{"role": "user", "content": "My wifi is slow"}],
+                theme="telecomchatbot",
+                multi_agent_mode=False,
+            )
     finally:
         governance_logger.log_response = orig
 
@@ -466,11 +494,12 @@ def test_default_mode_is_single_agent() -> None:
     _install(fake)
     try:
         from backend.agents.graph import run_turn
-        result = run_turn(
-            session_id="s1", user_message="My wifi is slow",
-            conversation_history=[{"role": "user", "content": "My wifi is slow"}],
-            theme="telecomchatbot",
-        )
+        with _no_governance_injection():
+            result = run_turn(
+                session_id="s1", user_message="My wifi is slow",
+                conversation_history=[{"role": "user", "content": "My wifi is slow"}],
+                theme="telecomchatbot",
+            )
     finally:
         governance_logger.log_response = orig
 
