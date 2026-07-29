@@ -65,13 +65,34 @@ if [ "$IMAGE_TREE" != "$OPENCLAW_TREE" ]; then
     echo "Building $IMAGE from the tracked recipe in git (tree ${OPENCLAW_TREE:0:12})..."
     echo "  (first build installs openclaw via npm — expect a few minutes)"
   fi
-  git archive "HEAD:openclaw" \
-    | podman build -t "$IMAGE" -f Containerfile \
-        --label "demobot.openclaw.tree=$OPENCLAW_TREE" - || {
-    echo "ERROR: build failed. Recipe source: git archive HEAD:openclaw" >&2
-    echo "       Inspect it with: scripts/openclaw-edit.sh --show openclaw/Containerfile" >&2
-    exit 1
-  }
+  # No -f: with the context on stdin, podman resolves an explicit -f against the
+  # HOST cwd, which here is the repo root — and that Containerfile is the app's
+  # python image. Left implicit, it reads Containerfile from the extracted
+  # context, which is exactly openclaw/Containerfile.
+  if ! git archive "HEAD:openclaw" \
+       | podman build -t "$IMAGE" \
+           --label "demobot.openclaw.tree=$OPENCLAW_TREE" -; then
+    echo "" >&2
+    echo "Build failed. Recipe source: git archive HEAD:openclaw" >&2
+    echo "  Inspect it with: scripts/openclaw-edit.sh --show openclaw/Containerfile" >&2
+    # The build needs the network (apt + npm). On a captive portal or offline it
+    # fails through no fault of the recipe, so fall back to whatever image is
+    # already in the podman VM rather than losing the demo entirely — but ONLY
+    # if that image actually carries the plugin. An image predating the baked-in
+    # plugin would start a gateway with NO governance seat, which looks like a
+    # working demo while silently letting every tool call through. Never that.
+    if podman image exists "$IMAGE" \
+       && podman run --rm "$IMAGE" test -f /opt/demobot-plugins/demobot-toolguard/index.js 2>/dev/null; then
+      echo "  Falling back to the existing $IMAGE (tree ${IMAGE_TREE:-unknown})." >&2
+      echo "  It has the plugin baked in, so the guard still works — but it is STALE" >&2
+      echo "  vs HEAD (${OPENCLAW_TREE:0:12}). Rerun with the network up to refresh." >&2
+    else
+      echo "  No usable image to fall back on: the existing $IMAGE predates the" >&2
+      echo "  baked-in plugin, so starting it would give you a gateway with NO" >&2
+      echo "  tool guard. Refusing to start. Get network access and rerun." >&2
+      exit 1
+    fi
+  fi
 fi
 
 if ! curl -s --max-time 3 http://localhost:11434/api/tags | grep -q '"llama3.2:3b"'; then
@@ -185,10 +206,15 @@ echo "Starting OpenClaw gateway on http://127.0.0.1:${GATEWAY_PORT} (podman: $CO
 # instead — that hands the supervisor a foreground process to KeepAlive while
 # the container itself runs detached.
 #
-# --userns=keep-id maps the container user to the host uid that owns the bind
-# mounts. Without it the image's `node` user (uid 1000) cannot write to
-# $STATE_DIR (owned by the host user) and the gateway dies on startup with
-# EACCES creating /home/node/.openclaw/state.
+# --userns=keep-id is meant to let the container write the host-owned bind
+# mounts. KNOWN BROKEN as written (2026-07-28, pre-existing): it maps the host
+# user to the SAME uid in the container, but the image runs as `node` (uid
+# 1000), so $STATE_DIR (host uid 501) is still not writable and the gateway
+# dies on startup with EACCES creating /home/node/.openclaw/state. Neither
+# keep-id nor keep-id:uid=1000,gid=1000 remaps it on macOS podman. The fix is a
+# posture decision (run as container root, which rootless podman already maps
+# to the unprivileged host user, vs. relaxing $STATE_DIR perms), so it is left
+# for a separate change rather than silently altering the demo's sandboxing.
 # --restart=on-failure:3 recovers a transient crash mid-demo but never
 # resurrects after a clean `podman stop` or a machine reboot — so "off" stays
 # the default state when you're not demoing.
@@ -202,10 +228,26 @@ podman run -d --replace --name "$CONTAINER" \
   -v "$DECOY_DIR:/home/node/.openclaw/workspace" \
   "$IMAGE" >/dev/null
 
+GATEWAY_UP=false
 for i in $(seq 1 30); do
-  if curl -s --max-time 2 "http://127.0.0.1:${GATEWAY_PORT}/" >/dev/null 2>&1; then break; fi
+  if curl -s --max-time 2 "http://127.0.0.1:${GATEWAY_PORT}/" >/dev/null 2>&1; then
+    GATEWAY_UP=true; break
+  fi
   sleep 1
 done
+
+# This loop used to fall through silently and the script printed "gateway up"
+# regardless, so a container that died on startup still looked like a clean
+# launch. Say what actually happened.
+if [ "$GATEWAY_UP" != true ]; then
+  echo "" >&2
+  echo "ERROR: the gateway never answered on :${GATEWAY_PORT} within 30s." >&2
+  echo "       Container state: $(podman inspect -f '{{.State.Status}} (exit {{.State.ExitCode}})' "$CONTAINER" 2>/dev/null || echo unknown)" >&2
+  echo "       Last lines:" >&2
+  podman logs --tail 8 "$CONTAINER" 2>&1 | sed 's/^/         /' >&2
+  echo "       Full logs: podman logs $CONTAINER" >&2
+  exit 1
+fi
 
 # diagnostics-otel is a ClawHub plugin (not bundled): install once into the
 # persisted state dir.
