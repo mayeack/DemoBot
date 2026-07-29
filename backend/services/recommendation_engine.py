@@ -2199,10 +2199,12 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         )
 
         # Naturally integrate PII/PHI into the response body
-        # Toggle behavior:
+        # Toggle behavior (mirrored by ``injection._should_request`` on the agent path):
         #   - ON (True): ALWAYS include PII/PHI (100%)
-        #   - OFF (False): Random inclusion at configured rate (e.g., 25%)
-        #   - None: Default random behavior (backward compatible)
+        #   - OFF (False): NEVER include PII/PHI (0%) — an explicitly-off toggle must
+        #     be off, so a live demo is predictable
+        #   - None (unset): Random inclusion at the configured rate (e.g., 25%), which
+        #     is what keeps unattended auto-generated sessions varied
         final_message = self._format_recommendation(recommendation)
         pii_injected = False
         pii_types = []
@@ -2213,8 +2215,8 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             # Toggle ON: ALWAYS include PII/PHI
             should_inject_pii = True
         elif force_pii_injection is False:
-            # Toggle OFF: Use random injection at configured rate
-            should_inject_pii = random.random() < settings.pii_injection_rate
+            # Toggle OFF: never inject
+            should_inject_pii = False
         else:
             # None: Default random behavior (backward compatible)
             should_inject_pii = random.random() < settings.pii_injection_rate
@@ -2231,8 +2233,8 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         # Inject toxic content into the response body
         # Toggle behavior (mirrors PII):
         #   - ON (True): ALWAYS include toxic content (100%)
-        #   - OFF (False): Random inclusion at configured rate (e.g., 25%)
-        #   - None: Default random behavior (backward compatible)
+        #   - OFF (False): NEVER include toxic content (0%)
+        #   - None: Random inclusion at the configured rate (e.g., 25%)
         toxic_injected = False
         toxic_types = []
 
@@ -2240,7 +2242,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         if force_toxic_injection is True:
             should_inject_toxic = True
         elif force_toxic_injection is False:
-            should_inject_toxic = random.random() < settings.toxic_injection_rate
+            should_inject_toxic = False
         else:
             should_inject_toxic = random.random() < settings.toxic_injection_rate
 
@@ -2256,8 +2258,8 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         # Inject hallucinated content into the response body
         # Toggle behavior (mirrors PII/toxic):
         #   - ON (True): ALWAYS include hallucinations (100%)
-        #   - OFF (False): Random inclusion at configured rate (e.g., 25%)
-        #   - None: Default random behavior (backward compatible)
+        #   - OFF (False): NEVER include hallucinations (0%)
+        #   - None: Random inclusion at the configured rate (e.g., 25%)
         hallucination_injected = False
         hallucination_types = []
 
@@ -2265,7 +2267,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         if force_hallucination_injection is True:
             should_inject_hallucination = True
         elif force_hallucination_injection is False:
-            should_inject_hallucination = random.random() < settings.hallucination_injection_rate
+            should_inject_hallucination = False
         else:
             should_inject_hallucination = random.random() < settings.hallucination_injection_rate
 
@@ -2965,6 +2967,15 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         Inject realistic toxic content into the response for governance testing.
         Toxic patterns are woven into the message to simulate problematic AI behaviour.
         Patterns are theme-specific to match the active domain.
+
+        The candidate pool is deliberately CATEGORY-PURE: only toxicity patterns.
+        It previously also drew from ``hallucinated_citation``, ``biased_assumptions``
+        and ``boundary_violation``, which meant a Toxic-only turn could emit a
+        fabricated NEJM citation or a prescriptive-overreach block — content the
+        operator reasonably attributes to the Hallucination / Prescriptive Overreach
+        toggles, which were off. Those categories own their own injectors
+        (``_inject_hallucination_content`` / ``_inject_boundary_violation``); this one
+        must not produce their content.
         """
         severity_upper = str(severity).upper()
         toxic_types = []
@@ -2984,9 +2995,6 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             snippet = random.choice(patterns["dangerous_dosage"])
             candidates.append(("dangerous_dosage", f"\n\n**Enhanced Options:**\n{snippet}"))
 
-        snippet = random.choice(patterns["hallucinated_citation"])
-        candidates.append(("hallucinated_citation", f"\n\n**Supporting Research:**\n{snippet}"))
-
         snippet = random.choice(patterns["condescending"])
         candidates.append(("condescending", f"\n\n**A Note:**\n{snippet}"))
 
@@ -3000,16 +3008,9 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         snippet = random.choice(patterns["contradictory"])
         candidates.append(("contradictory", f"\n\n**Recommendations:**\n{snippet}"))
 
-        if severity_upper in ["MEDIUM", "HIGH"]:
-            snippet = random.choice(patterns["boundary_violation"])
-            candidates.append(("boundary_violation", f"\n\n**Direct Assessment:**\n{snippet}"))
-
         if has_emotion or has_concern:
             snippet = random.choice(patterns["gaslighting"])
             candidates.append(("gaslighting", f"\n\n**Perspective:**\n{snippet}"))
-
-        snippet = random.choice(patterns["biased_assumptions"])
-        candidates.append(("biased_assumptions", f"\n\n**Demographic Considerations:**\n{snippet}"))
 
         num_injections = random.choice([1, 2])
         selected = random.sample(candidates, min(num_injections, len(candidates)))

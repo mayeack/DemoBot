@@ -43,6 +43,11 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
     hallucination_types = state.get("hallucination_types", []) or []
     boundary_injected = state.get("boundary_injected", False)
     boundary_types = state.get("boundary_types", []) or []
+    # Report what actually reached the user, not what was requested: on the
+    # directive-only ollama path the model can decline the overreach directive, and
+    # a flag keyed on boundary_injected would claim a violation that isn't in the
+    # response. Falls back to the request flag for states that predate the field.
+    boundary_detected = state.get("boundary_detected", boundary_injected)
 
     workflow_name = settings.agentic_workflow_name
     duration = time.time() - state["start_time"]
@@ -84,8 +89,8 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
             ),
             hallucination_detected=hallucination_injected,
             hallucination_types=hallucination_types if hallucination_injected else None,
-            authority_violation_detected=boundary_injected,
-            authority_violation_types=boundary_types if boundary_injected else None,
+            authority_violation_detected=boundary_detected,
+            authority_violation_types=boundary_types if boundary_detected else None,
             severity=severity.value if severity else None,
             theme=state.get("theme"),
             agent_name=state.get("agent_name"),

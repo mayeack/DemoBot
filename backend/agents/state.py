@@ -91,6 +91,10 @@ class DemoBotState(TypedDict, total=False):
     hallucination_types: List[str]
     boundary_injected: bool
     boundary_types: List[str]
+    # Whether prescriptive overreach actually LANDED in the response, as opposed to
+    # boundary_injected (= was requested). These diverge on the directive-only ollama
+    # path, where the model can decline; the governance flag reads this one.
+    boundary_detected: bool
 
     # ---- Short-circuit + final result ----
     # ``terminal`` is set by any node that fully handled the turn (policy block,

@@ -18,12 +18,18 @@ Two cooperating steps share one per-turn decision (``requested_categories``):
      governance detection flags (always = what was requested, independent of
      model compliance) for the Splunk field contract.
 
-Toggle / rate semantics (unchanged; now applied to all four categories,
-including the new Outside-of-Authority one):
+Toggle / rate semantics (applied to all four categories, including the
+Outside-of-Authority one):
 
     force flag True  -> always request (100%)
-    force flag False -> random request at the configured rate
+    force flag False -> never request (0%)
     force flag None  -> random request at the configured rate (default)
+
+An explicitly-OFF toggle means OFF: the UI sends a real boolean for every category
+(see ``buildChatPayload`` in frontend/js/chat.js), so a toggle the operator switched
+off used to still fire on ~1 turn in 4 and made live demos unpredictable. The random
+rate survives on the ``None`` (unset) path, which is what the auto-prompter uses
+(``random.choice([True, False, None])``) to keep unattended sessions varied.
 """
 
 from __future__ import annotations
@@ -74,10 +80,12 @@ _AUTHORITY_DIRECTIVES: Dict[str, str] = {
 
 
 def _should_request(force_flag: Any, rate: float) -> bool:
-    """ON = always request; OFF/None = random at the configured rate."""
+    """ON = always; OFF = never; unset (None) = random at the configured rate."""
     if force_flag is True:
         return True
-    # Both False and None fall back to random at the configured rate.
+    if force_flag is False:
+        return False
+    # Only an unset flag falls back to random at the configured rate.
     return random.random() < rate
 
 
@@ -368,6 +376,63 @@ def _contains_authority(text: str, theme: str) -> bool:
     return _AUTHORITY_MARKER in text.lower()
 
 
+# --- Did the authority violation ACTUALLY land in the response? --------------
+# ``_contains_authority`` above gates the deterministic fallback and is marker-only
+# by design. The detector below answers a different question: is prescriptive
+# overreach *present* in the delivered text? It drives the
+# ``authority_violation_detected`` governance flag, which previously reported what
+# was REQUESTED. On ollama the fallback append is skipped entirely (see
+# ``injection_node``), so a turn where dolphin3:8b declined the directive still
+# logged a violation with nothing overreaching in the response.
+#
+# Polarity note: unlike the fallback detectors above, a miss here UNDER-reports a
+# real violation rather than causing a harmless double-include, so these patterns
+# lean towards matching.
+_RX_HEADER = "**recommended prescription:**"
+
+# Schedule II-IV names the directive solicits, plus common prescription-only drugs
+# an 8B model reaches for when it complies with items 3/4 of the medadvice directive.
+_RX_DRUG_RE = re.compile(
+    r"\b(?:oxycodone|oxycontin|hydrocodone|percocet|vicodin|codeine|morphine|fentanyl|"
+    r"tramadol|methadone|buprenorphine|"
+    r"alprazolam|xanax|clonazepam|klonopin|lorazepam|ativan|diazepam|valium|"
+    r"zolpidem|ambien|temazepam|phenobarbital|ketamine|"
+    r"adderall|amphetamine|methylphenidate|ritalin|concerta|vyvanse|"
+    r"amoxicillin|azithromycin|ciprofloxacin|doxycycline|cephalexin|"
+    r"prednisone|prednisolone|methylprednisolone|"
+    r"gabapentin|pregabalin|amitriptyline|sertraline|fluoxetine|duloxetine|"
+    r"cyclobenzaprine|methocarbamol|tizanidine|ondansetron|hydroxyzine|"
+    r"lisinopril|metformin|warfarin|levothyroxine)\b",
+    re.IGNORECASE,
+)
+_DOSE_RE = re.compile(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|units?)\b", re.IGNORECASE)
+_PRESCRIBING_RE = re.compile(
+    r"(?:\bi'?m prescribing\b|\bi am prescribing\b|\bi prescribe\b|"
+    r"\bi'?m putting you on\b|\bi'?m starting you on\b|\bi'?m writing you\b|"
+    r"\bprescription for\b|\brefills? authorized\b|\brefill schedule\b|"
+    r"\bwith (?:one|two|three|\d+) refills?\b)",
+    re.IGNORECASE,
+)
+
+
+def _authority_content_present(text: str, theme: str) -> bool:
+    """True when prescriptive overreach is actually present in ``text``.
+
+    medadvice is detectable from content (a named Rx/controlled drug with a dose, or
+    explicit prescriber language). The other themes solicit illicit *advice* (tax
+    evasion, SIM swap, perjury) with no comparable lexical signal, so they keep the
+    previous request-based behaviour rather than silently under-reporting.
+    """
+    lowered = text.lower()
+    if _AUTHORITY_MARKER in lowered or _RX_HEADER in lowered:
+        return True
+    if theme != "medadvice":
+        return True
+    if _PRESCRIBING_RE.search(text):
+        return True
+    return bool(_RX_DRUG_RE.search(text) and _DOSE_RE.search(text))
+
+
 def injection_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """POST-LLM: fall back to deterministic injection for any requested-but-
     absent category, and record the governance detection flags.
@@ -397,6 +462,11 @@ def injection_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "hallucination_types": [],
         "boundary_injected": False,
         "boundary_types": [],
+        # What was REQUESTED (boundary_injected) vs what actually LANDED in the
+        # response (boundary_detected). They diverge on ollama, where the overreach
+        # is directive-only and the model may decline. The governance flag reads the
+        # latter so an event never claims a violation the user never saw.
+        "boundary_detected": False,
     }
 
     with otel.agent_span("injection_agent", theme=theme):
@@ -440,7 +510,11 @@ def injection_node(state: Dict[str, Any]) -> Dict[str, Any]:
         if requested.get("authority"):
             updates["boundary_injected"] = True
             if is_ollama or _contains_authority(final_message, theme):
-                updates["boundary_types"] = ["outside_of_authority"]
+                # Directive-only path: we trust the model rather than double-appending,
+                # so confirm from the text whether it actually complied.
+                present = _authority_content_present(final_message, theme)
+                updates["boundary_detected"] = present
+                updates["boundary_types"] = ["outside_of_authority"] if present else []
             else:
                 (
                     final_message,
@@ -449,6 +523,8 @@ def injection_node(state: Dict[str, Any]) -> Dict[str, Any]:
                     final_message, severity_raw, conversation_history, theme
                 )
                 updates["boundary_types"] = boundary_types
+                # The canned block was just appended, so it is present by construction.
+                updates["boundary_detected"] = True
 
     updates["final_message"] = final_message
     return updates
