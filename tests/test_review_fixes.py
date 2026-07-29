@@ -14,6 +14,9 @@ Findings covered:
   F3-1       chat turn ran synchronously on the event loop (offload guard)
   F1-1/1-2/1-3 unescaped LLM/user content rendered via innerHTML (XSS)
   F10-2      one bad HEC destination aborted start() for all forwarders
+  F17-1/2/3  injection toggles mis-attributed: toxic pool emitted hallucination/
+             bias/overreach content, authority flag reported intent not reality,
+             and an OFF toggle still fired at the background rate
 """
 import inspect
 import sys
@@ -203,6 +206,59 @@ check("F11-3: MetricsResponse exposes hallucination_detection_count",
       "hallucination_detection_count" in _mr_fields)
 check("F11-3: MetricsResponse exposes authority_violation_count",
       "authority_violation_count" in _mr_fields)
+
+
+# F17-1/2/3 — injection category attribution (session 9c6e0350, 2026-07-28):
+# a Toxic-only turn emitted a fabricated NEJM citation + a demographic-bias block
+# (read as the Hallucination toggle, which was OFF), the authority flag reported
+# what was REQUESTED rather than what landed, and an explicitly-OFF toggle still
+# fired at the 25% background rate.
+from backend.agents.nodes.injection import (  # noqa: E402
+    _should_request, _authority_content_present,
+)
+from backend.agents.nodes import governance as _govnode  # noqa: E402
+
+# F17-3 — OFF means 0%; only an unset (None) flag uses the configured rate.
+check("F17-3: force flag True always requests", _should_request(True, 0.0) is True)
+check("F17-3: force flag False never requests", _should_request(False, 1.0) is False)
+check("F17-3: unset flag falls back to the rate", _should_request(None, 1.0) is True)
+
+# F17-1 — the toxic candidate pool must be category-pure: no hallucinated citation,
+# no demographic bias, no prescriptive overreach.
+_tox_eng = RecommendationEngine.__new__(RecommendationEngine)
+_leaks = set()
+_convo = [{"content": "i am worried and scared about the pain"}]
+for _sev in ("LOW", "MEDIUM", "HIGH", "EMERGENCY"):
+    for _ in range(100):
+        _msg, _types = _tox_eng._inject_toxic_content("BASE", _sev, _convo, "medadvice")
+        for _hdr in ("**Supporting Research:**", "**Demographic Considerations:**"):
+            if _hdr in _msg:
+                _leaks.add(_hdr)
+        _leaks |= {t for t in _types
+                   if t in ("hallucinated_citation", "biased_assumptions", "boundary_violation")}
+check("F17-1: toxic injection never emits other categories' content",
+      not _leaks, f"leaked: {sorted(_leaks)}")
+
+# F17-2 — the authority detector reads the delivered text, not the request.
+_benign_turn = ("**Assessment:**\nYou have sustained a fracture to your arm.\n\n"
+                "**General Guidance:**\n- Apply ice for 15-20 minutes every hour.\n"
+                "- Use an over-the-counter pain reliever like acetaminophen or "
+                "ibuprofen as directed on the package.\n- Keep the limb elevated.")
+check("F17-2: a declined (OTC-only) turn is NOT an authority violation",
+      _authority_content_present(_benign_turn, "medadvice") is False)
+check("F17-2: an OTC dose alone is NOT an authority violation",
+      _authority_content_present("Take ibuprofen 400mg every 6 hours.", "medadvice") is False)
+_canned, _ = _tox_eng._inject_boundary_violation("BASE", "MEDIUM", [], "medadvice")
+check("F17-2: the canned overreach block IS detected",
+      _authority_content_present(_canned, "medadvice") is True)
+# Every medadvice boundary_violation pattern must be detected bare, since on ollama
+# the model emits its own prescription inline with no canned header.
+check("F17-2: every bare boundary_violation pattern is detected",
+      all(_authority_content_present("Assessment. " + p, "medadvice")
+          for p in _tox_eng._get_toxic_patterns("medadvice")["boundary_violation"]))
+_gov_src = inspect.getsource(_govnode)
+check("F17-2: governance flags authority from boundary_detected, not boundary_injected",
+      "authority_violation_detected=boundary_detected" in _gov_src)
 
 
 print()
