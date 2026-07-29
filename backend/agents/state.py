@@ -33,6 +33,7 @@ class DemoBotState(TypedDict, total=False):
     ai_defense_review: Optional[bool]
     internal_policy_review: Optional[bool]
     multi_agent_mode: Optional[bool]
+    agent_control_review: Optional[bool]
 
     # ---- Correlation / timing (set by the router node) ----
     request_id: str
@@ -96,6 +97,12 @@ class DemoBotState(TypedDict, total=False):
     # path, where the model can decline; the governance flag reads this one.
     boundary_detected: bool
 
+    # ---- Galileo Agent Control verdict (agent_control node) ----
+    # The ``ControlVerdict`` for this turn when the request opted into the
+    # "Agent Observability Controls" review — present for allowed turns too, so
+    # the governance event can record an observe/steer match that did not block.
+    agent_control: Any  # ControlVerdict
+
     # ---- Short-circuit + final result ----
     # ``terminal`` is set by any node that fully handled the turn (policy block,
     # AI Defense block, clarifying question). ``result`` is the
@@ -121,6 +128,7 @@ def build_initial_state(
     ai_defense_review: Optional[bool] = None,
     internal_policy_review: Optional[bool] = None,
     multi_agent_mode: Optional[bool] = None,
+    agent_control_review: Optional[bool] = None,
 ) -> DemoBotState:
     """Build the initial graph state from an inbound chat request.
 
@@ -142,5 +150,6 @@ def build_initial_state(
         ai_defense_review=ai_defense_review,
         internal_policy_review=internal_policy_review,
         multi_agent_mode=multi_agent_mode,
+        agent_control_review=agent_control_review,
         terminal=False,
     )

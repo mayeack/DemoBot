@@ -49,6 +49,16 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
     # response. Falls back to the request flag for states that predate the field.
     boundary_detected = state.get("boundary_detected", boundary_injected)
 
+    # Non-blocking Galileo Agent Control match (observe / steer, or a fail-open
+    # error): attribute the guardrail without claiming a safety violation. A
+    # deny never reaches this node — it short-circuits to the blocked event in
+    # ``_handle_agent_control_block``.
+    control_verdict = state.get("agent_control")
+    matched_controls = list(getattr(control_verdict, "matched_controls", None) or [])
+    guardrail_ids = ["escalation_rules"] if should_escalate else []
+    if matched_controls:
+        guardrail_ids.append("galileo_agent_control")
+
     workflow_name = settings.agentic_workflow_name
     duration = time.time() - state["start_time"]
 
@@ -77,8 +87,8 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
             response_finish_reasons=[state.get("llm_stop_reason", "end_turn")],
             safety_violated=should_escalate,
             safety_categories=escalation_reasons if should_escalate else None,
-            guardrail_triggered=should_escalate,
-            guardrail_ids=["escalation_rules"] if should_escalate else None,
+            guardrail_triggered=should_escalate or bool(matched_controls),
+            guardrail_ids=guardrail_ids or None,
             pii_detected=pii_injected,
             pii_types=pii_types if pii_injected else None,
             toxic_detected=toxic_injected,

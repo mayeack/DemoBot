@@ -97,6 +97,49 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
 - `run.sh` exports `GALILEO_*` to the app process; project/log stream = `YeackBot`/`default`.
   The `galileo` pkg bumped `httpx`→0.28.1 + `pydantic-settings`→2.14.1 (in requirements.txt).
 
+## Galileo Agent Control ("Agent Observability Controls" toggle)
+- **Two different auth schemes on `agent-control.multitenant.galileocloud.io`.**
+  Management (`/api/v1/controls`, `/agents/initAgent`, `/agents/{a}/controls/{id}`,
+  `/evaluators`) accepts `Authorization: Bearer <JWT>` where the JWT comes from
+  `POST https://api.multitenant.galileocloud.io/v2/login/api_key {"api_key": …}`.
+  A raw `X-API-Key: $GALILEO_API_KEY` is rejected 401 on every endpoint.
+  Do instead: always exchange the API key for the JWT first; the OpenAPI spec is
+  public at `<base>/openapi.json` (no auth) — read it instead of guessing.
+- **`POST /api/v1/evaluation` takes ONLY a minted HS256 runtime token**
+  (`/api/v1/auth/runtime-token-exchange`), and that exchange currently returns
+  **502 AUTH_UPSTREAM_REJECTED** for org `splunkse` regardless of target_type —
+  a tenant-side grant, not a payload bug (`/control-bindings` 502s the same way).
+  So controls are created/attached but do NOT enforce yet; the app fails open and
+  logs once. Do instead: don't "fix" it by inventing a second scoring path —
+  Galileo Protect has no correctness/hallucination metric (`/v2/protect/invoke`
+  returns "Unknown metric (correctness)"). Re-test the exchange after Galileo
+  enables the runtime grant; enforcement then works with no code change.
+- Controls are per-AGENT: a console control does nothing until attached to the
+  registered agent (`demobot-agent`). Do instead:
+  `venv/bin/python scripts/demo/register_agent_control.py --attach <id>`.
+- Hallucination control = evaluator `galileo.luna` + preset scorer
+  **`correctness`** (`89d579ce-…`, "factual errors or inconsistencies"), operator
+  `lt`, threshold 0.5, scope `stages:[post] step_types:[llm]`, selector `path:"*"`
+  (the judge needs the question AND the answer). Live control id **259**.
+- Node order is `compliance -> agent_control -> response_defense`, so Cisco AI
+  Defense stays the last word on output. Regression:
+  `venv/bin/python tests/test_agent_control.py`.
+
+## Cisco AI Defense — outbound API integration, fail-closed
+- "Connecting" a box to AI Defense = six `AI_DEFENSE_*` vars in that box's `.env`;
+  the **API key is the binding** to the SCC application/connection (org Yeack
+  Industries → app **YeackBot** → API connection). `push-replica.sh` installs the
+  Mac's `.env` verbatim, so fleet replicas inherit the connection for free — a box
+  deployed *before* the Mac was configured has a stale `.env` and must be
+  redeployed or patched + `systemctl restart demobot-app`.
+- **`AI_DEFENSE_FAIL_OPEN=False` means an unreachable/401 Inspection API blocks
+  EVERY prompt** — indistinguishable from working enforcement unless you also test
+  a benign prompt. Never "fix" that by flipping it True (silently disables the
+  guardrail while the UI still shows protection). Diagnose with the raw curl.
+- Leave `AI_DEFENSE_ENABLED_RULES` **empty**: the connection is SCC-policy-bound,
+  so explicit rules get HTTP 400 and fall back to the console policy anyway.
+- Full procedure + 4-tier verification: skill `connect-ai-defense`.
+
 ## Chat latency (2026-07-15 remediation — where the time goes)
 - **Multi-Agent Mode defaults OFF (2026-07-28):** a default turn = 1 Ollama
   call (the theme's domain agent / synthesizer). The 3-4 sequential calls

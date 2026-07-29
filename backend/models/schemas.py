@@ -40,6 +40,7 @@ class ChatRequest(BaseModel):
     ai_defense_review: Optional[bool] = None  # Send prompt to Cisco AI Defense for policy review
     internal_policy_review: Optional[bool] = None  # Run the built-in internal policy engine (default on)
     multi_agent_mode: Optional[bool] = None  # True = coordinator/specialists/synthesizer pipeline; None/False (default) = the domain agent answers directly
+    agent_control_review: Optional[bool] = None  # Submit the response to Galileo Agent Control for evaluation against the console's Controls
 
 class ChatResponse(BaseModel):
     session_id: str

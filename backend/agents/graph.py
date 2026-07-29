@@ -9,7 +9,8 @@ Topology:
 Each ``{theme}_subgraph`` is the decomposed pipeline (default path):
 
     policy -> prompt_defense -> intake -> synthesizer -> safety
-          -> injection -> compliance -> response_defense -> governance
+          -> injection -> compliance -> agent_control -> response_defense
+          -> governance
 
 By default the edge after ``intake`` routes straight to the synthesizer, which
 answers alone as the theme's ``*_domain_agent`` (one LLM call per turn).
@@ -23,7 +24,8 @@ its own GenAI AgentInvocation span, so the turn produces a multi-agent trace.
 Every guardrail node still runs in both modes.
 
 There are conditional short-circuits to END whenever a node sets ``terminal``
-(policy block, AI Defense block, clarifying question, agent generation error).
+(policy block, AI Defense block, Galileo Agent Control deny, clarifying
+question, agent generation error).
 
 The compiled workflow is tagged with ``workflow_name`` metadata so Splunk AI
 Agent Monitoring promotes it to a recognized workflow.
@@ -38,6 +40,7 @@ from typing import Any, Dict, Iterator, Optional
 
 from langgraph.graph import END, START, StateGraph
 
+from backend.agents.nodes.agent_control import agent_control_node
 from backend.agents.nodes.clarify import intake_node
 from backend.agents.nodes.compliance import compliance_node
 from backend.agents.nodes.coordinator import make_coordinator_agent
@@ -89,6 +92,7 @@ def build_theme_subgraph(theme_config):
     g.add_node("safety", safety_node)
     g.add_node("injection", injection_node)
     g.add_node("compliance", compliance_node)
+    g.add_node("agent_control", agent_control_node)
     g.add_node("response_defense", response_defense_node)
     g.add_node("governance", governance_node)
 
@@ -105,7 +109,10 @@ def build_theme_subgraph(theme_config):
     g.add_conditional_edges("synthesizer", _terminal_router, {"end": END, "next": "safety"})
     g.add_edge("safety", "injection")
     g.add_edge("injection", "compliance")
-    g.add_edge("compliance", "response_defense")
+    g.add_edge("compliance", "agent_control")
+    g.add_conditional_edges(
+        "agent_control", _terminal_router, {"end": END, "next": "response_defense"}
+    )
     g.add_conditional_edges(
         "response_defense", _terminal_router, {"end": END, "next": "governance"}
     )
@@ -178,6 +185,7 @@ def _build_turn_state(
     ai_defense_review: Optional[bool] = None,
     internal_policy_review: Optional[bool] = None,
     multi_agent_mode: Optional[bool] = None,
+    agent_control_review: Optional[bool] = None,
     enduser_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build the initial workflow state shared by run_turn / run_turn_stream."""
@@ -195,6 +203,7 @@ def _build_turn_state(
         ai_defense_review=ai_defense_review,
         internal_policy_review=internal_policy_review,
         multi_agent_mode=multi_agent_mode,
+        agent_control_review=agent_control_review,
     )
     state["request_id"] = str(uuid.uuid4())
     state["trace_id"] = str(uuid.uuid4())
@@ -216,6 +225,7 @@ def run_turn(
     ai_defense_review: Optional[bool] = None,
     internal_policy_review: Optional[bool] = None,
     multi_agent_mode: Optional[bool] = None,
+    agent_control_review: Optional[bool] = None,
     enduser_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run one chat turn through the multi-agent workflow.
@@ -240,6 +250,7 @@ def run_turn(
         ai_defense_review=ai_defense_review,
         internal_policy_review=internal_policy_review,
         multi_agent_mode=multi_agent_mode,
+        agent_control_review=agent_control_review,
     )
     request_id = state["request_id"]
     trace_id = state["trace_id"]

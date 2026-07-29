@@ -227,6 +227,44 @@ class Settings(BaseSettings):
     tool_guard_max_arg_chars: int = 4000
 
     # -------------------------------------------------------------------------
+    # Galileo Agent Control ("Agent Observability Controls" -> runtime guardrail)
+    # -------------------------------------------------------------------------
+    # Galileo's Agent Control server evaluates each agent step against the
+    # Controls defined centrally in the Galileo console (Controls dashboard) and
+    # returns deny / steer / observe. DemoBot submits the generated response as
+    # a post-stage ``llm`` step, so a matching deny control (e.g.
+    # "DemoBot-block-hallucinated-output", which fails a response whose Galileo
+    # Correctness score is below threshold) withholds the answer.
+    #
+    # Master switch: when False the per-request toggle is ignored and no step is
+    # ever submitted, regardless of the UI toggle state. Credentials come from
+    # the existing GALILEO_API_KEY / GALILEO_CONSOLE_URL — with no API key the
+    # client is a no-op, exactly like the Galileo logging integration.
+    galileo_agent_control_enabled: bool = True
+    # Agent Control server base URL. The multitenant deployment mirrors the
+    # console host (console.multitenant… -> agent-control.multitenant…).
+    galileo_agent_control_url: str = (
+        "https://agent-control.multitenant.galileocloud.io"
+    )
+    # Agent + step identity registered with the server (POST /agents/initAgent).
+    # Controls are attached to this agent name; the server's effective control
+    # set for an evaluation is resolved from it. Must be >=10 chars, lowercase
+    # [a-z0-9:_-] per the Agent Control contract.
+    galileo_agent_control_agent_name: str = "demobot-agent"
+    galileo_agent_control_step_name: str = "demobot-llm"
+    # Evaluation request timeout in seconds. Server-side controls that call a
+    # Luna scorer (correctness, PII, …) are an LLM-judge round-trip, so this is
+    # deliberately looser than the AI Defense inspection timeout.
+    galileo_agent_control_timeout: float = 25.0
+    # Behavior when the Agent Control server errors, is unreachable, or cannot
+    # mint a runtime token. True = fail open (release the response, log the
+    # error) — the default, because this is an observability-first control
+    # surface layered *after* the internal policy engine and Cisco AI Defense.
+    # False = fail closed (withhold the response), matching AI Defense's
+    # posture; only sensible once runtime enforcement is verified working.
+    galileo_agent_control_fail_open: bool = True
+
+    # -------------------------------------------------------------------------
     # Agentic orchestration (LangChain + LangGraph)
     # -------------------------------------------------------------------------
     # When True, /api/chat/message is served by the LangGraph multi-agent
