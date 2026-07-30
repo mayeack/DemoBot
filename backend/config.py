@@ -113,6 +113,23 @@ class Settings(BaseSettings):
     # dev). Supply via .env only — never hardcode.
     access_key: str = ""
 
+    # Browser origins allowed to call this API cross-origin, comma-separated.
+    # The UI is served same-origin by this very app, so it needs NO entry here —
+    # this exists for an external browser client. Empty = no cross-origin access
+    # (the safe default). Never set "*": these responses are credentialed
+    # (cookie / Basic auth), and wildcard-plus-credentials is exactly the
+    # combination browsers reject and attackers enjoy.
+    cors_origins: str = ""
+
+    @property
+    def cors_origins_list(self) -> list:
+        """Configured origins, plus this instance's own localhost origin."""
+        origins = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        for own in (f"http://localhost:{self.port}", f"http://127.0.0.1:{self.port}"):
+            if own not in origins:
+                origins.append(own)
+        return origins
+
     # Database (SQLite for local, PostgreSQL for AWS)
     database_url: str = "sqlite:///./medadvice.db"
 

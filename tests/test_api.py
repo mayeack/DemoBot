@@ -352,6 +352,39 @@ def main() -> int:
         for path in ("/admin/logs/interactions", "/admin/logs/escalations", "/admin/logs/metrics", "/admin/logs/export"):
             check(f"GET {path} -> 200", c.get(path, headers=AUTH).status_code == 200)
 
+        # Escalation review: reviewer_id/review_notes are BODY fields. They were
+        # bare scalar params, which FastAPI binds as required QUERY params, so
+        # the admin UI's JSON body produced a 422 on every single click. A 404
+        # here is the pass condition — it proves the body validated and the
+        # handler ran far enough to look the escalation up.
+        rrev = c.put("/admin/escalations/no-such-escalation/review?new_status=reviewed",
+                     headers=AUTH, json={"reviewer_id": "admin", "review_notes": "looks fine"})
+        check("PUT /admin/escalations/{id}/review (JSON body) -> body accepted, 404 for unknown id",
+              rrev.status_code == 404, f"{rrev.status_code} {rrev.text[:160]}")
+        check("PUT /admin/escalations/{id}/review missing body -> 422",
+              c.put("/admin/escalations/x/review?new_status=reviewed",
+                    headers=AUTH).status_code == 422)
+        check("PUT /admin/escalations/{id}/review bad new_status -> 422",
+              c.put("/admin/escalations/x/review?new_status=bogus", headers=AUTH,
+                    json={"reviewer_id": "a", "review_notes": "b"}).status_code == 422)
+
+        # ---- CORS: explicit origins only, and preflights survive the gate ----
+        # The access-key middleware wraps CORSMiddleware, so an unauthenticated
+        # OPTIONS used to 401 before CORS could answer it.
+        pre = c.options("/api/settings", headers={
+            "Origin": f"http://localhost:{settings.port}",
+            "Access-Control-Request-Method": "GET",
+        })
+        check("OPTIONS preflight is not blocked by the access-key gate",
+              pre.status_code != 401, f"{pre.status_code}")
+        check("preflight echoes the configured origin",
+              pre.headers.get("access-control-allow-origin") == f"http://localhost:{settings.port}",
+              str(pre.headers.get("access-control-allow-origin")))
+        eviltrip = c.get("/health", headers={"Origin": "https://evil.example.com"})
+        check("unconfigured origin gets no allow-origin header",
+              "access-control-allow-origin" not in eviltrip.headers,
+              str(eviltrip.headers.get("access-control-allow-origin")))
+
         # ---- auth (login/logout) ----
         bad = c.post("/login", data={"access_code": "wrong-code"}, follow_redirects=False)
         check("POST /login wrong code -> not authenticated (no md_access cookie)",

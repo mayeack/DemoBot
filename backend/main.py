@@ -30,10 +30,18 @@ app = FastAPI(
     debug=settings.debug
 )
 
-# CORS middleware
+# CORS middleware.
+#
+# Explicit origins, never "*". Responses here are credentialed (session cookie
+# or Basic auth), and allow_origins=["*"] with allow_credentials=True makes
+# Starlette echo whichever Origin asked whenever a cookie is present — i.e.
+# every site becomes a credential-allowed origin, with only the cookie's
+# SameSite=Lax standing between a hostile page and an authenticated read.
+# The UI is same-origin with this app, so the default list is empty and nothing
+# in the product needs an entry; set CORS_ORIGINS in .env for an external client.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -41,6 +49,13 @@ app.add_middleware(
 
 # Access-key gate (Basic Auth) — added before request logging so logging stays
 # outermost and still records rejected (401) requests. No-op unless ACCESS_KEY is set.
+#
+# NOTE on ordering: add_middleware prepends, so this runs OUTSIDE CORSMiddleware
+# and sees requests first. A cross-origin preflight carries neither cookie nor
+# Authorization header, so the gate would 401 every OPTIONS before CORS could
+# answer it — which silently broke every preflighted cross-origin request. The
+# middleware therefore lets OPTIONS through to CORS; a preflight reveals nothing
+# and grants nothing, and the real request that follows is still gated.
 app.add_middleware(AccessKeyMiddleware)
 
 # Request logging middleware
