@@ -13,6 +13,11 @@ export SPLUNK_ACCESS_TOKEN=$(grep '^SPLUNK_ACCESS_TOKEN=' .env 2>/dev/null | cut
 export GALILEO_API_KEY=$(grep '^GALILEO_API_KEY=' .env 2>/dev/null | cut -d= -f2- || true)
 export GALILEO_PROJECT=$(grep '^GALILEO_PROJECT=' .env 2>/dev/null | cut -d= -f2- || true)
 export GALILEO_LOG_STREAM=$(grep '^GALILEO_LOG_STREAM=' .env 2>/dev/null | cut -d= -f2- || true)
+# Logs — optional Splunk platform HEC destination (Splunk Observability Cloud
+# has no log ingest on this org; see otel-collector-logs.yaml).
+export SPLUNK_HEC_URL=$(grep '^SPLUNK_HEC_URL=' .env 2>/dev/null | cut -d= -f2- || true)
+export SPLUNK_HEC_TOKEN=$(grep '^SPLUNK_HEC_TOKEN=' .env 2>/dev/null | cut -d= -f2- || true)
+export SPLUNK_HEC_INDEX=$(grep '^SPLUNK_HEC_INDEX=' .env 2>/dev/null | cut -d= -f2- || true)
 
 # The Galileo exporter + pipeline live in an overlay config that is layered on
 # ONLY when a key is present. Previously they were unconditional in the base
@@ -27,6 +32,14 @@ if [ -n "${GALILEO_API_KEY:-}" ]; then
 else
   GALILEO_STATE="OFF (no GALILEO_API_KEY in .env)"
 fi
+# Same gating for the logs pipeline: no HEC credentials -> no logs pipeline at
+# all, rather than a pipeline that queues and retries against an empty endpoint.
+if [ -n "${SPLUNK_HEC_TOKEN:-}" ] && [ -n "${SPLUNK_HEC_URL:-}" ]; then
+  CONFIGS+=(--config otel-collector-logs.yaml)
+  LOGS_STATE="on -> ${SPLUNK_HEC_URL} (index=${SPLUNK_HEC_INDEX:-default})"
+else
+  LOGS_STATE="OFF (no SPLUNK_HEC_URL/SPLUNK_HEC_TOKEN in .env)"
+fi
 if [ -z "${SPLUNK_REALM:-}" ] || [ -z "${SPLUNK_ACCESS_TOKEN:-}" ]; then
   echo "ERROR: set SPLUNK_REALM and SPLUNK_ACCESS_TOKEN in .env first." >&2
   exit 1
@@ -34,6 +47,7 @@ fi
 
 echo "Starting OTel Collector (realm=$SPLUNK_REALM) -> Splunk Observability Cloud"
 echo "Galileo trace fan-out: $GALILEO_STATE"
+echo "Logs -> Splunk platform HEC: $LOGS_STATE"
 echo "Listening on :4317 (OTLP/gRPC) and :4318 (OTLP/HTTP). Ctrl+C to stop."
 
 # Native binary (downloaded once by the setup; see README/skill).
@@ -52,11 +66,16 @@ fi
 # containerized path gates identically to the native one above.
 CONTAINER_CONFIGS=(--config=/etc/otelcol-contrib/config.yaml)
 [ -n "${GALILEO_API_KEY:-}" ] && CONTAINER_CONFIGS+=(--config=/etc/otelcol-contrib/galileo.yaml)
+if [ -n "${SPLUNK_HEC_TOKEN:-}" ] && [ -n "${SPLUNK_HEC_URL:-}" ]; then
+  CONTAINER_CONFIGS+=(--config=/etc/otelcol-contrib/logs.yaml)
+fi
 exec "$RUNTIME" run --rm --name otel-collector \
   -p 4317:4317 -p 4318:4318 \
   -e SPLUNK_REALM -e SPLUNK_ACCESS_TOKEN \
   -e GALILEO_API_KEY -e GALILEO_PROJECT -e GALILEO_LOG_STREAM \
+  -e SPLUNK_HEC_URL -e SPLUNK_HEC_TOKEN -e SPLUNK_HEC_INDEX \
   -v "$PWD/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro" \
   -v "$PWD/otel-collector-galileo.yaml:/etc/otelcol-contrib/galileo.yaml:ro" \
+  -v "$PWD/otel-collector-logs.yaml:/etc/otelcol-contrib/logs.yaml:ro" \
   docker.io/otel/opentelemetry-collector-contrib:latest \
   "${CONTAINER_CONFIGS[@]}"
