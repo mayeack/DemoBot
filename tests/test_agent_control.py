@@ -551,6 +551,107 @@ check("cold cache + unreachable management API -> errored verdict", cold.errored
 with mock.patch.object(settings, "galileo_agent_control_fail_open", True):
     check("...which fail-open releases", cold.should_block is False)
 
+# ---- 6b. composite conditions + the per-evaluation scorer memo ----------
+# The output-PII control ORs one `contains` leaf per category, because the
+# Output PII (SLM) scorer returns a LIST (["ssn","name",…]) and `contains` takes a
+# single category. Without a memo that shape costs one judge call per leaf.
+print("\n[6b] composite conditions + scorer memo")
+
+PII_CATS = ["ssn", "date_of_birth", "email", "phone_number"]
+PII_CONTROLS = {
+    "controls": [
+        {
+            "id": 263,
+            "name": "DemoBot-block-output-pii",
+            "control": {
+                "enabled": True,
+                "execution": "server",
+                "scope": {"step_types": ["llm"], "stages": ["post"]},
+                "action": {"decision": "deny"},
+                "condition": {
+                    "or": [
+                        {
+                            "selector": {"path": "*"},
+                            "evaluator": {
+                                "name": "galileo.luna",
+                                "config": {
+                                    "scorer_label": "Output PII (SLM)",
+                                    "scorer_id": "88eada48",
+                                    "operator": "contains",
+                                    "threshold": cat,
+                                },
+                            },
+                        }
+                        for cat in PII_CATS
+                    ]
+                },
+            },
+        }
+    ]
+}
+
+# A response the scorer flags with a category NOT in the first leaf, to prove the
+# OR keeps walking rather than stopping at the first non-match.
+pii_hit, post_pii, calls_pii, _ = _evaluate(
+    {"score": ["name", "phone_number"], "status": "success"}, controls=PII_CONTROLS
+)
+check("an OR of contains leaves denies on a later category",
+      pii_hit.should_block is True and pii_hit.matched_controls == ["DemoBot-block-output-pii"])
+check("the deciding category is reported in the message",
+      "phone_number" in " ".join(pii_hit.messages))
+check("OR over one scorer costs ONE invoke, not one per leaf (memo)",
+      len([u for u in calls_pii if u.endswith("/scorers/invoke")]) == 1)
+
+# `name` alone must not trigger: a normal DemoBot answer naming a care provider
+# scores ["name"], so including that category would withhold good responses.
+pii_name_only, _, calls_name, _ = _evaluate(
+    {"score": ["name"], "status": "success"}, controls=PII_CONTROLS
+)
+check("a bare name does not trigger the PII control (no over-blocking)",
+      pii_name_only.should_block is False)
+check("a clean scorer result releases",
+      _evaluate({"score": [], "status": "success"}, controls=PII_CONTROLS)[0].should_block
+      is False)
+
+# AND short-circuits, NOT inverts.
+def _tree(node):
+    body = json.loads(json.dumps(PII_CONTROLS))
+    body["controls"][0]["control"]["condition"] = node
+    return body
+
+
+LEAF_HIT = {
+    "selector": {"path": "*"},
+    "evaluator": {
+        "name": "galileo.luna",
+        "config": {"scorer_id": "88eada48", "operator": "contains", "threshold": "ssn"},
+    },
+}
+LEAF_MISS = {
+    "selector": {"path": "*"},
+    "evaluator": {
+        "name": "galileo.luna",
+        "config": {"scorer_id": "88eada48", "operator": "contains", "threshold": "password"},
+    },
+}
+check("AND of hit+miss does not match",
+      _evaluate({"score": ["ssn"], "status": "success"},
+                controls=_tree({"and": [LEAF_HIT, LEAF_MISS]}))[0].should_block is False)
+check("AND of hit+hit matches",
+      _evaluate({"score": ["ssn"], "status": "success"},
+                controls=_tree({"and": [LEAF_HIT, LEAF_HIT]}))[0].should_block is True)
+check("NOT inverts a leaf",
+      _evaluate({"score": ["ssn"], "status": "success"},
+                controls=_tree({"not": LEAF_HIT}))[0].should_block is False)
+
+# A failing scorer inside a tree is memoized too: still one call, still an error.
+tree_err, _, calls_err, _ = _evaluate(
+    {"status": "failed", "error_message": "boom"}, controls=PII_CONTROLS
+)
+check("a failing scorer in a tree errors once, not per leaf",
+      tree_err.errored is True
+      and len([u for u in calls_err if u.endswith("/scorers/invoke")]) == 1)
+
 # ---- 7. wiring ----------------------------------------------------------
 print("\n[7] wiring")
 from backend.agents.state import build_initial_state  # noqa: E402
@@ -622,6 +723,38 @@ check(
 check(
     "checked-in control 259 stays execution=server (inherits the server path later)",
     control_json["execution"] == "server",
+)
+
+pii_json = json.loads(
+    (ROOT / "scripts/demo/controls/block-output-pii.json").read_text()
+)
+pii_leaves = pii_json["condition"]["or"]
+pii_thresholds = {
+    leaf["evaluator"]["config"]["threshold"] for leaf in pii_leaves
+}
+check(
+    "checked-in output-PII control ORs contains leaves over the PII SLM scorer",
+    all(
+        leaf["evaluator"]["config"]["operator"] == "contains"
+        and leaf["evaluator"]["config"]["scorer_id"] == "88eada48-109f-4f4e-8dc6-bf65799a331e"
+        for leaf in pii_leaves
+    ),
+)
+check(
+    "output-PII control covers the sensitive identifiers",
+    {"ssn", "date_of_birth", "email", "phone_number"} <= pii_thresholds,
+)
+check(
+    "output-PII control excludes the bare 'name' category (would over-block "
+    "answers naming a care provider)",
+    "name" not in pii_thresholds,
+)
+check("output-PII control denies", pii_json["action"]["decision"] == "deny")
+
+check(
+    "the block message does not claim a specific cause (any deny control lands there)",
+    "factually reliable" not in engine_src
+    and "withheld by our agent control" in engine_src,
 )
 
 gov_src = (ROOT / "backend/agents/nodes/governance.py").read_text()

@@ -151,6 +151,20 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
   `coerce_number()` returns None for bools, so a numeric operator (`lt 0.5`, the
   original config) raises `"score False is not numeric"` → evaluator error →
   fail-open → the control can never fire. `any` is inverted (fires on *correct*).
+- Output-PII control **263** = `DemoBot-block-output-pii`, the one that actually
+  ENFORCES today (`Output PII (SLM)`, `88eada48-…`, is an SLM scorer so it invokes).
+  Definition: `scripts/demo/controls/block-output-pii.json`. The scorer returns a
+  **list** of categories and `contains` takes one category, so the condition is an
+  **`or` of `contains` leaves** — with the per-evaluation memo that costs ONE judge
+  call, not one per leaf (the memo key was originally shadowed by the payload
+  loop variable; 8 leaves = 8 calls until that was fixed).
+  **`name` is deliberately excluded**: a normal answer naming a care provider
+  ("contact Dr. Robert Anderson") scores `['name']`, so `operator:"any"` or a
+  `name` leaf withholds legitimate responses. Verified: PII-injected turn →
+  blocked; same prompt without injection → allowed.
+- **The block message must stay generic.** `_handle_agent_control_block` serves
+  every deny control, so wording that asserts one cause ("not factually reliable")
+  misdescribes a PII block. The matched control is in `safety_categories`.
 - **A deny control whose evaluator errored is reported under `errors`, not
   `matches`,** while the engine still sets `is_safe:false`. Parsing only `matches`
   reads that as a clean pass — neither blocking nor honoring fail-open. Guarded in

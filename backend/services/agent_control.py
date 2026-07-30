@@ -568,40 +568,123 @@ class AgentControlClient:
         )
 
     def _invoke_scorer(
-        self, config: Dict[str, Any], *, query: str, response_text: str
+        self,
+        config: Dict[str, Any],
+        *,
+        query: str,
+        response_text: str,
+        memo: Optional[Dict[Any, Any]] = None,
     ) -> Any:
         """Run one Luna scorer through the console API's ``/scorers/invoke``.
 
         Returns the raw score. Raises ``AgentControlError`` when the scorer
         itself could not produce one — the client-side equivalent of the
         server's evaluator error, which fails open rather than matching.
+
+        ``memo`` is a per-evaluation cache keyed on (scorer, payload). A control
+        that ORs several ``contains`` leaves over the SAME scorer — the natural
+        shape for a list-valued scorer such as Output PII (SLM), which returns
+        ``["ssn", "name", …]`` — then costs one judge call instead of one per
+        category. Scoped to a single evaluation on purpose: caching verdicts
+        across turns would mean stale safety decisions.
         """
+        memo_key = (
+            config.get("scorer_id"),
+            config.get("scorer_version_id"),
+            config.get("scorer_label"),
+            query,
+            response_text,
+        )
+        if memo is not None and memo_key in memo:
+            cached = memo[memo_key]
+            if isinstance(cached, Exception):
+                raise cached
+            return cached
         payload: Dict[str, Any] = {
             "inputs": {"query": query, "response": response_text},
         }
-        for key in ("scorer_id", "scorer_version_id", "scorer_label"):
-            if config.get(key):
-                payload[key] = config[key]
+        for field_name in ("scorer_id", "scorer_version_id", "scorer_label"):
+            if config.get(field_name):
+                payload[field_name] = config[field_name]
 
         timeout = float(config.get("timeout_ms") or 0) / 1000.0 or self._timeout
-        http_response = httpx.post(
-            f"{self.console_api_url}/scorers/invoke",
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {self._fetch_access_token()}",
-                "Content-Type": "application/json",
-                "accept": "application/json",
-            },
-            timeout=max(timeout, self._timeout),
-        )
-        http_response.raise_for_status()
-        body = http_response.json() or {}
-        if body.get("status") != "success":
-            raise AgentControlError(
-                f"scorer {body.get('scorer_label') or config.get('scorer_label')} "
-                f"{body.get('status')}: {body.get('error_message')}"
+        try:
+            http_response = httpx.post(
+                f"{self.console_api_url}/scorers/invoke",
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {self._fetch_access_token()}",
+                    "Content-Type": "application/json",
+                    "accept": "application/json",
+                },
+                timeout=max(timeout, self._timeout),
             )
-        return body.get("score")
+            http_response.raise_for_status()
+            body = http_response.json() or {}
+            if body.get("status") != "success":
+                raise AgentControlError(
+                    f"scorer {body.get('scorer_label') or config.get('scorer_label')} "
+                    f"{body.get('status')}: {body.get('error_message')}"
+                )
+        except Exception as exc:  # noqa: BLE001 - memoized and re-raised as-is
+            if memo is not None:
+                memo[memo_key] = exc
+            raise
+
+        score = body.get("score")
+        if memo is not None:
+            memo[memo_key] = score
+        return score
+
+    def _evaluate_condition(
+        self,
+        node: Dict[str, Any],
+        *,
+        query: str,
+        response_text: str,
+        memo: Dict[Any, Any],
+    ) -> bool:
+        """Evaluate a control's condition tree.
+
+        Composite ``and``/``or``/``not`` nodes recurse and short-circuit like the
+        official engine; a leaf is ``selector`` + ``evaluator``. Only the
+        ``galileo.luna`` evaluator is supported client-side — anything else
+        raises so the caller records it as unevaluated rather than guessing.
+        """
+        if node.get("and"):
+            return all(
+                self._evaluate_condition(
+                    child, query=query, response_text=response_text, memo=memo
+                )
+                for child in node["and"]
+            )
+        if node.get("or"):
+            return any(
+                self._evaluate_condition(
+                    child, query=query, response_text=response_text, memo=memo
+                )
+                for child in node["or"]
+            )
+        if node.get("not"):
+            return not self._evaluate_condition(
+                node["not"], query=query, response_text=response_text, memo=memo
+            )
+
+        evaluator = node.get("evaluator") or {}
+        if evaluator.get("name") != _LOCAL_EVALUATOR:
+            raise AgentControlError(
+                f"{evaluator.get('name') or 'empty condition'} not supported client-side"
+            )
+        config = evaluator.get("config") or {}
+        score = self._invoke_scorer(
+            config, query=query, response_text=response_text, memo=memo
+        )
+        matched = score_matches(
+            score, config.get("operator") or "any", config.get("threshold")
+        )
+        # Remember the score that decided, for the verdict message.
+        memo.setdefault("_last_scores", []).append((score, config))
+        return matched
 
     def _evaluate_client_side(
         self, user_message: str, assistant_message: str
@@ -646,24 +729,23 @@ class AgentControlClient:
                 continue
 
             condition = definition.get("condition") or {}
-            evaluator = condition.get("evaluator") or {}
-            if not evaluator or evaluator.get("name") != _LOCAL_EVALUATOR:
-                verdict.evaluator_errors.append(
-                    f"{name}: {evaluator.get('name') or 'composite condition'} "
-                    "not supported client-side"
-                )
+            if not condition:
+                verdict.evaluator_errors.append(f"{name}: empty condition")
                 continue
 
             if (definition.get("execution") or "server") != "sdk":
                 self._log_server_control_run_locally(name)
 
-            config = evaluator.get("config") or {}
+            # One memo per control: leaves that share a scorer and payload — the
+            # natural shape when OR-ing `contains` over a list-valued scorer —
+            # cost a single judge call.
+            memo: Dict[Any, Any] = {}
             try:
-                score = self._invoke_scorer(
-                    config, query=user_message, response_text=assistant_message
-                )
-                matched = score_matches(
-                    score, config.get("operator") or "any", config.get("threshold")
+                matched = self._evaluate_condition(
+                    condition,
+                    query=user_message,
+                    response_text=assistant_message,
+                    memo=memo,
                 )
             except (httpx.HTTPError, ValueError, AgentControlError) as exc:
                 # Evaluator error: never a match, surfaced for triage.
@@ -676,6 +758,8 @@ class AgentControlClient:
                 continue
 
             decision = str((definition.get("action") or {}).get("decision") or "observe").lower()
+            scores = memo.get("_last_scores") or []
+            score, config = scores[-1] if scores else (None, {})
             verdict.matched_controls.append(name)
             verdict.decisions.append(decision)
             verdict.confidence = max(verdict.confidence, _confidence_from_score(score))

@@ -1971,11 +1971,15 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             reasons.extend(verdict.messages)
             if verdict.reason:
                 reasons.append(verdict.reason)
+            # Deliberately does not name a reason. Any deny control can land here
+            # (factuality, output PII, a future policy), so wording that asserts
+            # one specific cause misdescribes the block whenever a different
+            # control fires — which is what an earlier revision did. The control
+            # that actually matched is in safety_categories / metadata.
             blocked_message = (
                 "The assistant's response was withheld by our agent control "
-                "policy because it could not be verified as factually reliable. "
-                "Please rephrase your question or try again. If this is a "
-                "medical emergency, call 911 or go to your nearest emergency room."
+                "policy. Please rephrase your question or try again. If this is "
+                "a medical emergency, call 911 or go to your nearest emergency room."
             )
 
         governance_logger.log_response(
