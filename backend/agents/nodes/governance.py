@@ -48,6 +48,9 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
     # a flag keyed on boundary_injected would claim a violation that isn't in the
     # response. Falls back to the request flag for states that predate the field.
     boundary_detected = state.get("boundary_detected", boundary_injected)
+    # Same rule for hallucination, for the same reason (the ask rides in the JSON
+    # answer contract on ollama and the model can decline it).
+    hallucination_detected = state.get("hallucination_detected", hallucination_injected)
 
     # Non-blocking Galileo Agent Control match (observe / steer, or a fail-open
     # error): attribute the guardrail without claiming a safety violation. A
@@ -97,8 +100,8 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
             evaluation_score_label=(
                 "high" if confidence > 0.7 else "medium" if confidence > 0.5 else "low"
             ),
-            hallucination_detected=hallucination_injected,
-            hallucination_types=hallucination_types if hallucination_injected else None,
+            hallucination_detected=hallucination_detected,
+            hallucination_types=hallucination_types if hallucination_detected else None,
             authority_violation_detected=boundary_detected,
             authority_violation_types=boundary_types if boundary_detected else None,
             severity=severity.value if severity else None,

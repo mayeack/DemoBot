@@ -57,7 +57,13 @@ class AccessKeyMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next):
+        # CORS preflights pass through. This middleware is added last, so it
+        # wraps CORSMiddleware and sees the request first; a preflight carries
+        # neither cookie nor Authorization header, so gating OPTIONS 401'd every
+        # preflight before CORS could answer it. A preflight discloses nothing
+        # and authorizes nothing — the actual request behind it is still gated.
         if (not settings.access_key
+                or request.method == "OPTIONS"
                 or request.url.path in PUBLIC_PATHS
                 or _has_valid_cookie(request)
                 or _has_valid_basic_auth(request)):

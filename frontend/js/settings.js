@@ -270,6 +270,7 @@ function cardHTML(d) {
       <button onclick="saveDestination('${attr(id)}')" class="px-3 py-1.5 bg-violet-600 text-white rounded text-sm hover:bg-violet-700">Save</button>
       <button onclick="testDestination('${attr(id)}')" class="px-3 py-1.5 bg-slate-600 text-white rounded text-sm hover:bg-slate-700">Test connection</button>
       <button onclick="deleteDestination('${attr(id)}')" class="px-3 py-1.5 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200">Delete</button>
+      <button onclick="refreshDestStats('${attr(id)}')" class="px-3 py-1.5 bg-slate-100 text-slate-700 rounded text-sm hover:bg-slate-200">Refresh stats</button>
       <span data-result class="text-sm ml-2"></span>
     </div>
     <div data-stats class="text-xs text-gray-500 mt-3 font-mono"></div>
@@ -332,6 +333,28 @@ async function addDestination() {
 }
 
 // -------------------------------------------------------------------- stats
+// Refresh ONE destination's stats line. Uses GET /api/hec/stats/{id}, which had
+// no caller anywhere in the UI, tests, or scripts before this.
+async function refreshDestStats(id) {
+  const card = cardFor(id);
+  if (!card) return;
+  const el = card.querySelector('[data-stats]');
+  try {
+    const s = await api('GET', `/api/hec/stats/${encodeURIComponent(id)}`);
+    el.textContent = statsLine(s);
+  } catch (e) {
+    el.textContent = `could not read stats: ${e.message}`;
+  }
+}
+
+function statsLine(s) {
+  const state = s.running ? 'running' : (s.enabled ? 'enabled (idle)' : 'disabled');
+  let line = `sent ${s.events_sent} · failed ${s.events_failed} · dropped ${s.events_dropped} · queue ${s.queue_depth}/${s.queue_capacity} · ${state}`;
+  if (s.last_latency_ms != null) line += ` · ${s.last_latency_ms} ms`;
+  if (s.last_error) line += `  —  last error: ${s.last_error}`;
+  return line;
+}
+
 async function loadStats() {
   let data;
   try { data = await api('GET', '/api/hec/stats'); } catch (_) { return; }
@@ -342,7 +365,10 @@ async function loadStats() {
     const state = s.running ? 'running' : (s.enabled ? 'enabled (idle)' : 'disabled');
     let line = `sent ${s.events_sent} · failed ${s.events_failed} · dropped ${s.events_dropped} · queue ${s.queue_depth}/${s.queue_capacity} · ${state}`;
     if (s.last_latency_ms != null) line += ` · ${s.last_latency_ms} ms`;
-    if (s.last_error) line += `  —  last error: ${esc(s.last_error)}`;
+    // No esc(): this is assigned via textContent below, which does not parse
+    // entities — escaping first rendered "&amp;"/"&lt;" literally, which is
+    // common in URLs and HTML error bodies.
+    if (s.last_error) line += `  —  last error: ${s.last_error}`;
     el.textContent = line;
   }
 }

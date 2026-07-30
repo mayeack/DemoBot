@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 from typing import Optional, List
@@ -376,15 +377,29 @@ async def get_session_governance(
         ]
     }
 
+class EscalationReviewRequest(BaseModel):
+    """Reviewer identity + notes for a human escalation review.
+
+    A BODY model, deliberately. These were declared as bare scalar parameters,
+    which FastAPI binds as REQUIRED QUERY parameters — while the admin UI sends
+    them as JSON. Every click of the Review button therefore returned 422 and
+    the operator saw only "Failed to update escalation".
+    """
+
+    reviewer_id: str = Field(..., min_length=1, max_length=120)
+    review_notes: str = Field(..., min_length=1, max_length=4000)
+
+
 @router.put("/escalations/{escalation_id}/review")
 async def update_escalation_review(
     escalation_id: str,
-    reviewer_id: str,
-    review_notes: str,
+    body: EscalationReviewRequest,
     new_status: str = Query(..., regex="^(reviewed|resolved)$"),
     db: Session = Depends(get_db)
 ):
     """Update escalation review status"""
+    reviewer_id = body.reviewer_id
+    review_notes = body.review_notes
 
     escalation = db.query(EscalationQueue).filter(
         EscalationQueue.escalation_id == escalation_id

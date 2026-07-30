@@ -18,6 +18,24 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
   endpoint, response field, feature, or telemetry contract — or bumps a dependency
   in a way that changes runtime behavior — say so by name in that turn; never let
   it pass silently. `test_api.py` + `verify_observability.sh` are the detectors.
+- **Anything asserting an injection DIRECTIVE must pin `settings.ai_provider`.**
+  `build_input_directives` emits labeled `* SAMPLE:` text for censored providers
+  but natural UNLABELED asks for ollama (and routes hallucination + authority into
+  the JSON answer contract instead of an appended block). Five `test_api.py`
+  checks silently asserted only the labeled markers, so the suite was RED in the
+  shipped `.env` config (ollama) and nobody noticed. It now pins the provider per
+  block and asserts both builders.
+- **Other standalone suites:** `test_guardrail_nodes.py` (safety / policy /
+  compliance / prompt+response defense / intake driven directly with a synthetic
+  state — AI Defense stubbed, no network; catches a guardrail that silently
+  no-ops, which the stream stage-name checks cannot) and `test_db_integrity.py`
+  (per-session SQLite connections, JSON-column persistence, escalation-reason
+  isolation, JSONL write serialization — runs against a temp DB, never
+  `medadvice.db`).
+- **`test_api.py` writes to the LIVE `./medadvice.db`.** Its settings PUTs persist
+  to the same AppSettings row the launchd app reads; it now snapshots and restores
+  `logs_directory` + emit-model. Any new check that mutates persisted settings
+  must do the same, or it silently reconfigures the running demo.
 
 ## Observability (Splunk O11y) — CRITICAL
 - **After ANY change to the observability integration, run
@@ -81,8 +99,15 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
 
 ## Galileo (LLM observability) — second telemetry destination
 - Two paths, both **no-op without `GALILEO_API_KEY`**: (1) the OTel Collector fans
-  the gen_ai spans to Galileo — `otlphttp/galileo` → `https://api.galileo.ai/otel/traces`
-  in `otel-collector-config.yaml`, creds injected by `run-collector.sh`; (2) a per-turn
+  the gen_ai spans to Galileo — the `otlphttp/galileo` exporter + its pipeline live
+  in **`otel-collector-galileo.yaml`**, an OVERLAY that `run-collector.sh` layers on
+  with a second `--config` ONLY when the key is set (they used to sit
+  unconditionally in the base config with possibly-empty creds, so keyless boxes
+  POSTed span content — prompts and responses — with an empty API-key header).
+  Validate config changes without emitting telemetry:
+  `./bin/otelcol-contrib validate --config otel-collector-config.yaml --config otel-collector-galileo.yaml`;
+  the overlay references a processor/receiver defined only in the base, so a clean
+  validate also proves the merge works. (2) a per-turn
   SDK trace with governance metadata (safety/PII/toxicity/policy/eval) via
   `GalileoLogger` in `backend/galileo_integration.py`, fanned out from
   `governance_logger._write_log` on a daemon thread (mirrors the HEC fan-out).
@@ -261,15 +286,16 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
   fails `statfs ...: no such file or directory` — which is why the plugin is
   baked into the image rather than mounted. The remaining mounts are the state
   dir (`~/.demobot-openclaw`) and the decoy workspace (`~/DemoBotDecoy`).
-- **KNOWN BROKEN (pre-existing, 2026-07-28): the gateway does not start.** It
-  dies with `EACCES ... mkdir '/home/node/.openclaw/state'` — the image runs as
-  `node` (uid 1000) but the mounts are host-owned (uid 501), and `--userns=keep-id`
-  does NOT bridge that (nor does `keep-id:uid=1000,gid=1000`; verified on macOS
-  podman). This was masked because `run-openclaw.sh` printed "gateway up"
-  unconditionally after its health-wait; it now reports the real state and exits
-  non-zero. Fixing it is a posture call (container root — which rootless podman
-  already maps to the unprivileged host user — vs. loosening `$STATE_DIR`), so
-  it is deliberately not folded into the sparse-checkout change.
+- **The gateway runs as `--user 0:0`, NOT `--userns=keep-id`** (fixed 2026-07-30;
+  it crash-looped before that with `EACCES ... mkdir '/home/node/.openclaw/state'`).
+  keep-id maps the host user to the same uid, but the image's default `node` user
+  (uid 1000) maps to a subuid that owns nothing, so the host-owned mounts stayed
+  unwritable (`keep-id:uid=1000,gid=1000` doesn't bridge it either on macOS
+  podman). Rootless podman already maps container uid 0 to the unprivileged host
+  user, so container root gains **no host privilege** — it just makes the uid
+  match the mount owner, which lets `$STATE_DIR` stay mode **600** (it holds the
+  gateway token + `ACCESS_KEY`). Don't "fix" a future EACCES by loosening those
+  perms; check the uid mapping first.
 - **The guard is fail-closed:** with `TOOL_GUARD_ENABLED=True`, a dead app
   (:8001) denies EVERY agent tool call — looks like a broken agent, not a broken
   app. `TOOL_GUARD_ENABLED` gates *enforcement* only (default False = the
@@ -277,6 +303,21 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
   demobot-openclaw` is the real off switch.
 - Agent model is Ollama **`llama3.2:3b`** (tool-capable); `dolphin3:8b` has no
   tools template. Decoy workspace: `venv/bin/python scripts/demo/seed_agentic_decoy.py`.
+
+## Database (SQLite) — concurrency
+- **Never put the file-backed SQLite engine on `StaticPool`.** It hands ONE sqlite3
+  connection to every Session, and this app writes from both the event loop
+  (`Depends(get_db)` handlers) and threadpool workers (chat turns → governance /
+  escalation / audit rows via `get_db_context`). Measured cost of the shared
+  connection: **12 of 40 rows lost** with 8 concurrent writers, failing with
+  "cannot commit - no transaction is active" / NULL identity key — errors the
+  governance writer only logs. `check_same_thread=False` stays (connections do
+  cross threads). StaticPool IS still correct for `:memory:`, where a second
+  connection is a second empty database. Guard: `tests/test_db_integrity.py`.
+- `Conversation.messages` is a plain JSON column (**no MutableList**), so mutating
+  the loaded list in place and assigning it back compares the attribute against
+  itself and the column is dropped from the UPDATE. Copy on load
+  (`list(row.messages or [])`) and assign a new list back.
 
 ## Environment
 - venv is **Python 3.11** (the Splunk GenAI stack needs ≥3.10; 3.9 silently breaks

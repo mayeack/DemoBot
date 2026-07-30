@@ -1,10 +1,27 @@
 import json
 import logging
+import threading
 from pathlib import Path
 from typing import Dict, Any
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from backend.config import settings, LOGS_DIR, BASE_DIR
+
+# Serializes append + rotate for the governance JSONL files.
+#
+# These files are written from BOTH threadpool workers (every chat turn's
+# governance event) and the event loop (tool-guard inspections), and a single
+# event embeds the full input/output message lists — large enough that the
+# append is not one atomic write syscall. Concurrent writers could therefore
+# interleave halves of two JSON objects and corrupt the JSONL that Splunk
+# ingests. The stat -> rename -> touch rotation was equally unguarded: two
+# threads could double-rotate, or one could write into the file the other had
+# just renamed and see a swallowed FileNotFoundError.
+#
+# One process-wide lock rather than one per path: governance writes are small
+# and per-turn, so contention is irrelevant, and this stays correct even when
+# several handler instances point at the same file.
+_write_lock = threading.Lock()
 
 
 def _resolve_logs_dir(d) -> Path:
@@ -74,13 +91,21 @@ class GovernanceFileHandler:
         self._append_json_log(self.error_log, log_data)
 
     def _append_json_log(self, log_file: Path, log_data: Dict[str, Any]):
-        """Append JSON log entry to file"""
+        """Append JSON log entry to file (one line, atomically vs other writers)"""
+        # Serialize OUTSIDE the lock; only the file work is contended.
         try:
-            with open(log_file, "a") as f:
-                f.write(json.dumps(log_data) + "\n")
+            line = json.dumps(log_data) + "\n"
+        except (TypeError, ValueError) as e:
+            logging.error(f"Failed to serialize log entry for {log_file}: {e}")
+            return
+        try:
+            with _write_lock:
+                with open(log_file, "a") as f:
+                    f.write(line)
 
-            # Check if rotation needed
-            self._rotate_if_needed(log_file)
+                # Check if rotation needed (same lock: a concurrent rotation
+                # could otherwise rename the file between the write and the stat)
+                self._rotate_if_needed(log_file)
         except Exception as e:
             logging.error(f"Failed to write to log file {log_file}: {e}")
 
@@ -128,10 +153,19 @@ def setup_logging():
     governance_logger.propagate = False
 
     if settings.log_to_console:
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        ))
-        governance_logger.addHandler(console_handler)
+        # Idempotent. setup_logging can run more than once in a process (the app
+        # module imported under two names, a uvicorn reload, a test harness that
+        # imports backend.main), and each extra call appended ANOTHER
+        # StreamHandler to the same logger object — which is why every governance
+        # event appeared TWICE in launchd-app.log with the same event_id and the
+        # same millisecond, doubling the file's growth and any line-based count.
+        if not any(getattr(h, "_demobot_governance_console", False)
+                   for h in governance_logger.handlers):
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            ))
+            console_handler._demobot_governance_console = True
+            governance_logger.addHandler(console_handler)
 
     return governance_logger

@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DemoBot — EC2 replica deployment</title>
+<style>
+:root{--bg:#ffffff;--fg:#1c1e21;--muted:#5c6370;--border:#d7dbe0;--accent:#0b6bcb;--code-bg:#f5f7f9;--th:#eef2f6;--warn:#8a5a00}
+@media (prefers-color-scheme: dark){:root{--bg:#14171a;--fg:#e6e8ea;--muted:#9aa3ad;--border:#2c3238;--accent:#63a9f0;--code-bg:#1c2126;--th:#1f252b;--warn:#e0b050}}
+*{box-sizing:border-box}
+body{margin:0;padding:2.5rem 1.5rem 5rem;background:var(--bg);color:var(--fg);
+ font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+ -webkit-font-smoothing:antialiased}
+main{max-width:60rem;margin:0 auto}
+h1{font-size:2rem;line-height:1.25;margin:0 0 .5rem;letter-spacing:-.02em}
+h2{font-size:1.4rem;margin:3rem 0 .75rem;padding-bottom:.4rem;border-bottom:1px solid var(--border);letter-spacing:-.01em}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+h4{font-size:1rem;margin:1.5rem 0 .4rem;color:var(--muted)}
+p,li{margin:.6rem 0}
+a{color:var(--accent)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.875em;
+ background:var(--code-bg);padding:.15em .4em;border-radius:4px;border:1px solid var(--border)}
+pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:1rem;
+ overflow-x:auto;line-height:1.5}
+pre code{background:none;border:none;padding:0;font-size:.85rem}
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--th);font-weight:600}
+tbody tr:nth-child(even){background:color-mix(in srgb,var(--th) 45%,transparent)}
+blockquote{margin:1.2rem 0;padding:.6rem 1rem;border-left:3px solid var(--warn);
+ background:color-mix(in srgb,var(--warn) 8%,transparent);color:var(--fg)}
+blockquote p{margin:.3rem 0}
+hr{border:none;border-top:1px solid var(--border);margin:2.5rem 0}
+strong{font-weight:650}
+ul,ol{padding-left:1.4rem}
+@media print{body{padding:0}pre,table{page-break-inside:avoid}}
+</style></head>
+<body><main>
+<h1 id="ec2-replica-deployment">EC2 replica deployment</h1>
+<p>The Linux counterpart to <code>deploy/launchd/</code> (which runs DemoBot on the Mac).
+Both produce the same thing: a host serving <code>https://medadvice.yeackbot.com</code> as
+a replica of the <strong>same named Cloudflare tunnel</strong>, with its own telemetry
+identity.</p>
+<pre><code class="language-bash"># single box, existing shared tunnel
+./deploy/ec2/push-replica.sh --host 35.175.173.5 --replica 2
+
+# GPU fleet in your own AWS account — COUNT IS ALWAYS EXPLICIT, never defaulted
+./deploy/ec2/gen-access-keys.sh N
+FLEET_COUNT=N ./deploy/ec2/fleet.sh preflight
+FLEET_COUNT=N ./deploy/ec2/fleet.sh provision
+./deploy/ec2/fleet.sh deploy
+SCHED_TZ=America/Los_Angeles ./deploy/ec2/schedule.sh install
+</code></pre>
+<p>The <code>spin-up-ec2</code> skill (<code>.claude/skills/spin-up-ec2/</code>) walks this end to end
+and <strong>always asks how many instances first</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Runs on</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>push-replica.sh</code></td>
+<td>Mac</td>
+<td>assembles the secret payload, ships it, invokes the bootstrap</td>
+</tr>
+<tr>
+<td><code>ec2-bootstrap.sh</code></td>
+<td>EC2 target</td>
+<td>installs and configures everything; consumes the payload</td>
+</tr>
+<tr>
+<td><code>fleet.sh</code></td>
+<td>Mac</td>
+<td>provisions and deploys N GPU instances, one subdomain each</td>
+</tr>
+<tr>
+<td><code>gen-access-keys.sh</code></td>
+<td>Mac</td>
+<td>per-replica four-word <code>ACCESS_KEY</code> values (gitignored file)</td>
+</tr>
+<tr>
+<td><code>schedule.sh</code></td>
+<td>Mac</td>
+<td>EventBridge start/stop schedules so the fleet isn't billed 24/7</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-two-scripts">Why two scripts</h2>
+<p><code>ec2-bootstrap.sh</code> can build 90% of a replica unaided — packages, Python 3.11,
+Ollama, the repo, the venv, the collector binary, the systemd units. All of that
+is public and fetchable.</p>
+<p>The remaining 10% is <strong>secrets, and secrets only exist on the Mac</strong>:</p>
+<ul>
+<li><code>.env</code> — API keys for Anthropic, Cisco AI Defense, Splunk O11y, Galileo</li>
+<li>the Cloudflare tunnel credentials JSON</li>
+<li><code>Modelfile.poisoned</code> — the poisoned-model recipe, deliberately not in git</li>
+</ul>
+<p>There is no way for a fresh EC2 box to obtain these on its own. <code>push-replica.sh</code>
+is the bridge. The bootstrap refuses to run without a complete payload rather
+than starting a half-configured replica that looks healthy and silently exports
+nothing.</p>
+<blockquote>
+<p>A secrets manager (AWS Secrets Manager, SSM Parameter Store) would remove the
+Mac from the loop and let a box bootstrap itself from an instance profile.
+That is the right answer for anything beyond a demo. For a handful of workshop
+replicas, <code>scp</code> from the machine that already holds the secrets is simpler and
+has no standing cloud-side secret to rotate.</p>
+</blockquote>
+<hr />
+<h2 id="what-the-bootstrap-handles-that-you-used-to-do-by-hand">What the bootstrap handles that you used to do by hand</h2>
+<h3 id="models-are-derived-from-env-not-hard-coded">Models are derived from <code>.env</code>, not hard-coded</h3>
+<p>The old script pulled <code>dolphin3:8b</code> and stopped, so <code>llama3.2:3b</code> — the model
+every internal coordinator and specialist agent runs on — had to be pulled by
+hand on each box. Forgetting it did not fail at boot; it failed on the first
+chat turn, mid-demo.</p>
+<p>The bootstrap now reads <strong>every</strong> <code>OLLAMA_MODEL*</code> key out of <code>.env</code> and pulls
+each one:</p>
+<pre><code>OLLAMA_MODEL=dolphin3:8b                 -&gt;  pulled
+OLLAMA_MODEL_INTERNAL=llama3.2:3b        -&gt;  pulled
+OLLAMA_MODEL_JUDGE=...                   -&gt;  pulled, no script change needed
+</code></pre>
+<p>Adding an internal agent is therefore a <code>.env</code> edit, and every replica picks it
+up on its next push.</p>
+<h3 id="the-poisoned-model-is-built-always">The poisoned model is built, always</h3>
+<p><code>dolphin3:8b-poisoned</code> exists in no registry — <code>ollama pull</code> cannot fetch it. It
+is a <code>FROM dolphin3:8b</code> overlay whose TEMPLATE injects a prescribing directive
+<em>after</em> the application's own system prompt, and it is the exhibit the whole
+guardrail-failure demo rests on.</p>
+<p>The bootstrap builds it every run:</p>
+<ol>
+<li>reads the <code>FROM</code> line to find the base model, and pulls that base first
+   (<code>ollama create</code> needs it resident)</li>
+<li><code>ollama create &lt;tag&gt; -f Modelfile.poisoned</code></li>
+<li>the tag comes from <code>.env</code> if any <code>OLLAMA_MODEL*</code> value contains <code>poisoned</code>,
+   else defaults to <code>dolphin3:8b-poisoned</code></li>
+</ol>
+<p><code>push-replica.sh</code> sources the Modelfile from <code>deploy/ec2/Modelfile.poisoned</code> or
+<code>~/Modelfile.poisoned</code>, and if neither exists exports it from the Mac's live
+Ollama with <code>ollama show --modelfile</code>. One canonical recipe, byte-identical on
+every replica.</p>
+<blockquote>
+<p>This matters more than it looks. As of 2026-07-27 the Mac's poisoned model was
+<code>b5eec43102c3</code> and the EC2's was <code>d22293974766</code> — two <em>different</em> models
+behind one demo, because each was built by hand at a different time. Building
+from a single Modelfile removes that drift.</p>
+</blockquote>
+<p>If <code>ollama show --modelfile</code> emits <code>FROM /path/to/blob</code> instead of a tag (it
+sometimes does), <code>push-replica.sh</code> rewrites it to the base tag — a blob path is
+meaningless on another host.</p>
+<h3 id="tunnel-config-is-rewritten-not-copied">Tunnel config is rewritten, not copied</h3>
+<p>The Mac's <code>~/.cloudflared/config.yml</code> points at a Mac path:</p>
+<pre><code class="language-yaml">credentials-file: /Users/myeack/.cloudflared/52a942e8-….json
+</code></pre>
+<p>Copied verbatim to Linux, <code>cloudflared</code> starts, fails to find the credentials,
+and the unit restart-loops. The bootstrap copies the file <strong>verbatim except that
+one line</strong>, which it rewrites to the target's <code>$HOME</code>, then asserts the rewrite
+took. Ingress rules, tunnel ID, and protocol carry over untouched, so the Mac
+stays the single source of truth for the site config.</p>
+<p><strong><code>cert.pem</code> is never copied.</strong> It is the Cloudflare <em>account</em> credential and
+can create, route, and delete tunnels across the zone. A replica only runs
+<code>cloudflared tunnel run</code>, which needs the per-tunnel credentials JSON and
+nothing else. <code>push-replica.sh</code> refuses to stage it; the bootstrap warns if it
+finds one. The visible symptom of doing this correctly is that
+<code>cloudflared tunnel list</code> fails on a replica — expected, not a fault.</p>
+<p>The payload is deleted from the target once the bootstrap finishes.</p>
+<hr />
+<h2 id="deploymentenvironment-the-one-value-that-must-differ-per-replica"><code>deployment.environment</code> — the one value that must differ per replica</h2>
+<pre><code>OTEL_RESOURCE_ATTRIBUTES=deployment.environment=demobot-ec2-2
+</code></pre>
+<p><code>OTEL_RESOURCE_ATTRIBUTES</code> is a comma-separated list of OpenTelemetry <strong>resource
+attributes</strong> — facts about the emitting process, attached to every span and
+metric it produces. <code>deployment.environment</code> is the standard attribute for
+"which deployment of this service is this," and it is the <em>only</em> thing
+distinguishing one DemoBot replica from another downstream. Everything else —
+<code>service.name=demobot-v3</code>, the ingest token, the realm, the tunnel — is
+identical across replicas by design.</p>
+<p>Current allocation:</p>
+<table>
+<thead>
+<tr>
+<th>Host</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Mac, <code>/Applications/DemoBot</code></td>
+<td><code>demobot-local</code></td>
+</tr>
+<tr>
+<td>EC2 <code>i-0883a0ddedf54e4e8</code></td>
+<td><code>demobot-ec2-1</code></td>
+</tr>
+<tr>
+<td>next replica</td>
+<td><code>demobot-ec2-2</code>, …</td>
+</tr>
+</tbody>
+</table>
+<h3 id="why-a-collision-is-worse-than-it-sounds">Why a collision is worse than it sounds</h3>
+<p>Cloudflare load-balances across every connected replica, so a single user's
+session can hop between hosts. If two replicas share a <code>deployment.environment</code>:</p>
+<ul>
+<li><strong>Splunk O11y</strong> merges them into one apparent service. Latency and token-usage
+  charts average two hosts together, so one sick replica hides behind a healthy
+  one — exactly the failure the observability demo exists to make visible.</li>
+<li><strong>Galileo</strong> files both hosts' traces into one log stream, so a poisoned-model
+  turn on box 2 is indistinguishable from a clean turn on box 1.</li>
+<li>Per-replica alerting becomes impossible: you cannot write "box 2's error rate
+  spiked" if box 2 has no distinct identity.</li>
+</ul>
+<p>Splitting by <code>host.name</code> afterwards does not rescue this — the demo's saved
+views, detectors, and Galileo log stream all filter on
+<code>deployment.environment</code>.</p>
+<h3 id="how-the-bootstrap-sets-it">How the bootstrap sets it</h3>
+<p>The value arrives from the Mac saying <code>demobot-local</code> and must be rewritten. The
+bootstrap rewrites <strong>only</strong> the <code>deployment.environment</code> key inside the list,
+preserving any sibling attributes:</p>
+<pre><code>deployment.environment=demobot-local,service.version=3.0.0
+   -&gt;  deployment.environment=demobot-ec2-2,service.version=3.0.0
+</code></pre>
+<p>It adds the key if absent, and leaves the other ~50 <code>.env</code> lines byte-identical.</p>
+<p>Three ways to choose the value:</p>
+<table>
+<thead>
+<tr>
+<th>Invocation</th>
+<th>Result</th>
+<th>Use when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--replica 2</code></td>
+<td><code>demobot-ec2-2</code></td>
+<td>normal — matches the naming convention</td>
+</tr>
+<tr>
+<td><code>--env-name demobot-ec2-lab</code></td>
+<td>verbatim</td>
+<td>one-off or non-numbered box</td>
+</tr>
+<tr>
+<td>neither</td>
+<td><code>demobot-ec2-&lt;instance-id&gt;</code> from IMDS</td>
+<td>unattended builds; guaranteed unique, ugly but collision-proof</td>
+</tr>
+</tbody>
+</table>
+<p>The numbered convention is human-readable but relies on you remembering which
+numbers are taken. The IMDS default trades readability for a guarantee. Pick
+per situation; the bootstrap prints the value it settled on and echoes it again
+in the final summary.</p>
+<h3 id="verifying-the-split">Verifying the split</h3>
+<p><code>tests/observability/verify_observability.sh</code> <strong>hard-codes <code>demobot-local</code></strong> as
+the environment (line 76), so tier 3 queries the wrong replica and fails on any
+EC2 box even with a valid token. Run the checker directly instead — the
+bootstrap prints this line for you, filled in:</p>
+<pre><code class="language-bash">python3 tests/observability/check_o11y_metadata.py \
+    us1 &quot;$(grep '^SPLUNK_API_TOKEN=' .env | cut -d= -f2-)&quot; demobot-v3 demobot-ec2-2
+</code></pre>
+<p>Then confirm in Splunk O11y that the new value appears as its own environment
+alongside <code>demobot-local</code>.</p>
+<hr />
+<hr />
+<h2 id="gpu-fleet-mode">GPU fleet mode</h2>
+<p>The original box was a <code>c6i.2xlarge</code> — CPU-only, and measured on live demo
+traffic it was too slow for a workshop:</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>c6i.2xlarge (measured)</th>
+<th>g5.xlarge (A10G) expected</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Decode</td>
+<td>p50 <strong>13.6 tok/s</strong></td>
+<td>~55–70 tok/s</td>
+</tr>
+<tr>
+<td>Prefill</td>
+<td>~28 tok/s — <strong>26 s for 729 tokens</strong></td>
+<td>sub-second</td>
+</tr>
+<tr>
+<td>Per-request total</td>
+<td>p50 9.7 s, <strong>p95 65 s</strong>, max 101 s</td>
+<td>a few seconds</td>
+</tr>
+</tbody>
+</table>
+<p>Prefill dominated, and prefill is exactly what a GPU collapses. Note also that
+<code>c6i.2xlarge</code> advertises 8 vCPU but is <strong>4 physical cores</strong> — llama.cpp logged
+<code>n_threads = 4</code>, because hyperthreads do not help inference.</p>
+<h3 id="replicas-cannot-be-sticky-this-is-why-each-box-gets-its-own-tunnel-and-subdomain">Replicas cannot be sticky — this is why each box gets its own tunnel AND subdomain</h3>
+<p>Cloudflare is explicit:</p>
+<blockquote>
+<p>"The load balancer does not distinguish between replicas of the same tunnel.
+If you run the same tunnel UUID on two separate hosts, the load balancer treats
+both hosts as a single endpoint."
+— <a href="https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/routing-to-tunnel/public-load-balancers/">Public load balancers</a></p>
+</blockquote>
+<p>Replicas also do no traffic steering at all: a request goes to the geographically
+closest replica with no guarantee. Across N replicas of one tunnel a user lands
+on a different box (N−1)/N of the time, and per-box SQLite means multi-turn
+conversation history breaks.</p>
+<p><code>--own-tunnel</code> gives each host its own named tunnel (<code>demobot-N</code>) <strong>and its own
+subdomain</strong>, derived from the shared hostname:</p>
+<pre><code>medadvice1.yeackbot.com ──CNAME──&gt; &lt;uuid-1&gt;.cfargotunnel.com ──&gt; box 1
+medadvice2.yeackbot.com ──CNAME──&gt; &lt;uuid-2&gt;.cfargotunnel.com ──&gt; box 2
+   …
+medadvice.yeackbot.com  (no digit)  ──&gt;  the Mac replica, untouched
+</code></pre>
+<p>The CNAME is created by <code>cloudflared tunnel route dns</code> — ordinary DNS on the
+existing zone. <strong>The URL is the session pin.</strong> A user on <code>medadvice3</code> cannot
+reach any other box, so affinity is structural rather than configured:</p>
+<ul>
+<li>no Load Balancing add-on ($5/mo for 2 origins + $5/mo each beyond, and
+  session affinity possibly gated to Business plans — a dependency this design
+  simply doesn't have)</li>
+<li>per-box SQLite is fine by construction, not by cookie TTL</li>
+<li>per-box demo states become possible: one box on <code>dolphin3:8b</code>, another on
+  <code>dolphin3:8b-poisoned</code> (via the <code>OLLAMA_MODEL</code> override), shown side by side
+  in the same workshop session</li>
+</ul>
+<p>The trade is failover: a dead box takes down its own subdomain (Cloudflare 1033)
+until its group is pointed at a spare. For assigned workshop groups that is an
+acceptable, explicit failure — one URL down, blast radius one group.</p>
+<h3 id="per-replica-env-overrides">Per-replica .env overrides</h3>
+<p>The <code>.env</code> ships from the Mac identical to every box; a few keys must differ.
+<code>push-replica.sh</code> writes them to <code>overrides.env</code> inside the payload (a file, not
+argv — <code>ps</code> exposes argv to every user on the box), and the bootstrap applies
+them as a map, preserving key order and leaving every untouched line
+byte-identical:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Source</th>
+<th>Why per-box</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>deployment.environment</code></td>
+<td><code>--replica N</code> → <code>demobot-ec2-N</code></td>
+<td>telemetry split in O11y/Galileo</td>
+</tr>
+<tr>
+<td><code>ACCESS_KEY</code></td>
+<td><code>deploy/ec2/access-keys.env</code> via <code>gen-access-keys.sh</code></td>
+<td>per-group credential, rotatable alone</td>
+</tr>
+<tr>
+<td><code>OLLAMA_MODEL</code> (optional)</td>
+<td><code>--set OLLAMA_MODEL=…</code></td>
+<td>clean-vs-poisoned box splits</td>
+</tr>
+</tbody>
+</table>
+<p><code>gen-access-keys.sh N</code> maintains the key file: four-word keys
+(<code>goose-duck-shovel-blob</code> style, <code>secrets.choice</code> over a curated noun list),
+mode 600, gitignored, idempotent — an existing replica's key is never silently
+regenerated; <code>--rotate N</code> replaces exactly one. DemoBot itself has no
+generator: <code>backend/config.py</code> just reads <code>ACCESS_KEY</code> from <code>.env</code> at startup,
+so rotation requires an app restart and logs out that box's browser sessions
+(cookie = sha256 of the key).</p>
+<h3 id="gpu-verification-is-not-optional">GPU verification is not optional</h3>
+<p>A CPU fallback passes every health check and is ~5× slower — the likeliest way
+to reach a workshop with a box that looks fine and is not. Always pass
+<code>--gpu require</code> on a g5/g6 instance. The bootstrap then checks three things:</p>
+<ol>
+<li><code>nvidia-smi</code> returns a GPU</li>
+<li>Ollama's startup log reports a CUDA backend</li>
+<li>a model is warmed and <code>ollama ps</code> is read for actual placement — the decisive
+   test, since the backend can be CUDA while a given model still sits on CPU</li>
+</ol>
+<p>On GPU the bootstrap also raises <code>OLLAMA_MAX_LOADED_MODELS=3</code>,
+<code>OLLAMA_KEEP_ALIVE=60m</code>, and <code>OLLAMA_NUM_PARALLEL=4</code>: all three models total
+about 12 GB of the A10G's 24 GB, so nothing swaps and concurrency is cheap.</p>
+<h3 id="cost-per-box-multiply-by-the-count-you-choose">Cost — per box; multiply by the count you choose</h3>
+<p><code>g5.xlarge</code> is ~$1.006/hr in us-east-1:</p>
+<table>
+<thead>
+<tr>
+<th>Per box</th>
+<th>8 h/weekday (~176 h/mo)</th>
+<th>always-on</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Compute</td>
+<td>~$177/mo</td>
+<td>~$734/mo</td>
+</tr>
+<tr>
+<td>EBS (100 GB gp3, billed <strong>even while stopped</strong>)</td>
+<td>~$8/mo</td>
+<td>~$8/mo</td>
+</tr>
+<tr>
+<td>Cloudflare CNAME</td>
+<td>$0</td>
+<td>$0</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td><strong>≈ $185/mo</strong></td>
+<td><strong>≈ $742/mo</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>The count is a run-time decision — <code>FLEET_COUNT</code> has no default, and
+<code>provision</code> quotes the cost for the requested count before asking for "yes".</strong>
+<code>schedule.sh install</code> creates start, stop, <strong>and a nightly safety-stop</strong> — a
+g5.xlarge left running is ~$24/day per box, so the backstop pays for itself the
+first time an evening stop silently fails.</p>
+<p>Quota is the gate: <code>g5.xlarge</code> is 4 vCPU of <em>Running On-Demand G and VT
+instances</em> (<code>L-DB2E81BA</code>) each. New accounts default to <strong>0</strong> and approval takes
+hours to days. <code>fleet.sh preflight</code> compares the quota against the requested
+count and prints the exact increase request.</p>
+<hr />
+<h2 id="operational-notes">Operational notes</h2>
+<ul>
+<li><strong>Idempotent.</strong> Re-run <code>push-replica.sh</code> to redeploy: it re-ships the current
+  <code>.env</code>, re-pulls models, rebuilds the poisoned model, and restarts the units.
+  It is the update path as well as the install path.</li>
+<li><strong>No <code>set -x</code>.</strong> The original bootstrap ran under <code>set -euxo pipefail</code>, which
+  echoed every line — including <code>.env</code> contents — to the console and any
+  capturing log. Tracing is now opt-in with <code>DEBUG=1</code>.</li>
+<li><strong>Collector collision.</strong> On the Splunk lab AMI an apt <code>splunk-otel-collector</code>
+  is installed and binds the same <code>:4317</code>. The bootstrap masks it.</li>
+<li><strong>Python 3.11 is mandatory.</strong> The venv is built with <code>python3.11</code> from
+  deadsnakes; <code>python3 -m venv</code> picks Ubuntu 22.04's 3.10, on which LangChain
+  1.x fails to install.</li>
+<li><strong>Sizing.</strong> Both models are CPU-resident (~9.3 GB combined at 8192 context).
+  Below ~16 GB RAM the box thrashes between the 3B and 8B models on every turn.</li>
+<li><strong>OpenClaw is not deployed here.</strong> <code>run-openclaw.sh</code> needs podman, which these
+  boxes do not have. It runs on the Mac only.</li>
+</ul>
+</main></body></html>

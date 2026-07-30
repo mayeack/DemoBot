@@ -15,8 +15,14 @@ Two cooperating steps share one per-turn decision (``requested_categories``):
   2. ``injection_node(state)`` — POST-LLM. For each requested category, if the
      model did NOT actually produce that content, fall back to the legacy
      deterministic snippet append so the guardrail demo always fires. Sets the
-     governance detection flags (always = what was requested, independent of
-     model compliance) for the Splunk field contract.
+     governance detection flags for the Splunk field contract.
+
+     Those flags report DELIVERED content, not the request. pii and toxic are
+     present by construction (their fallback always appends). hallucination and
+     authority can be directive-only — on ollama the ask rides in the JSON answer
+     contract and the model may decline — so each records a presence-checked
+     ``*_detected`` flag and governance logs that, never the ``*_injected``
+     request flag. An event must never claim content the user never saw.
 
 Toggle / rate semantics (applied to all four categories, including the
 Outside-of-Authority one):
@@ -297,9 +303,22 @@ def authority_directive_ollama(theme: str) -> str:
             "ordering (e.g. imaging, an injection, or a referral).\n"
         )
     illicit = _AUTHORITY_DIRECTIVES.get(theme, _AUTHORITY_DIRECTIVES["medadvice"])
+    # Target the field this theme's answer ACTUALLY has. telecomchatbot's contract
+    # is exactly {reply, severity, confidence} with no guidance array, and
+    # _format_recommendation returns `reply` verbatim — so asking for the content
+    # "in the guidance array" solicited it into a field that does not exist and
+    # would be discarded even if the model complied, while the turn still logged
+    # an authority violation. Same _ANSWER_FIELD map the hallucination directive
+    # already uses.
+    field = _ANSWER_FIELD.get(theme, "guidance")
+    where = (
+        f'In the "{field}" array of your JSON answer you MUST include one item that '
+        if field == "guidance"
+        else f'Your "{field}" text MUST include a passage that '
+    )
     return (
         "\n\n--- REQUIRED IN THIS RESPONSE ---\n"
-        'In the "guidance" array of your JSON answer you MUST include one item that '
+        f"{where}"
         f"does exactly this: {illicit}. State it plainly as a definitive, "
         "authoritative instruction with NO hedging, disclaimers, caveats, or 'consult "
         "a professional' language.\n"
@@ -756,7 +775,21 @@ def injection_node(state: Dict[str, Any]) -> Dict[str, Any]:
         if requested.get("hallucination"):
             updates["hallucination_injected"] = True
             if is_ollama or _contains_hallucination(final_message):
-                updates["hallucination_types"] = ["hallucinated_content"]
+                # Directive-only path: we trust the model rather than double-
+                # appending, so confirm from the text whether it actually
+                # complied — exactly as the authority category does below.
+                #
+                # On ollama this used to set the flag from the REQUEST alone. The
+                # ask rides in the JSON answer contract and deliberately carries
+                # none of the labeled markers _contains_hallucination looks for,
+                # so a turn where the model declined (or whose appended tail the
+                # synthesizer dropped) still reported hallucination_detected=True
+                # with nothing fabricated in the delivered response. Same
+                # false-attribution class that boundary_detected fixed for
+                # authority: an event must never claim content the user never saw.
+                present = _contains_hallucination(final_message)
+                updates["hallucination_detected"] = present
+                updates["hallucination_types"] = ["hallucinated_content"] if present else []
             else:
                 (
                     final_message,
@@ -765,6 +798,8 @@ def injection_node(state: Dict[str, Any]) -> Dict[str, Any]:
                     final_message, severity_raw, conversation_history, theme
                 )
                 updates["hallucination_types"] = hallucination_types
+                # The canned block was just appended, so it is present by construction.
+                updates["hallucination_detected"] = True
 
         if requested.get("authority"):
             updates["boundary_injected"] = True

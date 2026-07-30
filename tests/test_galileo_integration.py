@@ -55,16 +55,28 @@ check("_text flattens message lists + passes strings",
 
 # ---- wiring presence (export paths) ----
 collector = (ROOT / "otel-collector-config.yaml").read_text()
-check("collector has the otlphttp/galileo exporter -> multitenant galileocloud",
-      "otlphttp/galileo" in collector and "api.multitenant.galileocloud.io/otel/traces" in collector)
-check("galileo exporter is on the traces pipeline",
-      "otlphttp/galileo" in collector.split("pipelines:", 1)[-1])
+# The Galileo fan-out lives in an OVERLAY config layered on by run-collector.sh
+# only when GALILEO_API_KEY is set. It used to sit unconditionally in the base
+# config, so a keyless deployment POSTed every gen_ai span (prompt and response
+# content included) to Galileo with an empty API-key header.
+galileo_overlay = (ROOT / "otel-collector-galileo.yaml").read_text()
+check("galileo overlay has the otlphttp/galileo exporter -> multitenant galileocloud",
+      "otlphttp/galileo" in galileo_overlay
+      and "api.multitenant.galileocloud.io/otel/traces" in galileo_overlay)
+check("galileo exporter is on a traces pipeline in the overlay",
+      "otlphttp/galileo" in galileo_overlay.split("pipelines:", 1)[-1])
+check("BASE collector config carries NO galileo exporter or pipeline",
+      "otlphttp/galileo" not in collector and "traces/galileo" not in collector.replace(
+          "# traces/galileo is defined in otel-collector-galileo.yaml", ""))
+check("run-collector.sh layers the overlay only when GALILEO_API_KEY is set",
+      'if [ -n "${GALILEO_API_KEY:-}" ]' in (ROOT / "run-collector.sh").read_text()
+      and "otel-collector-galileo.yaml" in (ROOT / "run-collector.sh").read_text())
+
 # Galileo ingests GenAI spans only; the fan-out must drop non-GenAI (HTTP) spans
 # or Galileo answers every batch with a "No GenAI patterns detected" partial drop.
 # Splunk APM, on its own pipeline, must still receive the FULL trace.
-_pl = collector.split("pipelines:", 1)[-1]
-_splunk_block = _pl.split("traces/galileo:", 1)[0]
-_galileo_block = _pl.split("traces/galileo:", 1)[-1].split("metrics:", 1)[0]
+_splunk_block = collector.split("pipelines:", 1)[-1]
+_galileo_block = galileo_overlay.split("pipelines:", 1)[-1]
 check("collector defines a GenAI-only filter (drops non-gen_ai spans)",
       "filter/genai_only" in collector and "gen_ai.operation.name" in collector)
 check("Galileo export pipeline applies the GenAI-only filter",

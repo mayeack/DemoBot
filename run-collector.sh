@@ -9,22 +9,36 @@ cd "$(dirname "$0")"
 
 export SPLUNK_REALM=$(grep '^SPLUNK_REALM=' .env 2>/dev/null | cut -d= -f2- || true)
 export SPLUNK_ACCESS_TOKEN=$(grep '^SPLUNK_ACCESS_TOKEN=' .env 2>/dev/null | cut -d= -f2- || true)
-# Galileo (LLM observability) — optional; the collector fans traces here too.
-# Exported (possibly empty) so the config's ${env:GALILEO_*} always resolve.
+# Galileo (LLM observability) — optional second trace destination.
 export GALILEO_API_KEY=$(grep '^GALILEO_API_KEY=' .env 2>/dev/null | cut -d= -f2- || true)
 export GALILEO_PROJECT=$(grep '^GALILEO_PROJECT=' .env 2>/dev/null | cut -d= -f2- || true)
 export GALILEO_LOG_STREAM=$(grep '^GALILEO_LOG_STREAM=' .env 2>/dev/null | cut -d= -f2- || true)
+
+# The Galileo exporter + pipeline live in an overlay config that is layered on
+# ONLY when a key is present. Previously they were unconditional in the base
+# config and the vars were exported even when empty, so a keyless deployment
+# POSTed every gen_ai span — prompt and response content included — to Galileo
+# with an empty API-key header, failing continuously and visibly only in the
+# collector's own log.
+CONFIGS=(--config otel-collector-config.yaml)
+if [ -n "${GALILEO_API_KEY:-}" ]; then
+  CONFIGS+=(--config otel-collector-galileo.yaml)
+  GALILEO_STATE="on -> api.multitenant.galileocloud.io"
+else
+  GALILEO_STATE="OFF (no GALILEO_API_KEY in .env)"
+fi
 if [ -z "${SPLUNK_REALM:-}" ] || [ -z "${SPLUNK_ACCESS_TOKEN:-}" ]; then
   echo "ERROR: set SPLUNK_REALM and SPLUNK_ACCESS_TOKEN in .env first." >&2
   exit 1
 fi
 
 echo "Starting OTel Collector (realm=$SPLUNK_REALM) -> Splunk Observability Cloud"
+echo "Galileo trace fan-out: $GALILEO_STATE"
 echo "Listening on :4317 (OTLP/gRPC) and :4318 (OTLP/HTTP). Ctrl+C to stop."
 
 # Native binary (downloaded once by the setup; see README/skill).
 if [ -x ./bin/otelcol-contrib ]; then
-  exec ./bin/otelcol-contrib --config otel-collector-config.yaml
+  exec ./bin/otelcol-contrib "${CONFIGS[@]}"
 fi
 
 # Fallback: containerized collector.
@@ -34,10 +48,15 @@ if [ -z "$RUNTIME" ]; then
   echo "Re-download the binary or start podman, then retry." >&2
   exit 1
 fi
+# Mount both configs; pass the overlay only when a Galileo key is present, so the
+# containerized path gates identically to the native one above.
+CONTAINER_CONFIGS=(--config=/etc/otelcol-contrib/config.yaml)
+[ -n "${GALILEO_API_KEY:-}" ] && CONTAINER_CONFIGS+=(--config=/etc/otelcol-contrib/galileo.yaml)
 exec "$RUNTIME" run --rm --name otel-collector \
   -p 4317:4317 -p 4318:4318 \
   -e SPLUNK_REALM -e SPLUNK_ACCESS_TOKEN \
   -e GALILEO_API_KEY -e GALILEO_PROJECT -e GALILEO_LOG_STREAM \
   -v "$PWD/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro" \
+  -v "$PWD/otel-collector-galileo.yaml:/etc/otelcol-contrib/galileo.yaml:ro" \
   docker.io/otel/opentelemetry-collector-contrib:latest \
-  --config=/etc/otelcol-contrib/config.yaml
+  "${CONTAINER_CONFIGS[@]}"

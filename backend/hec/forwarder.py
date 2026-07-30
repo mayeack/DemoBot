@@ -61,6 +61,10 @@ class HECStats:
 
 
 class HECForwarder:
+    # Pause before restarting a crashed consumer, so a persistently failing
+    # loop cannot spin the event loop.
+    _CRASH_BACKOFF_S = 2.0
+
     def __init__(self, cfg: HECConfig, token: Optional[str]) -> None:
         self._cfg = cfg
         self._token = token or ""
@@ -193,7 +197,22 @@ class HECForwarder:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("hec_forwarder_loop_crashed id=%s", self._cfg.id)
+            # Do NOT let one unexpected error end forwarding for the process
+            # lifetime. This used to exit the loop for good: `running` went
+            # False, submit() silently dropped every subsequent event, and the
+            # only signal was this single log line plus a flag in
+            # /api/hec/stats — Splunk Core simply stopped receiving governance
+            # events until someone reconfigured the destination by hand.
+            # Back off briefly, then resume consuming.
+            logger.exception(
+                "hec_forwarder_loop_crashed id=%s — restarting consumer", self._cfg.id
+            )
+            if not self._stopping.is_set():
+                try:
+                    await asyncio.sleep(self._CRASH_BACKOFF_S)
+                except asyncio.CancelledError:
+                    raise
+                self._task = asyncio.create_task(self._consume_loop())
 
     async def _send_with_retry(self, batch: list[dict[str, Any]]) -> None:
         retries = max(0, int(self._cfg.max_retries))

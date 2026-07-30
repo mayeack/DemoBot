@@ -88,8 +88,9 @@ def _base_state(theme_key: str) -> dict:
         "theme": theme_key,
         "conversation_history": [{"role": "user", "content": "I have a headache"}],
         "user_message": "I have a headache",
-        # NB: False is not "off" -- _should_request treats False and None alike
-        # (random at the configured rate); only True forces a category ON.
+        # Toggle contract: True = always, False = never, None/unset = random at
+        # the configured rate. (False WAS treated like None; that changed when
+        # each toggle was made to own exactly one kind of content.)
         "force_pii_injection": False,
         "force_toxic_injection": False,
         "force_hallucination_injection": False,
@@ -374,10 +375,9 @@ def _no_governance_injection():
     ``run_turn`` rolls each category once per turn at its configured rate (25%
     by default) and, when one lands, appends synthetic governance content to
     ``final_message`` -- so an exact-match assertion on the reply is flaky
-    without this. Passing ``force_*_injection=False`` does NOT disable it:
-    ``injection._should_request`` treats False and None alike (random at the
-    configured rate) and only True forces a category ON, so zeroing the rates
-    is what actually makes the turn deterministic.
+    without this. Zeroing the rates is what makes a turn that passes NO force
+    flags deterministic; a turn passing ``force_*_injection=False`` is already
+    deterministic on its own, since False now means never.
     """
     import backend.config as cfg
     rates = ("pii_injection_rate", "toxic_injection_rate",

@@ -50,7 +50,13 @@ class Settings(BaseSettings):
 
     # AWS Bedrock Configuration (used when ai_provider="bedrock")
     aws_region: str = "us-east-1"
-    bedrock_model_id: str = "anthropic.claude-3-sonnet-20240229-v1:0"
+    # Cross-region inference profile ID. The previous default,
+    # anthropic.claude-3-sonnet-20240229-v1:0, reached end-of-life on Bedrock in
+    # July 2025 — selecting bedrock with the shipped default failed on the first
+    # turn with a model-not-available error.
+    # Exact availability is account- and region-specific; list what you can call
+    # with:  aws bedrock list-inference-profiles --region $AWS_REGION
+    bedrock_model_id: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
     # OpenAI-compatible API Configuration (used when ai_provider="openai")
     openai_api_key: str = ""
@@ -113,6 +119,23 @@ class Settings(BaseSettings):
     # dev). Supply via .env only — never hardcode.
     access_key: str = ""
 
+    # Browser origins allowed to call this API cross-origin, comma-separated.
+    # The UI is served same-origin by this very app, so it needs NO entry here —
+    # this exists for an external browser client. Empty = no cross-origin access
+    # (the safe default). Never set "*": these responses are credentialed
+    # (cookie / Basic auth), and wildcard-plus-credentials is exactly the
+    # combination browsers reject and attackers enjoy.
+    cors_origins: str = ""
+
+    @property
+    def cors_origins_list(self) -> list:
+        """Configured origins, plus this instance's own localhost origin."""
+        origins = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        for own in (f"http://localhost:{self.port}", f"http://127.0.0.1:{self.port}"):
+            if own not in origins:
+                origins.append(own)
+        return origins
+
     # Database (SQLite for local, PostgreSQL for AWS)
     database_url: str = "sqlite:///./medadvice.db"
 
@@ -130,7 +153,11 @@ class Settings(BaseSettings):
     hallucination_injection_rate: float = 0.25  # 25% of responses will include hallucinated content
     authority_injection_rate: float = 0.25  # 25% of responses will include outside-of-authority content
     require_disclaimer_acceptance: bool = True
-    max_clarifying_questions: int = 3
+    # 2, not 3: ClarifyingQuestionsService hardcoded 2 ("reduced from 3 to
+    # minimize unnecessary questions") and never read this setting, so the
+    # documented 3 was never the real limit. Keeping the shipped behavior and
+    # making the setting actually drive it.
+    max_clarifying_questions: int = 2
 
     # Cisco AI Defense (Inspection API - runtime policy review of user prompts)
     # https://developer.cisco.com/docs/ai-defense-inspection/
@@ -222,8 +249,10 @@ class Settings(BaseSettings):
     # inspection client is configured). Error handling honors the existing
     # ai_defense_fail_open policy — there is deliberately no second flag.
     tool_guard_ai_defense: bool = True
-    # Rendered tool-call text is truncated to this many characters before
-    # inspection/logging.
+    # Bound on the rendered tool-call text stored in governance events and
+    # submitted to AI Defense. NOT a bound on what the policy checks read —
+    # those run over the untruncated render (see services/tool_policy.py), and a
+    # call too large to render fully is force-escalated to AI Defense.
     tool_guard_max_arg_chars: int = 4000
 
     # -------------------------------------------------------------------------

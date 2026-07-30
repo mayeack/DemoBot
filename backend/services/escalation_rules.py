@@ -66,6 +66,9 @@ class EscalationRules:
     )
 
     def __init__(self):
+        # Retained for backward compatibility only. should_escalate builds and
+        # returns a LOCAL list — never accumulate per-turn state on a shared
+        # instance (see the note in should_escalate).
         self.escalation_reasons = []
 
     def check_policy_block(self, user_input: str) -> Tuple[bool, List[str]]:
@@ -92,35 +95,41 @@ class EscalationRules:
         Returns:
             Tuple of (should_escalate: bool, reasons: List[str])
         """
-        self.escalation_reasons = []
+        # Local, not self.escalation_reasons: both call sites are module-level
+        # singletons (recommendation_engine's module-global engine, invoked per
+        # request via run_in_threadpool, and agents/nodes/shared.py's content
+        # engine used by safety_node). Accumulating on the instance let two
+        # concurrent turns reset and append to each other's list, so a turn could
+        # report another turn's escalation reasons — or lose its own.
+        reasons: List[str] = []
         full_conversation = self._extract_full_text(conversation_history)
 
         # Check emergency symptoms
         if self._check_emergency_symptoms(user_input, full_conversation):
-            self.escalation_reasons.append("Emergency symptoms detected")
+            reasons.append("Emergency symptoms detected")
 
         # Check severity level
         if severity in [SeverityLevel.EMERGENCY, SeverityLevel.HIGH]:
-            self.escalation_reasons.append(f"High severity level: {severity.value}")
+            reasons.append(f"High severity level: {severity.value}")
 
         # Check vulnerable populations
         if self._check_age_risk(full_conversation):
-            self.escalation_reasons.append("Vulnerable age group identified")
+            reasons.append("Vulnerable age group identified")
 
         if self._check_pregnancy(full_conversation):
-            self.escalation_reasons.append("Pregnancy detected")
+            reasons.append("Pregnancy detected")
 
         # Check for medication interactions
         if self._check_medication_risk(full_conversation):
-            self.escalation_reasons.append("Potential medication interactions")
+            reasons.append("Potential medication interactions")
 
         # Check for persistent/worsening symptoms
         if self._check_persistent_symptoms(full_conversation):
-            self.escalation_reasons.append("Persistent or worsening symptoms")
+            reasons.append("Persistent or worsening symptoms")
 
         # Check for self-harm ideation
         if self._check_self_harm(user_input, full_conversation):
-            self.escalation_reasons.append("Self-harm ideation expressed")
+            reasons.append("Self-harm ideation expressed")
 
         # REMOVED: Low AI confidence escalation - instead ask clarifying questions
         # Low confidence should trigger clarifying questions, not escalation
@@ -128,9 +137,9 @@ class EscalationRules:
 
         # Check for explicit human review request
         if self._check_human_review_request(user_input, full_conversation):
-            self.escalation_reasons.append("User requested professional review")
+            reasons.append("User requested professional review")
 
-        return len(self.escalation_reasons) > 0, self.escalation_reasons
+        return len(reasons) > 0, reasons
 
     def _extract_full_text(self, conversation_history: List[Dict[str, Any]]) -> str:
         """Extract only USER text from conversation history to avoid false positives from AI responses"""

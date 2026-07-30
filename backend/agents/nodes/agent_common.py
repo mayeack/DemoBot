@@ -16,6 +16,14 @@ from backend.config import settings
 from backend.logging.governance_logger import governance_logger
 from backend.models.schemas import MessageType, SeverityLevel
 
+# Request params for the user-facing generation (the synthesizer call). Shared
+# with the router, which logs them on the governance INPUT event: it hardcoded
+# 2048/0.7, a leftover from before the cap was lowered, so anyone auditing
+# request params from governance logs read a max_tokens that no model call in
+# the turn actually used. Coordinator and specialists use their own smaller caps.
+SYNTHESIZER_MAX_TOKENS = 1024
+SYNTHESIZER_TEMPERATURE = 0.7
+
 # Per-agent model output stored in agent_trace is capped before it is logged
 # (file / HEC / DB) and forwarded to Galileo, to bound governance-event size.
 _MAX_TRACE_TEXT = 2000

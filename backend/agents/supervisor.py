@@ -16,6 +16,10 @@ import time
 import uuid
 from typing import Any, Dict
 
+from backend.agents.nodes.agent_common import (
+    SYNTHESIZER_MAX_TOKENS,
+    SYNTHESIZER_TEMPERATURE,
+)
 from backend.agents.themes import get_theme
 from backend.logging.governance_logger import governance_logger
 from backend.telemetry import otel
@@ -35,9 +39,12 @@ def router_node(state: Dict[str, Any]) -> Dict[str, Any]:
             request_id=request_id,
             operation_name="chat",
             input_messages=[{"role": "user", "content": user_message}],
+            # The user-facing generation's real params, from the one place that
+            # defines them. (Coordinator and specialists use their own smaller
+            # caps; the synthesizer is the call that produces the answer.)
             request_params={
-                "request_max_tokens": 2048,
-                "request_temperature": 0.7,
+                "request_max_tokens": SYNTHESIZER_MAX_TOKENS,
+                "request_temperature": SYNTHESIZER_TEMPERATURE,
             },
             trace_id=trace_id,
             client_address=state.get("client_address"),

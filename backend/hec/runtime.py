@@ -75,7 +75,13 @@ class HECRuntime:
     def submit(self, log_type: str, log_data: dict) -> None:
         if not self._forwarders:
             return
-        for dest_id, fwd in self._forwarders.items():
+        # Snapshot before iterating. This runs on governance worker THREADS while
+        # reconfigure()/stop() clear the same dict on the event loop, so
+        # iterating it live could raise "dictionary changed size during
+        # iteration" — outside the per-item try, so it propagated up to
+        # governance_logger's blanket handler and silently dropped that event's
+        # entire HEC fan-out.
+        for dest_id, fwd in list(self._forwarders.items()):
             try:
                 fwd.submit(log_type, log_data)
             except Exception:

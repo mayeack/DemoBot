@@ -260,18 +260,27 @@ async function reviewEscalation(escalationId) {
     }
 }
 
-async function exportLogs(logType) {
+// Wired to the Export buttons in admin.html. `format` is honored so the
+// backend's CSV branch is reachable too — it had no caller at all before.
+async function exportLogs(logType, format = 'json') {
     try {
-        const response = await fetch(`/admin/logs/export?log_type=${logType}&format=json`);
+        const response = await fetch(
+            `/admin/logs/export?log_type=${encodeURIComponent(logType)}&format=${encodeURIComponent(format)}`
+        );
         if (!response.ok) throw new Error('Failed to export logs');
 
-        const data = await response.json();
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const stamp = new Date().toISOString().split('T')[0];
+        const blob = format === 'csv'
+            ? await response.blob()
+            : new Blob([JSON.stringify(await response.json(), null, 2)],
+                       { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${logType}_export_${new Date().toISOString().split('T')[0]}.json`;
+        a.download = `${logType}_export_${stamp}.${format}`;
+        document.body.appendChild(a);   // Firefox ignores click() on a detached node
         a.click();
+        a.remove();
         URL.revokeObjectURL(url);
 
     } catch (error) {

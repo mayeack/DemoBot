@@ -20,14 +20,34 @@ def create_db_engine():
     database_url = settings.database_url
     
     if database_url.startswith("sqlite"):
-        # SQLite configuration for local development
-        logger.info("Configuring SQLite database for local development")
-        return create_engine(
-            database_url,
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-            echo=settings.debug
+        # SQLite configuration for local development.
+        #
+        # A file-backed SQLite database gets the DEFAULT pool, so each Session
+        # checks out its own DBAPI connection. StaticPool (used here previously)
+        # hands the SAME sqlite3 connection to every checkout, and this app is
+        # genuinely concurrent: async handlers hold sessions on the event loop
+        # while chat turns run in run_in_threadpool and write governance,
+        # escalation, and audit rows through separate sessions. Sharing one
+        # connection let those transactions interleave, so one session's commit
+        # or rollback could commit another's half-written work — losing
+        # governance/audit rows behind an error the writer only logs.
+        #
+        # check_same_thread stays False: connections legitimately move between
+        # the event loop and threadpool workers. StaticPool is still correct for
+        # in-memory SQLite, where a fresh connection would be a fresh, empty
+        # database (used by tests).
+        in_memory = ":memory:" in database_url or database_url.endswith("sqlite://")
+        logger.info(
+            "Configuring SQLite database for local development (%s pool)",
+            "static/shared" if in_memory else "default per-session",
         )
+        kwargs = {
+            "connect_args": {"check_same_thread": False},
+            "echo": settings.debug,
+        }
+        if in_memory:
+            kwargs["poolclass"] = StaticPool
+        return create_engine(database_url, **kwargs)
     elif database_url.startswith("postgresql"):
         # PostgreSQL configuration for AWS production
         logger.info("Configuring PostgreSQL database for production")

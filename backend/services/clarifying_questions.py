@@ -1,10 +1,18 @@
 from typing import List, Dict, Any, Optional
 import re
 
+from backend.config import settings
+
 class ClarifyingQuestionsService:
     """Manage clarifying questions logic - only ask when truly needed for confident recommendations"""
 
-    MAX_QUESTIONS = 2  # Reduced from 3 to minimize unnecessary questions
+    # Read from config (default 2, deliberately reduced from 3 to minimize
+    # unnecessary questions) rather than hardcoded. MAX_CLARIFYING_QUESTIONS had
+    # no readers at all, so the setting was inert and the real limit was this
+    # constant — which also made README's "up to 3 questions" wrong.
+    @property
+    def MAX_QUESTIONS(self) -> int:
+        return max(1, int(getattr(settings, "max_clarifying_questions", 2) or 2))
 
     EMERGENCY_KEYWORDS = [
         "chest pain", "difficulty breathing", "unconscious", "severe bleeding",

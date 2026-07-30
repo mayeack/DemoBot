@@ -90,6 +90,10 @@ class DemoBotState(TypedDict, total=False):
     toxic_types: List[str]
     hallucination_injected: bool
     hallucination_types: List[str]
+    # Whether fabricated content actually LANDED in the response, as opposed to
+    # hallucination_injected (= was requested). Same distinction as
+    # boundary_detected below, and for the same reason.
+    hallucination_detected: bool
     boundary_injected: bool
     boundary_types: List[str]
     # Whether prescriptive overreach actually LANDED in the response, as opposed to

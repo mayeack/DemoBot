@@ -7,7 +7,7 @@ import asyncio
 import logging
 import uuid
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from backend.config import settings
 from backend.models.schemas import ChatRequest, ChatResponse, MessageRole, MessageType
@@ -24,8 +24,37 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 recommendation_engine = RecommendationEngine()
 
-# In-memory session store (in production, use Redis or similar)
+# In-memory session store (in production, use Redis or similar).
+# Bounded — see _evict_stale_sessions.
 sessions: Dict[str, Dict[str, Any]] = {}
+
+
+def _evict_stale_sessions() -> int:
+    """Drop in-memory sessions idle longer than settings.session_timeout_minutes.
+
+    This dict is a CACHE: every session is durably persisted as a Conversation
+    row, and _prepare_session transparently reloads one that isn't resident. It
+    previously had no eviction at all, so it grew for the process lifetime with
+    the full message history of every session — while the auto-prompter creates
+    one per minute and the incident load driver one every 2.5 seconds. The
+    advertised SESSION_TIMEOUT_MINUTES (README and .env.example) was read by
+    nothing; this is what makes it real.
+
+    Returns the number of sessions evicted.
+    """
+    timeout = getattr(settings, "session_timeout_minutes", 0) or 0
+    if timeout <= 0:
+        return 0
+    cutoff = datetime.utcnow() - timedelta(minutes=timeout)
+    stale = [
+        sid for sid, s in sessions.items()
+        if (s.get("last_activity") or s.get("created_at") or datetime.utcnow()) < cutoff
+    ]
+    for sid in stale:
+        sessions.pop(sid, None)
+    if stale:
+        logger.info("Evicted %d idle in-memory session(s)", len(stale))
+    return len(stale)
 
 
 def _dispatch_chat_turn(**kwargs: Any) -> Dict[str, Any]:
@@ -83,17 +112,27 @@ def _prepare_session(chat_request: ChatRequest, client_host, db: Session) -> Dic
         ).first()
 
         if existing_conversation:
-            # Load existing session from database into memory
+            # Load existing session from database into memory.
+            # list(...) COPIES: Conversation.messages is a plain JSON column with
+            # no MutableList, so holding the ORM-loaded list by reference and
+            # mutating it in place left SQLAlchemy comparing the attribute
+            # against itself. History looked unchanged and `messages` was
+            # omitted from the UPDATE, silently dropping the first turn of any
+            # conversation resumed after a restart.
             sessions[session_id] = {
                 "created_at": existing_conversation.created_at,
-                "messages": existing_conversation.messages or [],
+                "messages": list(existing_conversation.messages or []),
                 "disclaimer_accepted": existing_conversation.disclaimer_accepted,
                 "escalated": existing_conversation.escalated,
-                "enduser_id": pick_enduser_id()
+                "enduser_id": pick_enduser_id(),
+                "last_activity": datetime.utcnow()
             }
         else:
-            # New session - require disclaimer
-            if not chat_request.disclaimer_accepted:
+            # New session - require disclaimer, unless the operator turned the
+            # requirement off. The setting existed with no readers, so
+            # REQUIRE_DISCLAIMER_ACCEPTANCE=False silently did nothing and the
+            # gate was unconditional.
+            if settings.require_disclaimer_acceptance and not chat_request.disclaimer_accepted:
                 raise HTTPException(
                     status_code=400,
                     detail="Medical disclaimer must be accepted before starting consultation"
@@ -104,7 +143,8 @@ def _prepare_session(chat_request: ChatRequest, client_host, db: Session) -> Dic
                 "messages": [],
                 "disclaimer_accepted": True,
                 "escalated": False,
-                "enduser_id": pick_enduser_id()
+                "enduser_id": pick_enduser_id(),
+                "last_activity": datetime.utcnow()
             }
 
             # Create conversation in database
@@ -140,6 +180,11 @@ def _prepare_session(chat_request: ChatRequest, client_host, db: Session) -> Dic
         "type": MessageType.USER_MESSAGE
     }
     session["messages"].append(user_message)
+    session["last_activity"] = datetime.utcnow()
+    # Sweep idle sessions on the way through; the durable copy is in the DB, so
+    # this only trims the cache. Cheap: a dict scan per turn, and the turn that
+    # follows costs an LLM call.
+    _evict_stale_sessions()
     return session
 
 
@@ -187,7 +232,9 @@ def _record_assistant_turn(
     ).first()
 
     if conversation:
-        conversation.messages = session["messages"]
+        # Assign a NEW list so change detection always sees a distinct object,
+        # even if some future path reintroduces a shared reference.
+        conversation.messages = list(session["messages"])
         conversation.escalated = session["escalated"]
         conversation.updated_at = datetime.utcnow()
         if response_data.get("severity"):
@@ -348,10 +395,51 @@ async def create_session():
     return {"session_id": session_id}
 
 @router.get("/disclaimer")
-async def get_disclaimer():
-    """Get medical disclaimer text"""
+async def get_disclaimer(theme: str = "medadvice"):
+    """Get the disclaimer text for an Application Theme.
+
+    Theme-aware because this used to return the MEDICAL disclaimer
+    unconditionally, with no theme parameter at all — so an API consumer got
+    wrong text for five of the six themes. The detailed medical copy below is
+    medadvice's; other themes get a disclaimer built from their own label.
+
+    The web UI renders its own per-theme copy client-side (frontend/js/chat.js
+    THEMES) and does not call this endpoint; deliberately not duplicating all six
+    bodies here, which would just create a second place to drift.
+    """
+    from backend.agents.themes import get_theme
+
+    theme_config = get_theme(theme)
+    if theme_config.key != "medadvice":
+        return {
+            "title": f"{theme_config.label} Disclaimer",
+            "theme": theme_config.key,
+            "content": (
+                f"**IMPORTANT DISCLAIMER — {theme_config.label.upper()}**\n\n"
+                "This service provides general information and guidance only. It "
+                "is NOT a substitute for advice from a qualified professional in "
+                "this domain, and no professional relationship is created by "
+                "using it.\n\n"
+                "**Key Points:**\n\n"
+                "• Responses are generated by an AI system and may be incomplete "
+                "or incorrect.\n\n"
+                "• Do not rely on this service for decisions with legal, "
+                "financial, medical, or contractual consequences.\n\n"
+                "• Always confirm anything material with a qualified professional "
+                "or an official source.\n\n"
+                "• Do not share sensitive personal information you would not want "
+                "logged for governance review.\n\n"
+                "**By continuing, you acknowledge that:**\n\n"
+                "1. You understand this is not professional advice\n"
+                "2. You will verify important information independently\n"
+                "3. You understand the limitations of this service\n\n"
+                "Do you accept these terms and wish to continue?\n"
+            ),
+            "version": "1.0",
+        }
     return {
         "title": "Medical Disclaimer",
+        "theme": theme_config.key,
         "content": """**IMPORTANT MEDICAL DISCLAIMER**
 
 This service provides general health information and guidance only. It is NOT a substitute for professional medical advice, diagnosis, or treatment.

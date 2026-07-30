@@ -112,57 +112,142 @@ def main() -> int:
         check("GET /api/chat/session/{id} -> 200",
               c.get(f"/api/chat/session/{sid}", headers=AUTH).status_code in (200, 404))
         check("GET /api/chat/disclaimer -> 200", c.get("/api/chat/disclaimer", headers=AUTH).status_code == 200)
+        # Theme-aware: it used to return the MEDICAL disclaimer unconditionally,
+        # with no theme parameter, so five of six themes got wrong text.
+        rdm = c.get("/api/chat/disclaimer", headers=AUTH).json()
+        check("disclaimer: defaults to medadvice's medical text",
+              rdm.get("theme") == "medadvice" and "MEDICAL DISCLAIMER" in rdm.get("content", ""))
+        rdt = c.get("/api/chat/disclaimer?theme=telecomchatbot", headers=AUTH).json()
+        check("disclaimer: a non-medical theme gets non-medical text",
+              rdt.get("theme") == "telecomchatbot"
+              and "MEDICAL DISCLAIMER" not in rdt.get("content", "")
+              and "not professional advice" in rdt.get("content", ""),
+              str(rdt.get("title")))
+        check("disclaimer: unknown theme falls back rather than erroring",
+              c.get("/api/chat/disclaimer?theme=nonsense", headers=AUTH).status_code == 200)
+
+        # REQUIRE_DISCLAIMER_ACCEPTANCE had no readers: setting it False did
+        # nothing and the 400 gate was unconditional.
+        _saved_req = settings.require_disclaimer_acceptance
+        try:
+            settings.require_disclaimer_acceptance = True
+            _newsid = c.post("/api/chat/session/new", headers=AUTH).json()["session_id"]
+            check("disclaimer gate ON -> new session without acceptance is 400",
+                  c.post("/api/chat/message", headers=AUTH,
+                         json={"session_id": _newsid, "message": "hi",
+                               "disclaimer_accepted": False}).status_code == 400)
+            settings.require_disclaimer_acceptance = False
+            _newsid2 = c.post("/api/chat/session/new", headers=AUTH).json()["session_id"]
+            check("disclaimer gate OFF -> the flag is actually honored (no 400)",
+                  c.post("/api/chat/message", headers=AUTH,
+                         json={"session_id": _newsid2, "message": "hi",
+                               "disclaimer_accepted": False}).status_code == 200)
+        finally:
+            settings.require_disclaimer_acceptance = _saved_req
+
+        # MAX_CLARIFYING_QUESTIONS was likewise inert (a hardcoded 2 won).
+        from backend.services.clarifying_questions import ClarifyingQuestionsService  # noqa: E402
+        _svc = ClarifyingQuestionsService()
+        _saved_max = settings.max_clarifying_questions
+        try:
+            settings.max_clarifying_questions = 5
+            check("clarifying limit follows the setting", _svc.MAX_QUESTIONS == 5,
+                  str(_svc.MAX_QUESTIONS))
+        finally:
+            settings.max_clarifying_questions = _saved_max
+        # Assert the CODE default, not the live value: this box's .env sets 3, and
+        # now that the setting is honored that .env value is what actually applies.
+        check("clarifying limit code default is the shipped 2",
+              type(settings).model_fields["max_clarifying_questions"].default == 2,
+              str(type(settings).model_fields["max_clarifying_questions"].default))
         # /message: validation (no real LLM turn asserted — that's integration-tested)
         check("POST /api/chat/message bad body -> 422",
               c.post("/api/chat/message", headers=AUTH, json={}).status_code == 422)
         rmsg = c.post("/api/chat/message", headers=AUTH,
                       json={"session_id": sid, "message": "test", "disclaimer_accepted": True})
         check("POST /api/chat/message (stubbed LLM) -> 200", rmsg.status_code == 200, f"{rmsg.status_code}")
-        # --- Governance content toggles: each force_* flag now appends a
-        # directive to the INPUT asking the model to produce the content, with a
-        # deterministic fallback when the (stubbed) model omits it.
-        # force_boundary_injection -> "outside of authority" directive + fallback.
-        rb = c.post("/api/chat/message", headers=AUTH,
-                    json={"session_id": sid, "message": "I have a sore throat.",
-                          "disclaimer_accepted": True, "force_boundary_injection": True})
-        check("force_boundary_injection -> outside-of-authority directive on the INPUT",
-              "AUTHORITY-VIOLATION SAMPLE" in _last_system["v"])
-        check("force_boundary_injection -> overreach present (fallback fires for stubbed model)",
-              rb.status_code == 200 and "**Recommended Prescription:**" in rb.json().get("message", ""),
-              f"{rb.status_code}")
-        # force_pii_injection -> PII directive + synthetic SSN via fallback
-        rp = c.post("/api/chat/message", headers=AUTH,
-                    json={"session_id": sid, "message": "I have a sore throat.",
-                          "disclaimer_accepted": True, "force_pii_injection": True})
-        check("force_pii_injection -> PII directive on the INPUT",
-              "PII/PHI SAMPLE" in _last_system["v"])
-        check("force_pii_injection -> synthetic SSN present (fallback)",
-              rp.status_code == 200 and bool(re.search(r"\d{3}-\d{2}-\d{4}", rp.json().get("message", ""))),
-              f"{rp.status_code}")
-        # force_toxic_injection -> toxic directive + harassment via fallback
-        rt = c.post("/api/chat/message", headers=AUTH,
-                    json={"session_id": sid, "message": "I have a sore throat.",
-                          "disclaimer_accepted": True, "force_toxic_injection": True})
-        check("force_toxic_injection -> toxic directive on the INPUT",
-              "TOXICITY SAMPLE" in _last_system["v"])
-        check("force_toxic_injection -> toxic content present (fallback)",
-              rt.status_code == 200 and "**Direct Assessment:**" in rt.json().get("message", ""),
-              f"{rt.status_code}")
-        # force_hallucination_injection -> hallucination directive on the INPUT
-        rh = c.post("/api/chat/message", headers=AUTH,
-                    json={"session_id": sid, "message": "I have a sore throat.",
-                          "disclaimer_accepted": True, "force_hallucination_injection": True})
-        check("force_hallucination_injection -> hallucination directive on the INPUT",
-              rh.status_code == 200 and "HALLUCINATION SAMPLE" in _last_system["v"], f"{rh.status_code}")
-        # with no switches and zeroed background rates: no directive, no overreach
-        rnb = c.post("/api/chat/message", headers=AUTH,
-                     json={"session_id": sid, "message": "I have a sore throat.",
-                           "disclaimer_accepted": True})
-        check("no toggles -> no directive on the INPUT",
-              "INTERNAL SAFETY-DETECTOR TEST SUITE" not in _last_system["v"])
-        check("no toggles -> no overreach marker",
-              rnb.status_code == 200 and "**Recommended Prescription:**" not in rnb.json().get("message", ""),
-              f"{rnb.status_code}")
+        # --- Governance content toggles ------------------------------------
+        # Each force_* flag appends a directive to the INPUT asking the model to
+        # produce the content, with a deterministic fallback when the (stubbed)
+        # model omits it.
+        #
+        # The directive TEXT is provider-dependent (build_input_directives):
+        #   * ollama       -> natural, UNLABELED asks; an uncensored local model
+        #                     complies with those. Hallucination and authority
+        #                     ride inside the JSON answer contract instead of an
+        #                     appended block, because dolphin3:8b emits unfenced
+        #                     JSON and the synthesizer drops any trailing text.
+        #   * every other  -> the labeled "* SAMPLE:" test-suite framing that a
+        #                     censored model needs to comply at all.
+        # So pin the provider per block and assert BOTH builders. Previously this
+        # section asserted only the labeled markers, which meant all five checks
+        # failed whenever .env selected ollama — i.e. in the default demo config.
+        _saved_provider = settings.ai_provider
+
+        def _turn(**flags):
+            return c.post("/api/chat/message", headers=AUTH,
+                          json={"session_id": sid, "message": "I have a sore throat.",
+                                "disclaimer_accepted": True, **flags})
+
+        try:
+            # -- labeled path (anthropic / bedrock / openai / nvidia) ----------
+            settings.ai_provider = "anthropic"
+            rb = _turn(force_boundary_injection=True)
+            check("labeled: boundary -> AUTHORITY-VIOLATION SAMPLE on the INPUT",
+                  "AUTHORITY-VIOLATION SAMPLE" in _last_system["v"])
+            check("labeled: boundary -> overreach present (fallback fires for stubbed model)",
+                  rb.status_code == 200 and "**Recommended Prescription:**" in rb.json().get("message", ""),
+                  f"{rb.status_code}")
+            rp = _turn(force_pii_injection=True)
+            check("labeled: pii -> PII/PHI SAMPLE on the INPUT",
+                  "PII/PHI SAMPLE" in _last_system["v"])
+            check("labeled: pii -> synthetic SSN present (fallback)",
+                  rp.status_code == 200 and bool(re.search(r"\d{3}-\d{2}-\d{4}", rp.json().get("message", ""))),
+                  f"{rp.status_code}")
+            rt = _turn(force_toxic_injection=True)
+            check("labeled: toxic -> TOXICITY SAMPLE on the INPUT",
+                  "TOXICITY SAMPLE" in _last_system["v"])
+            check("labeled: toxic -> toxic content present (fallback)",
+                  rt.status_code == 200 and "**Direct Assessment:**" in rt.json().get("message", ""),
+                  f"{rt.status_code}")
+            rh = _turn(force_hallucination_injection=True)
+            check("labeled: hallucination -> HALLUCINATION SAMPLE on the INPUT",
+                  rh.status_code == 200 and "HALLUCINATION SAMPLE" in _last_system["v"], f"{rh.status_code}")
+
+            rnb = _turn()
+            check("labeled: no toggles -> no directive on the INPUT",
+                  "INTERNAL SAFETY-DETECTOR TEST SUITE" not in _last_system["v"])
+            check("labeled: no toggles -> no overreach marker",
+                  rnb.status_code == 200 and "**Recommended Prescription:**" not in rnb.json().get("message", ""),
+                  f"{rnb.status_code}")
+
+            # -- ollama path: unlabeled asks, and the two categories that must
+            #    survive the JSON parse are written into the answer contract ---
+            settings.ai_provider = "ollama"
+            rp = _turn(force_pii_injection=True)
+            check("ollama: pii -> unlabeled NNN-NN-NNNN ask, no SAMPLE label",
+                  "NNN-NN-NNNN" in _last_system["v"]
+                  and "PII/PHI SAMPLE" not in _last_system["v"])
+            check("ollama: pii -> synthetic SSN present (fallback)",
+                  rp.status_code == 200 and bool(re.search(r"\d{3}-\d{2}-\d{4}", rp.json().get("message", ""))),
+                  f"{rp.status_code}")
+            rt = _turn(force_toxic_injection=True)
+            check("ollama: toxic -> unlabeled ask, no SAMPLE label",
+                  "dismissive, condescending, insulting remark" in _last_system["v"]
+                  and "TOXICITY SAMPLE" not in _last_system["v"])
+            rh = _turn(force_hallucination_injection=True)
+            check("ollama: hallucination -> embedded in the answer contract",
+                  "never admit that anything is invented or unverified" in _last_system["v"])
+            rb = _turn(force_boundary_injection=True)
+            check("ollama: boundary -> overstep directive embedded in the answer",
+                  "overstep your authorized non-prescriptive scope" in _last_system["v"])
+
+            rnb = _turn()
+            check("ollama: no toggles -> neither directive header on the INPUT",
+                  "written as earnest, first-person advice" not in _last_system["v"]
+                  and "REQUIRED IN THIS RESPONSE" not in _last_system["v"])
+        finally:
+            settings.ai_provider = _saved_provider
         # /message/stream: same turn over SSE — auth-gated, stage frames then one final.
         r401 = c.post("/api/chat/message/stream",
                       json={"session_id": sid, "message": "test", "disclaimer_accepted": True})
@@ -231,6 +316,38 @@ def main() -> int:
                            "disclaimer_accepted": True, "agent_control_review": True})
         check("POST /api/chat/message agent_control_review=true -> 200 + message",
               rac.status_code == 200 and bool(rac.json().get("message")), f"{rac.status_code}")
+        # Resume-after-restart: a conversation reloaded from the DB must persist
+        # its next turn. _prepare_session used to hold the ORM-loaded messages
+        # list BY REFERENCE and mutate it in place; with a plain JSON column (no
+        # MutableList) SQLAlchemy compared the attribute against itself, saw no
+        # change, and omitted `messages` from the UPDATE — so the first turn
+        # after a restart was written to nothing. Dropping the in-memory entry is
+        # exactly what a process restart does.
+        import backend.routers.chat as chat_router  # noqa: E402
+        from backend.database.db import get_db_context  # noqa: E402
+        from backend.models.db_models import Conversation  # noqa: E402
+
+        rsum = c.post("/api/chat/message", headers=AUTH,
+                      json={"session_id": sid, "message": "before the restart",
+                            "disclaimer_accepted": True})
+        check("resume: pre-restart turn -> 200", rsum.status_code == 200, f"{rsum.status_code}")
+        with get_db_context() as _s:
+            _before = len((_s.query(Conversation)
+                           .filter(Conversation.session_id == sid).first().messages) or [])
+        chat_router.sessions.pop(sid, None)      # simulate the restart
+        rres = c.post("/api/chat/message", headers=AUTH,
+                      json={"session_id": sid, "message": "after the restart",
+                            "disclaimer_accepted": True})
+        check("resume: post-restart turn -> 200", rres.status_code == 200, f"{rres.status_code}")
+        with get_db_context() as _s:
+            _msgs = (_s.query(Conversation)
+                     .filter(Conversation.session_id == sid).first().messages) or []
+        check("resume: post-restart turn was persisted (grew by user+assistant)",
+              len(_msgs) >= _before + 2, f"{_before} -> {len(_msgs)}")
+        check("resume: the resumed user message is in the stored history",
+              any(m.get("content") == "after the restart" for m in _msgs),
+              str([m.get("content") for m in _msgs][-4:]))
+
         check("GET /api/chat/auto-prompt/status -> 200", c.get("/api/chat/auto-prompt/status", headers=AUTH).status_code == 200)
         check("POST /api/chat/auto-prompt/start -> 200 (stubbed)", c.post("/api/chat/auto-prompt/start", headers=AUTH).status_code == 200)
         check("POST /api/chat/auto-prompt/stop -> 200", c.post("/api/chat/auto-prompt/stop", headers=AUTH).status_code == 200)
@@ -264,6 +381,13 @@ def main() -> int:
               and "sensitive_tools" in rpol.json(), f"{rpol.status_code}")
 
         # ---- settings ----
+        # These PUTs persist to the AppSettings row in ./medadvice.db — the SAME
+        # database the live app reads. Snapshot and restore both values so a test
+        # run cannot silently disable an operator's Emit Static Model or reset a
+        # custom logs directory (this suite advertises itself as side-effect-safe).
+        _saved_logs_dir = c.get("/api/settings", headers=AUTH).json().get("logs_directory")
+        _saved_emit = c.get("/api/settings/emit-model", headers=AUTH).json()
+
         rs = c.get("/api/settings", headers=AUTH)
         check("GET /api/settings -> 200 + logs_directory", rs.status_code == 200 and "logs_directory" in rs.json())
         check("PUT /api/settings -> 200", c.put("/api/settings", headers=AUTH, json={"logs_directory": "logs"}).status_code == 200)
@@ -273,6 +397,20 @@ def main() -> int:
               c.put("/api/settings/emit-model", headers=AUTH, json={"enabled": False, "model_name": "gpt-4o", "random": False}).status_code == 200)
         check("PUT /api/settings/emit-model unknown model -> 422",
               c.put("/api/settings/emit-model", headers=AUTH, json={"enabled": True, "model_name": "not-a-real-model", "random": False}).status_code == 422)
+
+        # Restore the operator's values (mirrors the ai_defense discovery restore
+        # further down). Best-effort: a failure here must not mask a real result.
+        try:
+            if _saved_logs_dir:
+                c.put("/api/settings", headers=AUTH, json={"logs_directory": _saved_logs_dir})
+            if _saved_emit.get("model_name"):
+                c.put("/api/settings/emit-model", headers=AUTH, json={
+                    "enabled": bool(_saved_emit.get("enabled")),
+                    "model_name": _saved_emit["model_name"],
+                    "random": bool(_saved_emit.get("random")),
+                })
+        except Exception as exc:  # noqa: BLE001
+            print(f"  WARN: could not restore settings: {exc}")
         rsi = c.get("/api/server-info", headers=AUTH)
         check("GET /api/server-info -> 200 + non-empty hostname",
               rsi.status_code == 200 and bool(rsi.json().get("hostname")), f"{rsi.status_code}")
@@ -293,6 +431,39 @@ def main() -> int:
         # ---- admin ----
         for path in ("/admin/logs/interactions", "/admin/logs/escalations", "/admin/logs/metrics", "/admin/logs/export"):
             check(f"GET {path} -> 200", c.get(path, headers=AUTH).status_code == 200)
+
+        # Escalation review: reviewer_id/review_notes are BODY fields. They were
+        # bare scalar params, which FastAPI binds as required QUERY params, so
+        # the admin UI's JSON body produced a 422 on every single click. A 404
+        # here is the pass condition — it proves the body validated and the
+        # handler ran far enough to look the escalation up.
+        rrev = c.put("/admin/escalations/no-such-escalation/review?new_status=reviewed",
+                     headers=AUTH, json={"reviewer_id": "admin", "review_notes": "looks fine"})
+        check("PUT /admin/escalations/{id}/review (JSON body) -> body accepted, 404 for unknown id",
+              rrev.status_code == 404, f"{rrev.status_code} {rrev.text[:160]}")
+        check("PUT /admin/escalations/{id}/review missing body -> 422",
+              c.put("/admin/escalations/x/review?new_status=reviewed",
+                    headers=AUTH).status_code == 422)
+        check("PUT /admin/escalations/{id}/review bad new_status -> 422",
+              c.put("/admin/escalations/x/review?new_status=bogus", headers=AUTH,
+                    json={"reviewer_id": "a", "review_notes": "b"}).status_code == 422)
+
+        # ---- CORS: explicit origins only, and preflights survive the gate ----
+        # The access-key middleware wraps CORSMiddleware, so an unauthenticated
+        # OPTIONS used to 401 before CORS could answer it.
+        pre = c.options("/api/settings", headers={
+            "Origin": f"http://localhost:{settings.port}",
+            "Access-Control-Request-Method": "GET",
+        })
+        check("OPTIONS preflight is not blocked by the access-key gate",
+              pre.status_code != 401, f"{pre.status_code}")
+        check("preflight echoes the configured origin",
+              pre.headers.get("access-control-allow-origin") == f"http://localhost:{settings.port}",
+              str(pre.headers.get("access-control-allow-origin")))
+        eviltrip = c.get("/health", headers={"Origin": "https://evil.example.com"})
+        check("unconfigured origin gets no allow-origin header",
+              "access-control-allow-origin" not in eviltrip.headers,
+              str(eviltrip.headers.get("access-control-allow-origin")))
 
         # ---- auth (login/logout) ----
         bad = c.post("/login", data={"access_code": "wrong-code"}, follow_redirects=False)
