@@ -7,7 +7,7 @@ import asyncio
 import logging
 import uuid
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from backend.config import settings
 from backend.models.schemas import ChatRequest, ChatResponse, MessageRole, MessageType
@@ -24,8 +24,37 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 recommendation_engine = RecommendationEngine()
 
-# In-memory session store (in production, use Redis or similar)
+# In-memory session store (in production, use Redis or similar).
+# Bounded — see _evict_stale_sessions.
 sessions: Dict[str, Dict[str, Any]] = {}
+
+
+def _evict_stale_sessions() -> int:
+    """Drop in-memory sessions idle longer than settings.session_timeout_minutes.
+
+    This dict is a CACHE: every session is durably persisted as a Conversation
+    row, and _prepare_session transparently reloads one that isn't resident. It
+    previously had no eviction at all, so it grew for the process lifetime with
+    the full message history of every session — while the auto-prompter creates
+    one per minute and the incident load driver one every 2.5 seconds. The
+    advertised SESSION_TIMEOUT_MINUTES (README and .env.example) was read by
+    nothing; this is what makes it real.
+
+    Returns the number of sessions evicted.
+    """
+    timeout = getattr(settings, "session_timeout_minutes", 0) or 0
+    if timeout <= 0:
+        return 0
+    cutoff = datetime.utcnow() - timedelta(minutes=timeout)
+    stale = [
+        sid for sid, s in sessions.items()
+        if (s.get("last_activity") or s.get("created_at") or datetime.utcnow()) < cutoff
+    ]
+    for sid in stale:
+        sessions.pop(sid, None)
+    if stale:
+        logger.info("Evicted %d idle in-memory session(s)", len(stale))
+    return len(stale)
 
 
 def _dispatch_chat_turn(**kwargs: Any) -> Dict[str, Any]:
@@ -95,7 +124,8 @@ def _prepare_session(chat_request: ChatRequest, client_host, db: Session) -> Dic
                 "messages": list(existing_conversation.messages or []),
                 "disclaimer_accepted": existing_conversation.disclaimer_accepted,
                 "escalated": existing_conversation.escalated,
-                "enduser_id": pick_enduser_id()
+                "enduser_id": pick_enduser_id(),
+                "last_activity": datetime.utcnow()
             }
         else:
             # New session - require disclaimer
@@ -110,7 +140,8 @@ def _prepare_session(chat_request: ChatRequest, client_host, db: Session) -> Dic
                 "messages": [],
                 "disclaimer_accepted": True,
                 "escalated": False,
-                "enduser_id": pick_enduser_id()
+                "enduser_id": pick_enduser_id(),
+                "last_activity": datetime.utcnow()
             }
 
             # Create conversation in database
@@ -146,6 +177,11 @@ def _prepare_session(chat_request: ChatRequest, client_host, db: Session) -> Dic
         "type": MessageType.USER_MESSAGE
     }
     session["messages"].append(user_message)
+    session["last_activity"] = datetime.utcnow()
+    # Sweep idle sessions on the way through; the durable copy is in the DB, so
+    # this only trims the cache. Cheap: a dict scan per turn, and the turn that
+    # follows costs an LLM call.
+    _evict_stale_sessions()
     return session
 
 

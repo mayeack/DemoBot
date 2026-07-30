@@ -212,6 +212,56 @@ check("escalation: concurrent benign turns stay empty",
       all(_conc[f"t{i}"] == [] for i in range(6) if i % 2),
       str({k: v for k, v in _conc.items() if v}))
 
+# 5. Governance JSONL writes are serialized across threads (F29) -------------
+# Concurrent writers used to be able to interleave halves of two JSON objects,
+# corrupting the file Splunk ingests. Every line must still parse.
+import json as _json  # noqa: E402
+
+from backend.logging.log_handlers import GovernanceFileHandler  # noqa: E402
+
+_logdir = tempfile.mkdtemp(prefix="demobot-logtest-")
+_handler = GovernanceFileHandler(logs_dir=_logdir)
+_big = "x" * 20000          # well past one atomic write
+
+
+def _spam(n):
+    for i in range(15):
+        _handler.write_governance_log(
+            {"event_id": f"e{n}-{i}", "who": n, "seq": i, "payload": _big}
+        )
+
+
+_ts = [threading.Thread(target=_spam, args=(n,)) for n in range(8)]
+for t in _ts:
+    t.start()
+for t in _ts:
+    t.join()
+
+_gov = Path(_logdir) / "ai_governance.json"
+_lines = [l for l in _gov.read_text().splitlines() if l.strip()]
+_bad = []
+for l in _lines:
+    try:
+        _json.loads(l)
+    except ValueError as exc:
+        _bad.append(str(exc)[:60])
+check("jsonl: every concurrently-written line parses", not _bad,
+      f"{len(_bad)} corrupt of {len(_lines)}: {_bad[:2]}")
+check("jsonl: no events lost", len(_lines) == 8 * 15, f"{len(_lines)} of {8 * 15}")
+
+# 6. setup_logging is idempotent — no duplicate console handlers (F57) -------
+import logging as _logging  # noqa: E402
+
+from backend.logging.log_handlers import setup_logging  # noqa: E402
+
+setup_logging()
+_first = len(_logging.getLogger("governance").handlers)
+setup_logging()
+setup_logging()
+_after = len(_logging.getLogger("governance").handlers)
+check("logging: repeated setup_logging adds no extra handlers",
+      _after == _first, f"{_first} -> {_after}")
+
 # Cleanup: drop the temp database entirely.
 dbmod.engine.dispose()
 try:
