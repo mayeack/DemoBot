@@ -50,7 +50,13 @@ class Settings(BaseSettings):
 
     # AWS Bedrock Configuration (used when ai_provider="bedrock")
     aws_region: str = "us-east-1"
-    bedrock_model_id: str = "anthropic.claude-3-sonnet-20240229-v1:0"
+    # Cross-region inference profile ID. The previous default,
+    # anthropic.claude-3-sonnet-20240229-v1:0, reached end-of-life on Bedrock in
+    # July 2025 — selecting bedrock with the shipped default failed on the first
+    # turn with a model-not-available error.
+    # Exact availability is account- and region-specific; list what you can call
+    # with:  aws bedrock list-inference-profiles --region $AWS_REGION
+    bedrock_model_id: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
     # OpenAI-compatible API Configuration (used when ai_provider="openai")
     openai_api_key: str = ""
@@ -239,8 +245,10 @@ class Settings(BaseSettings):
     # inspection client is configured). Error handling honors the existing
     # ai_defense_fail_open policy — there is deliberately no second flag.
     tool_guard_ai_defense: bool = True
-    # Rendered tool-call text is truncated to this many characters before
-    # inspection/logging.
+    # Bound on the rendered tool-call text stored in governance events and
+    # submitted to AI Defense. NOT a bound on what the policy checks read —
+    # those run over the untruncated render (see services/tool_policy.py), and a
+    # call too large to render fully is force-escalated to AI Defense.
     tool_guard_max_arg_chars: int = 4000
 
     # -------------------------------------------------------------------------

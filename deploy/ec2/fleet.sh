@@ -284,10 +284,17 @@ cmd_deploy() {
 
     # Throttle: each bootstrap pulls ~7 GB of models, so unbounded parallelism
     # just saturates the link and slows every box down.
-    while [ "$running" -ge "$PARALLEL" ]; do
-      wait -n 2>/dev/null || true
-      running=$((running - 1))
+    #
+    # Poll `jobs -pr` rather than `wait -n`: this script's shebang is /bin/bash,
+    # which on macOS is 3.2, where `wait -n` does not exist. Its error went to
+    # /dev/null and `|| true` swallowed the non-zero exit, so `running` was
+    # decremented without any child having finished — the loop drained instantly
+    # and every replica bootstrapped at once, which is exactly the link
+    # saturation this throttle exists to prevent.
+    while [ "$(jobs -pr | wc -l | tr -d ' ')" -ge "$PARALLEL" ]; do
+      sleep 5
     done
+    running=$(jobs -pr | wc -l | tr -d ' ')
 
     log "deploying replica $replica -> $ip  (log: $logdir/$replica.log)"
     deploy_one "$replica" "$ip" "$logdir/$replica.log" &

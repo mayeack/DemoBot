@@ -1,0 +1,33 @@
+# Galileo (LLM observability) fan-out — an OVERLAY on otel-collector-config.yaml.
+#
+# Kept separate so it can be omitted entirely. The exporter and its pipeline used
+# to live in the base config unconditionally, and run-collector.sh exported
+# GALILEO_* even when empty "so the config's ${env:GALILEO_*} always resolve" —
+# so a deployment with no Galileo key (a fresh install, an EC2 replica missing
+# the var) still POSTed every gen_ai span, prompt and response content included,
+# to Galileo with an empty Galileo-API-Key header. That contradicted the stated
+# contract that both Galileo paths are a no-op without GALILEO_API_KEY (the
+# app-side SDK path self-gates correctly), and the resulting auth failures were
+# visible only in collector logs.
+#
+# run-collector.sh appends this file with a second --config flag ONLY when
+# GALILEO_API_KEY is non-empty; the collector deep-merges the two.
+#
+# Header KEYS are fixed (Galileo-API-Key/project/logstream); values come from
+# env. Galileo auto-maps OpenTelemetry GenAI semconv.
+exporters:
+  otlphttp/galileo:
+    traces_endpoint: "https://api.multitenant.galileocloud.io/otel/traces"
+    headers:
+      Galileo-API-Key: "${env:GALILEO_API_KEY}"
+      project: "${env:GALILEO_PROJECT}"
+      logstream: "${env:GALILEO_LOG_STREAM}"
+
+service:
+  pipelines:
+    # Galileo: GenAI spans only (HTTP spans filtered out by the base config's
+    # filter/genai_only processor).
+    traces/galileo:
+      receivers: [otlp]
+      processors: [filter/genai_only, batch]
+      exporters: [otlphttp/galileo]

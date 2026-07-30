@@ -36,15 +36,11 @@ exporters:
     traces_endpoint: "https://ingest.${env:SPLUNK_REALM}.signalfx.com/v2/trace/otlp"
     headers:
       X-SF-Token: "${env:SPLUNK_ACCESS_TOKEN}"
-  # Galileo (LLM observability). Same gen_ai.* spans fan out here over OTLP/HTTP.
-  # Header KEYS are fixed (Galileo-API-Key/project/logstream); values from env,
-  # injected by run-collector.sh. Galileo auto-maps OpenTelemetry GenAI semconv.
-  otlphttp/galileo:
-    traces_endpoint: "https://api.multitenant.galileocloud.io/otel/traces"
-    headers:
-      Galileo-API-Key: "${env:GALILEO_API_KEY}"
-      project: "${env:GALILEO_PROJECT}"
-      logstream: "${env:GALILEO_LOG_STREAM}"
+  # The Galileo (LLM observability) fan-out lives in otel-collector-galileo.yaml
+  # and is layered on by run-collector.sh with a second --config flag, ONLY when
+  # GALILEO_API_KEY is set. Keeping it out of this file is what makes it a real
+  # no-op on a keyless deployment instead of POSTing span content with an empty
+  # API-key header.
 
 service:
   pipelines:
@@ -53,11 +49,8 @@ service:
       receivers: [otlp]
       processors: [batch]
       exporters: [otlphttp/traces]
-    # Galileo: GenAI spans only (HTTP spans filtered out above).
-    traces/galileo:
-      receivers: [otlp]
-      processors: [filter/genai_only, batch]
-      exporters: [otlphttp/galileo]
+    # traces/galileo is defined in otel-collector-galileo.yaml (layered on only
+    # when GALILEO_API_KEY is set — see the exporters note above).
     metrics:
       receivers: [otlp]
       processors: [batch]

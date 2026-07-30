@@ -530,6 +530,19 @@ def get_ai_client(settings) -> AIClient:
             model=settings.ollama_model,
             base_url=ollama_base
         )
+    elif provider == "nvidia":
+        # Same OpenAI-compatible shape as the ollama branch: NVIDIA NIM serves an
+        # OpenAI-compatible API. Without this branch, selecting nvidia (a
+        # first-class provider in config, model_catalog, the agentic path, and
+        # the Settings UI's AI_PROVIDER_CHOICES) made this factory raise — which
+        # killed the documented agentic -> legacy fallback for that provider and
+        # meant the legacy engine could not run at all.
+        logger.info(f"Creating NVIDIA NIM (OpenAI-compatible) client for base URL: {settings.nvidia_base_url}")
+        return OpenAIClient(
+            api_key=settings.nvidia_api_key,
+            model=settings.nvidia_model,
+            base_url=settings.nvidia_base_url
+        )
     elif provider == "anthropic":
         logger.info("Creating Anthropic client")
         return AnthropicClient(
@@ -538,6 +551,6 @@ def get_ai_client(settings) -> AIClient:
         )
     else:
         raise AIClientError(
-            f"Unknown AI provider: {provider}. "
-            f"Valid options are 'anthropic', 'bedrock', 'openai', or 'ollama'"
+            f"Unknown AI provider: {provider}. Valid options are "
+            f"'anthropic', 'bedrock', 'openai', 'ollama', or 'nvidia'"
         )
