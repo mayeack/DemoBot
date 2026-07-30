@@ -1,0 +1,154 @@
+{
+  "description": "Blocks DemoBot LLM responses whose Output PII (SLM) scorer reports a sensitive identifier: ssn, date_of_birth, email, phone_number, address, credit_card_info, account_info, password. The scorer returns a LIST of categories, so each leaf is a `contains` over one category and they are OR'd. The `name` category is deliberately NOT included: a normal DemoBot answer that names a care provider (\"contact Dr. Robert Anderson\") scores ['name'], so blocking on it would withhold legitimate responses. Post-LLM, deny.",
+  "enabled": true,
+  "execution": "server",
+  "scope": {
+    "step_types": [
+      "llm"
+    ],
+    "stages": [
+      "post"
+    ]
+  },
+  "action": {
+    "decision": "deny"
+  },
+  "condition": {
+    "or": [
+      {
+        "selector": {
+          "path": "*"
+        },
+        "evaluator": {
+          "name": "galileo.luna",
+          "config": {
+            "scorer_label": "Output PII (SLM)",
+            "scorer_id": "88eada48-109f-4f4e-8dc6-bf65799a331e",
+            "scorer_version_id": "17e6ae33-2c88-4f3b-b382-114176871968",
+            "timeout_ms": 15000,
+            "operator": "contains",
+            "threshold": "ssn"
+          }
+        }
+      },
+      {
+        "selector": {
+          "path": "*"
+        },
+        "evaluator": {
+          "name": "galileo.luna",
+          "config": {
+            "scorer_label": "Output PII (SLM)",
+            "scorer_id": "88eada48-109f-4f4e-8dc6-bf65799a331e",
+            "scorer_version_id": "17e6ae33-2c88-4f3b-b382-114176871968",
+            "timeout_ms": 15000,
+            "operator": "contains",
+            "threshold": "date_of_birth"
+          }
+        }
+      },
+      {
+        "selector": {
+          "path": "*"
+        },
+        "evaluator": {
+          "name": "galileo.luna",
+          "config": {
+            "scorer_label": "Output PII (SLM)",
+            "scorer_id": "88eada48-109f-4f4e-8dc6-bf65799a331e",
+            "scorer_version_id": "17e6ae33-2c88-4f3b-b382-114176871968",
+            "timeout_ms": 15000,
+            "operator": "contains",
+            "threshold": "email"
+          }
+        }
+      },
+      {
+        "selector": {
+          "path": "*"
+        },
+        "evaluator": {
+          "name": "galileo.luna",
+          "config": {
+            "scorer_label": "Output PII (SLM)",
+            "scorer_id": "88eada48-109f-4f4e-8dc6-bf65799a331e",
+            "scorer_version_id": "17e6ae33-2c88-4f3b-b382-114176871968",
+            "timeout_ms": 15000,
+            "operator": "contains",
+            "threshold": "phone_number"
+          }
+        }
+      },
+      {
+        "selector": {
+          "path": "*"
+        },
+        "evaluator": {
+          "name": "galileo.luna",
+          "config": {
+            "scorer_label": "Output PII (SLM)",
+            "scorer_id": "88eada48-109f-4f4e-8dc6-bf65799a331e",
+            "scorer_version_id": "17e6ae33-2c88-4f3b-b382-114176871968",
+            "timeout_ms": 15000,
+            "operator": "contains",
+            "threshold": "address"
+          }
+        }
+      },
+      {
+        "selector": {
+          "path": "*"
+        },
+        "evaluator": {
+          "name": "galileo.luna",
+          "config": {
+            "scorer_label": "Output PII (SLM)",
+            "scorer_id": "88eada48-109f-4f4e-8dc6-bf65799a331e",
+            "scorer_version_id": "17e6ae33-2c88-4f3b-b382-114176871968",
+            "timeout_ms": 15000,
+            "operator": "contains",
+            "threshold": "credit_card_info"
+          }
+        }
+      },
+      {
+        "selector": {
+          "path": "*"
+        },
+        "evaluator": {
+          "name": "galileo.luna",
+          "config": {
+            "scorer_label": "Output PII (SLM)",
+            "scorer_id": "88eada48-109f-4f4e-8dc6-bf65799a331e",
+            "scorer_version_id": "17e6ae33-2c88-4f3b-b382-114176871968",
+            "timeout_ms": 15000,
+            "operator": "contains",
+            "threshold": "account_info"
+          }
+        }
+      },
+      {
+        "selector": {
+          "path": "*"
+        },
+        "evaluator": {
+          "name": "galileo.luna",
+          "config": {
+            "scorer_label": "Output PII (SLM)",
+            "scorer_id": "88eada48-109f-4f4e-8dc6-bf65799a331e",
+            "scorer_version_id": "17e6ae33-2c88-4f3b-b382-114176871968",
+            "timeout_ms": 15000,
+            "operator": "contains",
+            "threshold": "password"
+          }
+        }
+      }
+    ]
+  },
+  "tags": [
+    "pii",
+    "phi",
+    "compliance",
+    "demobot"
+  ]
+}

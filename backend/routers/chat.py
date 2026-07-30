@@ -158,6 +158,7 @@ def _turn_kwargs(chat_request: ChatRequest, session: Dict[str, Any], client_host
         ai_defense_review=chat_request.ai_defense_review,
         internal_policy_review=chat_request.internal_policy_review,
         multi_agent_mode=chat_request.multi_agent_mode,
+        agent_control_review=chat_request.agent_control_review,
         enduser_id=session.get("enduser_id"),
     )
 

@@ -13,6 +13,7 @@ from backend.services.escalation_rules import EscalationRules
 from backend.services.clarifying_questions import ClarifyingQuestionsService
 from backend.services.ai_client import get_ai_client, AIClientError
 from backend.services.ai_defense import ai_defense_client, InspectionResult
+from backend.services.agent_control import agent_control_client, ControlVerdict
 
 logger = logging.getLogger(__name__)
 
@@ -1925,6 +1926,120 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             },
         }
 
+    def _handle_agent_control_block(
+        self,
+        session_id: str,
+        request_id: str,
+        trace_id: str,
+        conversation_messages: List[Dict[str, Any]],
+        verdict: "ControlVerdict",
+        start_time: float,
+        client_address: Optional[str],
+        enduser_id: Optional[str],
+        llm_model: Optional[str] = None,
+        usage_data: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Withhold a model response that a Galileo Agent Control denied (or
+        that errored under a fail-closed policy), logging the verdict to the
+        governance pipeline.
+
+        Shaped exactly like ``_handle_ai_defense_response_block`` — same result
+        keys, same governance fields — so the two output guardrails are
+        interchangeable downstream. Only ``guardrail_ids`` and the metadata
+        block differ, which is what lets a dashboard attribute the block to
+        Galileo rather than Cisco AI Defense. The model already answered, so the
+        caller should pass the real ``llm_model``/``usage_data``."""
+        duration = time.time() - start_time
+
+        if verdict.errored:
+            reasons = [
+                f"Galileo Agent Control unavailable (fail-closed): {verdict.error_message}"
+            ]
+            blocked_message = (
+                "The assistant's response could not be reviewed by our agent "
+                "control service and was withheld. Please try again in a "
+                "moment. If this is a medical emergency, call 911 or go to your "
+                "nearest emergency room."
+            )
+        else:
+            control_part = (
+                f" ({', '.join(verdict.matched_controls)})"
+                if verdict.matched_controls
+                else ""
+            )
+            reasons = [f"Galileo Agent Control denied the response{control_part}"]
+            reasons.extend(verdict.messages)
+            if verdict.reason:
+                reasons.append(verdict.reason)
+            # Deliberately does not name a reason. Any deny control can land here
+            # (factuality, output PII, a future policy), so wording that asserts
+            # one specific cause misdescribes the block whenever a different
+            # control fires — which is what an earlier revision did. The control
+            # that actually matched is in safety_categories / metadata.
+            blocked_message = (
+                "The assistant's response was withheld by our agent control "
+                "policy. Please rephrase your question or try again. If this is "
+                "a medical emergency, call 911 or go to your nearest emergency room."
+            )
+
+        governance_logger.log_response(
+            session_id=session_id,
+            request_id=request_id,
+            response_id="agent-control-response-blocked",
+            operation_name="chat",
+            input_messages=conversation_messages,
+            output_messages=[{"role": "assistant", "content": blocked_message}],
+            response_text=(
+                f"⚠️ POLICY BLOCKED (Galileo Agent Control - response)\n{blocked_message}"
+            ),
+            usage_data=usage_data
+            or {
+                "usage_input_tokens": 0,
+                "usage_output_tokens": 0,
+                "usage_total_tokens": 0,
+            },
+            performance_data={"client_operation_duration": duration},
+            response_model=llm_model or active_response_model(),
+            response_finish_reasons=["policy_blocked"],
+            safety_violated=True,
+            safety_categories=reasons,
+            guardrail_triggered=True,
+            guardrail_ids=["galileo_agent_control"],
+            policy_blocked=True,
+            pii_detected=False,
+            pii_types=[],
+            toxic_detected=False,
+            toxic_types=[],
+            evaluation_score_value=1.0,
+            evaluation_score_label="high",
+            trace_id=trace_id,
+            client_address=client_address,
+            enduser_id=enduser_id,
+        )
+
+        return {
+            "message": blocked_message,
+            "type": MessageType.SAFETY_WARNING,
+            "severity": SeverityLevel.MEDIUM,
+            "escalated": False,
+            "policy_blocked": True,
+            "metadata": {
+                "confidence": 1.0,
+                "escalation_reasons": reasons,
+                "agent_control": {
+                    "is_safe": verdict.is_safe,
+                    "confidence": verdict.confidence,
+                    "controls": verdict.matched_controls,
+                    "decisions": verdict.decisions,
+                    "messages": verdict.messages,
+                    "evaluator_errors": verdict.evaluator_errors,
+                    "errored": verdict.errored,
+                    "transport": verdict.transport,
+                    "stage": "response",
+                },
+            },
+        }
+
     def process_message(
         self,
         session_id: str,
@@ -1939,6 +2054,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         ai_defense_review: Optional[bool] = None,
         internal_policy_review: Optional[bool] = None,
         multi_agent_mode: Optional[bool] = None,  # accepted for kwargs parity; the legacy engine is inherently single-agent
+        agent_control_review: Optional[bool] = None,
         enduser_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -2104,6 +2220,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
                 force_toxic_injection, force_hallucination_injection,
                 force_boundary_injection=force_boundary_injection,
                 ai_defense_review=ai_defense_review,
+                agent_control_review=agent_control_review,
                 enduser_id=enduser_id
             )
 
@@ -2143,6 +2260,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         force_hallucination_injection: Optional[bool] = None,
         force_boundary_injection: Optional[bool] = None,
         ai_defense_review: Optional[bool] = None,
+        agent_control_review: Optional[bool] = None,
         enduser_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Generate recommendation using Claude with the active theme's system prompt"""
@@ -2303,6 +2421,38 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             display_text_parts.append("⚠️ ESCALATED FOR REVIEW")
         display_text_parts.append(final_message)
         complete_display_text = "\n".join(display_text_parts)
+
+        # Optional Galileo Agent Control review of the MODEL RESPONSE. Runs
+        # before AI Defense so the ordering matches the agentic graph
+        # (compliance -> agent_control -> response_defense), keeping Cisco AI
+        # Defense as the last word on output on both paths.
+        if agent_control_review and agent_control_client.is_configured:
+            control_verdict = agent_control_client.evaluate_response(
+                user_message=user_message,
+                assistant_message=final_message,
+                enduser_id=enduser_id,
+                session_id=session_id,
+                theme=theme,
+                model=response.model,
+            )
+            if control_verdict.should_block:
+                return self._handle_agent_control_block(
+                    session_id=session_id,
+                    request_id=request_id,
+                    trace_id=trace_id,
+                    conversation_messages=messages,
+                    verdict=control_verdict,
+                    start_time=start_time,
+                    client_address=client_address,
+                    enduser_id=enduser_id,
+                    llm_model=response.model,
+                    usage_data={
+                        "usage_input_tokens": response.input_tokens,
+                        "usage_output_tokens": response.output_tokens,
+                        "usage_total_tokens": response.input_tokens
+                        + response.output_tokens,
+                    },
+                )
 
         # Optional Cisco AI Defense review of the MODEL RESPONSE (output
         # inspection). Mirrors the inbound prompt review but inspects the

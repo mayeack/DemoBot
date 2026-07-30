@@ -5,6 +5,7 @@ let toxicEnabled = false;
 let hallucinationEnabled = false;
 let boundaryEnabled = false;
 let aiDefenseEnabled = false;
+let agentControlEnabled = false;
 let internalPolicyEnabled = true;
 let multiAgentEnabled = false;
 let autoPromptEnabled = false;
@@ -382,6 +383,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const savedHallucinationEnabled = localStorage.getItem('medadvice_hallucination_enabled');
     const savedBoundaryEnabled = localStorage.getItem('medadvice_boundary_enabled');
     const savedAiDefenseEnabled = localStorage.getItem('medadvice_ai_defense_enabled');
+    const savedAgentControlEnabled = localStorage.getItem('medadvice_agent_control_enabled');
     const savedInternalPolicyEnabled = localStorage.getItem('medadvice_internal_policy_enabled');
     const savedMultiAgentEnabled = localStorage.getItem('medadvice_multi_agent_enabled');
 
@@ -395,6 +397,8 @@ document.addEventListener('DOMContentLoaded', function() {
         hallucinationEnabled = savedHallucinationEnabled === 'true';
         boundaryEnabled = savedBoundaryEnabled === 'true';
         aiDefenseEnabled = savedAiDefenseEnabled === 'true';
+        // Galileo Agent Control defaults OFF unless explicitly turned on.
+        agentControlEnabled = savedAgentControlEnabled === 'true';
         // Internal policy engine defaults ON unless explicitly turned off.
         internalPolicyEnabled = savedInternalPolicyEnabled !== 'false';
         // Multi-agent mode defaults OFF unless explicitly turned on.
@@ -432,6 +436,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (aiDefenseToggle) {
             aiDefenseToggle.checked = aiDefenseEnabled;
             updateAIDefenseStatus();
+        }
+
+        const agentControlToggle = document.getElementById('agentControlToggle');
+        if (agentControlToggle) {
+            agentControlToggle.checked = agentControlEnabled;
+            updateAgentControlStatus();
         }
 
         const internalPolicyToggle = document.getElementById('internalPolicyToggle');
@@ -688,6 +698,7 @@ function buildChatPayload(message) {
         force_hallucination_injection: hallucinationEnabled,
         force_boundary_injection: boundaryEnabled,
         ai_defense_review: aiDefenseEnabled,
+        agent_control_review: agentControlEnabled,
         internal_policy_review: internalPolicyEnabled,
         multi_agent_mode: multiAgentEnabled
     };
@@ -1047,6 +1058,26 @@ function updateAIDefenseStatus() {
     if (aiDefenseEnabled) {
         statusElement.textContent = 'REVIEWING';
         statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-sky-100 text-sky-700';
+    } else {
+        statusElement.textContent = 'OFF';
+        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
+    }
+}
+
+function toggleAgentControl() {
+    const toggle = document.getElementById('agentControlToggle');
+    agentControlEnabled = toggle.checked;
+    localStorage.setItem('medadvice_agent_control_enabled', agentControlEnabled);
+    updateAgentControlStatus();
+    console.log('Galileo agent observability controls', agentControlEnabled ? 'enabled' : 'disabled');
+}
+
+function updateAgentControlStatus() {
+    const statusElement = document.getElementById('agentControlStatus');
+    if (!statusElement) return;
+    if (agentControlEnabled) {
+        statusElement.textContent = 'EVALUATING';
+        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-fuchsia-100 text-fuchsia-700';
     } else {
         statusElement.textContent = 'OFF';
         statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';

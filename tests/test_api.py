@@ -58,6 +58,14 @@ def _fake_llm(*_a, **_k):
 llm.invoke_agent = _fake_llm
 llm.invoke_chat = _fake_llm
 
+# --- stub the Galileo Agent Control evaluation so the agent_control_review
+# check below exercises the node without an outbound call to Galileo ---
+import backend.services.agent_control as agent_control  # noqa: E402
+
+agent_control.agent_control_client.evaluate_response = (
+    lambda *_a, **_k: agent_control.ControlVerdict(is_safe=True, confidence=0.0)
+)
+
 # --- stub the auto-prompter so /auto-prompt/start launches no real load ---
 import backend.services.auto_prompter as ap  # noqa: E402
 
@@ -182,7 +190,7 @@ def main() -> int:
               f"nodes={stage_nodes}")
         check("stream default -> synthesizer + all guardrails run",
               {"synthesizer", "safety", "injection", "compliance",
-               "response_defense", "governance"} <= set(stage_nodes),
+               "agent_control", "response_defense", "governance"} <= set(stage_nodes),
               f"nodes={stage_nodes}")
         # multi_agent_mode=true -> opt-in to the full coordinator/specialists core.
         rma = c.post("/api/chat/message/stream", headers=AUTH,
@@ -213,8 +221,16 @@ def main() -> int:
               f"nodes={sa_nodes}")
         check("multi_agent_mode=false -> synthesizer + all guardrails still run",
               {"synthesizer", "safety", "injection", "compliance",
-               "response_defense", "governance"} <= set(sa_nodes),
+               "agent_control", "response_defense", "governance"} <= set(sa_nodes),
               f"nodes={sa_nodes}")
+        # agent_control_review (the "Agent Observability Controls" toggle) is
+        # accepted and, with a clean verdict (stubbed above), leaves the turn
+        # untouched rather than erroring or withholding the answer.
+        rac = c.post("/api/chat/message", headers=AUTH,
+                     json={"session_id": sid, "message": "I have a sore throat.",
+                           "disclaimer_accepted": True, "agent_control_review": True})
+        check("POST /api/chat/message agent_control_review=true -> 200 + message",
+              rac.status_code == 200 and bool(rac.json().get("message")), f"{rac.status_code}")
         check("GET /api/chat/auto-prompt/status -> 200", c.get("/api/chat/auto-prompt/status", headers=AUTH).status_code == 200)
         check("POST /api/chat/auto-prompt/start -> 200 (stubbed)", c.post("/api/chat/auto-prompt/start", headers=AUTH).status_code == 200)
         check("POST /api/chat/auto-prompt/stop -> 200", c.post("/api/chat/auto-prompt/stop", headers=AUTH).status_code == 200)
