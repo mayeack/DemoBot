@@ -268,6 +268,38 @@ def main() -> int:
                            "disclaimer_accepted": True, "agent_control_review": True})
         check("POST /api/chat/message agent_control_review=true -> 200 + message",
               rac.status_code == 200 and bool(rac.json().get("message")), f"{rac.status_code}")
+        # Resume-after-restart: a conversation reloaded from the DB must persist
+        # its next turn. _prepare_session used to hold the ORM-loaded messages
+        # list BY REFERENCE and mutate it in place; with a plain JSON column (no
+        # MutableList) SQLAlchemy compared the attribute against itself, saw no
+        # change, and omitted `messages` from the UPDATE — so the first turn
+        # after a restart was written to nothing. Dropping the in-memory entry is
+        # exactly what a process restart does.
+        import backend.routers.chat as chat_router  # noqa: E402
+        from backend.database.db import get_db_context  # noqa: E402
+        from backend.models.db_models import Conversation  # noqa: E402
+
+        rsum = c.post("/api/chat/message", headers=AUTH,
+                      json={"session_id": sid, "message": "before the restart",
+                            "disclaimer_accepted": True})
+        check("resume: pre-restart turn -> 200", rsum.status_code == 200, f"{rsum.status_code}")
+        with get_db_context() as _s:
+            _before = len((_s.query(Conversation)
+                           .filter(Conversation.session_id == sid).first().messages) or [])
+        chat_router.sessions.pop(sid, None)      # simulate the restart
+        rres = c.post("/api/chat/message", headers=AUTH,
+                      json={"session_id": sid, "message": "after the restart",
+                            "disclaimer_accepted": True})
+        check("resume: post-restart turn -> 200", rres.status_code == 200, f"{rres.status_code}")
+        with get_db_context() as _s:
+            _msgs = (_s.query(Conversation)
+                     .filter(Conversation.session_id == sid).first().messages) or []
+        check("resume: post-restart turn was persisted (grew by user+assistant)",
+              len(_msgs) >= _before + 2, f"{_before} -> {len(_msgs)}")
+        check("resume: the resumed user message is in the stored history",
+              any(m.get("content") == "after the restart" for m in _msgs),
+              str([m.get("content") for m in _msgs][-4:]))
+
         check("GET /api/chat/auto-prompt/status -> 200", c.get("/api/chat/auto-prompt/status", headers=AUTH).status_code == 200)
         check("POST /api/chat/auto-prompt/start -> 200 (stubbed)", c.post("/api/chat/auto-prompt/start", headers=AUTH).status_code == 200)
         check("POST /api/chat/auto-prompt/stop -> 200", c.post("/api/chat/auto-prompt/stop", headers=AUTH).status_code == 200)

@@ -83,10 +83,16 @@ def _prepare_session(chat_request: ChatRequest, client_host, db: Session) -> Dic
         ).first()
 
         if existing_conversation:
-            # Load existing session from database into memory
+            # Load existing session from database into memory.
+            # list(...) COPIES: Conversation.messages is a plain JSON column with
+            # no MutableList, so holding the ORM-loaded list by reference and
+            # mutating it in place left SQLAlchemy comparing the attribute
+            # against itself. History looked unchanged and `messages` was
+            # omitted from the UPDATE, silently dropping the first turn of any
+            # conversation resumed after a restart.
             sessions[session_id] = {
                 "created_at": existing_conversation.created_at,
-                "messages": existing_conversation.messages or [],
+                "messages": list(existing_conversation.messages or []),
                 "disclaimer_accepted": existing_conversation.disclaimer_accepted,
                 "escalated": existing_conversation.escalated,
                 "enduser_id": pick_enduser_id()
@@ -187,7 +193,9 @@ def _record_assistant_turn(
     ).first()
 
     if conversation:
-        conversation.messages = session["messages"]
+        # Assign a NEW list so change detection always sees a distinct object,
+        # even if some future path reintroduces a shared reference.
+        conversation.messages = list(session["messages"])
         conversation.escalated = session["escalated"]
         conversation.updated_at = datetime.utcnow()
         if response_data.get("severity"):
