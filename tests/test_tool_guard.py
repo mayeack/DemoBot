@@ -134,6 +134,82 @@ check("fail-closed: enforced -> block true", resp_closed.block is True)
 resp_open = asyncio.run(_run_inspect(fail_open=True))
 check("fail-open: allows on AI Defense error", resp_open.decision == "allow", resp_open.decision)
 
+# 10. Padded arguments cannot push a payload past the truncation bound -------
+# json.dumps sorts by key and the agent chooses the key NAMES, so a fat
+# early-sorting key used to shove the real payload out of the text the checks
+# read — and out of the text submitted to AI Defense. Checks now read the
+# untruncated render, so the payload is still visible.
+_pad = "A" * (settings.tool_guard_max_arg_chars + 1000)
+v = tool_policy.evaluate("read", {"aaa_pad": _pad, "zz_path": "/etc/passwd"})
+check("padded: containment still catches the escaped path", v.should_block is True, str(v.reasons))
+
+v = tool_policy.evaluate(
+    "web_fetch", {"aaa_pad": _pad, "zz_url": "https://evil.example.com/collect"}
+)
+check("padded: egress allowlist still catches the host", v.should_block is True, str(v.reasons))
+check(
+    "padded: rendered stays bounded",
+    len(v.rendered) <= settings.tool_guard_max_arg_chars,
+    str(len(v.rendered)),
+)
+
+# An oversized call is escalated to AI Defense even for a non-sensitive tool:
+# AI Defense only ever sees the bounded text, so it must not be possible to
+# skip inspection by being too big to inspect.
+v = tool_policy.evaluate(
+    "read", {"aaa_pad": _pad, "zz_path": "/home/node/.openclaw/workspace/ok.md"}
+)
+check("padded: oversized call escalated to AI Defense", v.sensitive is True)
+
+# 11. A crash inside evaluate escalates instead of silently allowing ---------
+_orig_extract = tool_policy._extract_paths
+
+
+def _boom(_text):
+    raise RuntimeError("synthetic policy failure")
+
+
+tool_policy._extract_paths = _boom
+try:
+    v = tool_policy.evaluate("read", {"path": "/home/node/.openclaw/workspace/x.md"})
+finally:
+    tool_policy._extract_paths = _orig_extract
+check("crash: still returns a verdict", isinstance(v, tool_policy.ToolPolicyVerdict))
+check("crash: escalated to AI Defense rather than allowed", v.sensitive is True)
+
+# 12. A raising AI Defense inspection yields an ERRORED result, not None -----
+# None means "AI Defense not in play" and the caller allows, which ignored
+# ai_defense_fail_open. An errored result routes through should_block.
+import backend.services.ai_defense as aid  # noqa: E402
+
+
+class _RaisingClient:
+    is_configured = True
+
+    def inspect_prompt(self, *a, **k):
+        raise RuntimeError("synthetic inspection failure")
+
+
+_saved_client = aid.ai_defense_client
+_saved_aidef = settings.tool_guard_ai_defense
+aid.ai_defense_client = _RaisingClient()
+settings.tool_guard_ai_defense = True
+try:
+    insp = asyncio.run(tg._inspect_ai_defense("Agent tool call: bash(rm -rf /)", "S-raise"))
+finally:
+    aid.ai_defense_client = _saved_client
+    settings.tool_guard_ai_defense = _saved_aidef
+
+check("raise: inspection returns a result, not None", insp is not None)
+check("raise: result is marked errored", getattr(insp, "errored", False) is True)
+
+_saved_fo = settings.ai_defense_fail_open
+settings.ai_defense_fail_open = False
+check("raise: fail-closed blocks", insp.should_block is True)
+settings.ai_defense_fail_open = True
+check("raise: fail-open allows", insp.should_block is False)
+settings.ai_defense_fail_open = _saved_fo
+
 # Restore settings we mutated.
 settings.tool_guard_workspace_roots = _saved["roots"]
 settings.tool_guard_sensitive_tools = _saved["sensitive"]

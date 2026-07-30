@@ -74,9 +74,9 @@ async def _inspect_ai_defense(rendered: str, enduser_id: Optional[str]):
     """
     if not settings.tool_guard_ai_defense:
         return None
-    try:
-        from backend.services.ai_defense import ai_defense_client
+    from backend.services.ai_defense import InspectionResult, ai_defense_client
 
+    try:
         if not ai_defense_client.is_configured:
             return None
         return await asyncio.to_thread(
@@ -85,9 +85,14 @@ async def _inspect_ai_defense(rendered: str, enduser_id: Optional[str]):
             enduser_id=enduser_id,
             src_app="demobot-openclaw",
         )
-    except Exception:  # noqa: BLE001 - never let inspection break the guard
+    except Exception as exc:  # noqa: BLE001 - never let inspection break the guard
         logger.exception("tool-guard AI Defense inspection failed")
-        return None
+        # Return an ERRORED result, not None. None means "AI Defense is not in
+        # play" and the caller proceeds to allow — so a raising inspection used
+        # to allow the call even with ai_defense_fail_open=False. An errored
+        # result routes through InspectionResult.should_block, which honors the
+        # configured fail policy (fail-closed by default).
+        return InspectionResult(errored=True, error_message=str(exc))
 
 
 @router.post("/inspect", response_model=ToolInspectResponse)
