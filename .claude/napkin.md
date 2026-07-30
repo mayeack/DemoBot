@@ -261,15 +261,16 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
   fails `statfs ...: no such file or directory` — which is why the plugin is
   baked into the image rather than mounted. The remaining mounts are the state
   dir (`~/.demobot-openclaw`) and the decoy workspace (`~/DemoBotDecoy`).
-- **KNOWN BROKEN (pre-existing, 2026-07-28): the gateway does not start.** It
-  dies with `EACCES ... mkdir '/home/node/.openclaw/state'` — the image runs as
-  `node` (uid 1000) but the mounts are host-owned (uid 501), and `--userns=keep-id`
-  does NOT bridge that (nor does `keep-id:uid=1000,gid=1000`; verified on macOS
-  podman). This was masked because `run-openclaw.sh` printed "gateway up"
-  unconditionally after its health-wait; it now reports the real state and exits
-  non-zero. Fixing it is a posture call (container root — which rootless podman
-  already maps to the unprivileged host user — vs. loosening `$STATE_DIR`), so
-  it is deliberately not folded into the sparse-checkout change.
+- **The gateway runs as `--user 0:0`, NOT `--userns=keep-id`** (fixed 2026-07-30;
+  it crash-looped before that with `EACCES ... mkdir '/home/node/.openclaw/state'`).
+  keep-id maps the host user to the same uid, but the image's default `node` user
+  (uid 1000) maps to a subuid that owns nothing, so the host-owned mounts stayed
+  unwritable (`keep-id:uid=1000,gid=1000` doesn't bridge it either on macOS
+  podman). Rootless podman already maps container uid 0 to the unprivileged host
+  user, so container root gains **no host privilege** — it just makes the uid
+  match the mount owner, which lets `$STATE_DIR` stay mode **600** (it holds the
+  gateway token + `ACCESS_KEY`). Don't "fix" a future EACCES by loosening those
+  perms; check the uid mapping first.
 - **The guard is fail-closed:** with `TOOL_GUARD_ENABLED=True`, a dead app
   (:8001) denies EVERY agent tool call — looks like a broken agent, not a broken
   app. `TOOL_GUARD_ENABLED` gates *enforcement* only (default False = the

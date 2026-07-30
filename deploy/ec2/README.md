@@ -1,0 +1,349 @@
+# EC2 replica deployment
+
+The Linux counterpart to `deploy/launchd/` (which runs DemoBot on the Mac).
+Both produce the same thing: a host serving `https://medadvice.yeackbot.com` as
+a replica of the **same named Cloudflare tunnel**, with its own telemetry
+identity.
+
+```bash
+# single box, existing shared tunnel
+./deploy/ec2/push-replica.sh --host 35.175.173.5 --replica 2
+
+# GPU fleet in your own AWS account — COUNT IS ALWAYS EXPLICIT, never defaulted
+./deploy/ec2/gen-access-keys.sh N
+FLEET_COUNT=N ./deploy/ec2/fleet.sh preflight
+FLEET_COUNT=N ./deploy/ec2/fleet.sh provision
+./deploy/ec2/fleet.sh deploy
+SCHED_TZ=America/Los_Angeles ./deploy/ec2/schedule.sh install
+```
+
+The `spin-up-ec2` skill (`.claude/skills/spin-up-ec2/`) walks this end to end
+and **always asks how many instances first**.
+
+| File | Runs on | Purpose |
+|---|---|---|
+| `push-replica.sh` | Mac | assembles the secret payload, ships it, invokes the bootstrap |
+| `ec2-bootstrap.sh` | EC2 target | installs and configures everything; consumes the payload |
+| `fleet.sh` | Mac | provisions and deploys N GPU instances, one subdomain each |
+| `gen-access-keys.sh` | Mac | per-replica four-word `ACCESS_KEY` values (gitignored file) |
+| `schedule.sh` | Mac | EventBridge start/stop schedules so the fleet isn't billed 24/7 |
+
+---
+
+## Why two scripts
+
+`ec2-bootstrap.sh` can build 90% of a replica unaided — packages, Python 3.11,
+Ollama, the repo, the venv, the collector binary, the systemd units. All of that
+is public and fetchable.
+
+The remaining 10% is **secrets, and secrets only exist on the Mac**:
+
+- `.env` — API keys for Anthropic, Cisco AI Defense, Splunk O11y, Galileo
+- the Cloudflare tunnel credentials JSON
+- `Modelfile.poisoned` — the poisoned-model recipe, deliberately not in git
+
+There is no way for a fresh EC2 box to obtain these on its own. `push-replica.sh`
+is the bridge. The bootstrap refuses to run without a complete payload rather
+than starting a half-configured replica that looks healthy and silently exports
+nothing.
+
+> A secrets manager (AWS Secrets Manager, SSM Parameter Store) would remove the
+> Mac from the loop and let a box bootstrap itself from an instance profile.
+> That is the right answer for anything beyond a demo. For a handful of workshop
+> replicas, `scp` from the machine that already holds the secrets is simpler and
+> has no standing cloud-side secret to rotate.
+
+---
+
+## What the bootstrap handles that you used to do by hand
+
+### Models are derived from `.env`, not hard-coded
+
+The old script pulled `dolphin3:8b` and stopped, so `llama3.2:3b` — the model
+every internal coordinator and specialist agent runs on — had to be pulled by
+hand on each box. Forgetting it did not fail at boot; it failed on the first
+chat turn, mid-demo.
+
+The bootstrap now reads **every** `OLLAMA_MODEL*` key out of `.env` and pulls
+each one:
+
+```
+OLLAMA_MODEL=dolphin3:8b                 ->  pulled
+OLLAMA_MODEL_INTERNAL=llama3.2:3b        ->  pulled
+OLLAMA_MODEL_JUDGE=...                   ->  pulled, no script change needed
+```
+
+Adding an internal agent is therefore a `.env` edit, and every replica picks it
+up on its next push.
+
+### The poisoned model is built, always
+
+`dolphin3:8b-poisoned` exists in no registry — `ollama pull` cannot fetch it. It
+is a `FROM dolphin3:8b` overlay whose TEMPLATE injects a prescribing directive
+*after* the application's own system prompt, and it is the exhibit the whole
+guardrail-failure demo rests on.
+
+The bootstrap builds it every run:
+
+1. reads the `FROM` line to find the base model, and pulls that base first
+   (`ollama create` needs it resident)
+2. `ollama create <tag> -f Modelfile.poisoned`
+3. the tag comes from `.env` if any `OLLAMA_MODEL*` value contains `poisoned`,
+   else defaults to `dolphin3:8b-poisoned`
+
+`push-replica.sh` sources the Modelfile from `deploy/ec2/Modelfile.poisoned` or
+`~/Modelfile.poisoned`, and if neither exists exports it from the Mac's live
+Ollama with `ollama show --modelfile`. One canonical recipe, byte-identical on
+every replica.
+
+> This matters more than it looks. As of 2026-07-27 the Mac's poisoned model was
+> `b5eec43102c3` and the EC2's was `d22293974766` — two *different* models
+> behind one demo, because each was built by hand at a different time. Building
+> from a single Modelfile removes that drift.
+
+If `ollama show --modelfile` emits `FROM /path/to/blob` instead of a tag (it
+sometimes does), `push-replica.sh` rewrites it to the base tag — a blob path is
+meaningless on another host.
+
+### Tunnel config is rewritten, not copied
+
+The Mac's `~/.cloudflared/config.yml` points at a Mac path:
+
+```yaml
+credentials-file: /Users/myeack/.cloudflared/52a942e8-….json
+```
+
+Copied verbatim to Linux, `cloudflared` starts, fails to find the credentials,
+and the unit restart-loops. The bootstrap copies the file **verbatim except that
+one line**, which it rewrites to the target's `$HOME`, then asserts the rewrite
+took. Ingress rules, tunnel ID, and protocol carry over untouched, so the Mac
+stays the single source of truth for the site config.
+
+**`cert.pem` is never copied.** It is the Cloudflare *account* credential and
+can create, route, and delete tunnels across the zone. A replica only runs
+`cloudflared tunnel run`, which needs the per-tunnel credentials JSON and
+nothing else. `push-replica.sh` refuses to stage it; the bootstrap warns if it
+finds one. The visible symptom of doing this correctly is that
+`cloudflared tunnel list` fails on a replica — expected, not a fault.
+
+The payload is deleted from the target once the bootstrap finishes.
+
+---
+
+## `deployment.environment` — the one value that must differ per replica
+
+```
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment=demobot-ec2-2
+```
+
+`OTEL_RESOURCE_ATTRIBUTES` is a comma-separated list of OpenTelemetry **resource
+attributes** — facts about the emitting process, attached to every span and
+metric it produces. `deployment.environment` is the standard attribute for
+"which deployment of this service is this," and it is the *only* thing
+distinguishing one DemoBot replica from another downstream. Everything else —
+`service.name=demobot-v3`, the ingest token, the realm, the tunnel — is
+identical across replicas by design.
+
+Current allocation:
+
+| Host | Value |
+|---|---|
+| Mac, `/Applications/DemoBot` | `demobot-local` |
+| EC2 `i-0883a0ddedf54e4e8` | `demobot-ec2-1` |
+| next replica | `demobot-ec2-2`, … |
+
+### Why a collision is worse than it sounds
+
+Cloudflare load-balances across every connected replica, so a single user's
+session can hop between hosts. If two replicas share a `deployment.environment`:
+
+- **Splunk O11y** merges them into one apparent service. Latency and token-usage
+  charts average two hosts together, so one sick replica hides behind a healthy
+  one — exactly the failure the observability demo exists to make visible.
+- **Galileo** files both hosts' traces into one log stream, so a poisoned-model
+  turn on box 2 is indistinguishable from a clean turn on box 1.
+- Per-replica alerting becomes impossible: you cannot write "box 2's error rate
+  spiked" if box 2 has no distinct identity.
+
+Splitting by `host.name` afterwards does not rescue this — the demo's saved
+views, detectors, and Galileo log stream all filter on
+`deployment.environment`.
+
+### How the bootstrap sets it
+
+The value arrives from the Mac saying `demobot-local` and must be rewritten. The
+bootstrap rewrites **only** the `deployment.environment` key inside the list,
+preserving any sibling attributes:
+
+```
+deployment.environment=demobot-local,service.version=3.0.0
+   ->  deployment.environment=demobot-ec2-2,service.version=3.0.0
+```
+
+It adds the key if absent, and leaves the other ~50 `.env` lines byte-identical.
+
+Three ways to choose the value:
+
+| Invocation | Result | Use when |
+|---|---|---|
+| `--replica 2` | `demobot-ec2-2` | normal — matches the naming convention |
+| `--env-name demobot-ec2-lab` | verbatim | one-off or non-numbered box |
+| neither | `demobot-ec2-<instance-id>` from IMDS | unattended builds; guaranteed unique, ugly but collision-proof |
+
+The numbered convention is human-readable but relies on you remembering which
+numbers are taken. The IMDS default trades readability for a guarantee. Pick
+per situation; the bootstrap prints the value it settled on and echoes it again
+in the final summary.
+
+### Verifying the split
+
+`tests/observability/verify_observability.sh` **hard-codes `demobot-local`** as
+the environment (line 76), so tier 3 queries the wrong replica and fails on any
+EC2 box even with a valid token. Run the checker directly instead — the
+bootstrap prints this line for you, filled in:
+
+```bash
+python3 tests/observability/check_o11y_metadata.py \
+    us1 "$(grep '^SPLUNK_API_TOKEN=' .env | cut -d= -f2-)" demobot-v3 demobot-ec2-2
+```
+
+Then confirm in Splunk O11y that the new value appears as its own environment
+alongside `demobot-local`.
+
+---
+
+---
+
+## GPU fleet mode
+
+The original box was a `c6i.2xlarge` — CPU-only, and measured on live demo
+traffic it was too slow for a workshop:
+
+| Metric | c6i.2xlarge (measured) | g5.xlarge (A10G) expected |
+|---|---|---|
+| Decode | p50 **13.6 tok/s** | ~55–70 tok/s |
+| Prefill | ~28 tok/s — **26 s for 729 tokens** | sub-second |
+| Per-request total | p50 9.7 s, **p95 65 s**, max 101 s | a few seconds |
+
+Prefill dominated, and prefill is exactly what a GPU collapses. Note also that
+`c6i.2xlarge` advertises 8 vCPU but is **4 physical cores** — llama.cpp logged
+`n_threads = 4`, because hyperthreads do not help inference.
+
+### Replicas cannot be sticky — this is why each box gets its own tunnel AND subdomain
+
+Cloudflare is explicit:
+
+> "The load balancer does not distinguish between replicas of the same tunnel.
+> If you run the same tunnel UUID on two separate hosts, the load balancer treats
+> both hosts as a single endpoint."
+> — [Public load balancers](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/routing-to-tunnel/public-load-balancers/)
+
+Replicas also do no traffic steering at all: a request goes to the geographically
+closest replica with no guarantee. Across N replicas of one tunnel a user lands
+on a different box (N−1)/N of the time, and per-box SQLite means multi-turn
+conversation history breaks.
+
+`--own-tunnel` gives each host its own named tunnel (`demobot-N`) **and its own
+subdomain**, derived from the shared hostname:
+
+```
+medadvice1.yeackbot.com ──CNAME──> <uuid-1>.cfargotunnel.com ──> box 1
+medadvice2.yeackbot.com ──CNAME──> <uuid-2>.cfargotunnel.com ──> box 2
+   …
+medadvice.yeackbot.com  (no digit)  ──>  the Mac replica, untouched
+```
+
+The CNAME is created by `cloudflared tunnel route dns` — ordinary DNS on the
+existing zone. **The URL is the session pin.** A user on `medadvice3` cannot
+reach any other box, so affinity is structural rather than configured:
+
+- no Load Balancing add-on ($5/mo for 2 origins + $5/mo each beyond, and
+  session affinity possibly gated to Business plans — a dependency this design
+  simply doesn't have)
+- per-box SQLite is fine by construction, not by cookie TTL
+- per-box demo states become possible: one box on `dolphin3:8b`, another on
+  `dolphin3:8b-poisoned` (via the `OLLAMA_MODEL` override), shown side by side
+  in the same workshop session
+
+The trade is failover: a dead box takes down its own subdomain (Cloudflare 1033)
+until its group is pointed at a spare. For assigned workshop groups that is an
+acceptable, explicit failure — one URL down, blast radius one group.
+
+### Per-replica .env overrides
+
+The `.env` ships from the Mac identical to every box; a few keys must differ.
+`push-replica.sh` writes them to `overrides.env` inside the payload (a file, not
+argv — `ps` exposes argv to every user on the box), and the bootstrap applies
+them as a map, preserving key order and leaving every untouched line
+byte-identical:
+
+| Key | Source | Why per-box |
+|---|---|---|
+| `deployment.environment` | `--replica N` → `demobot-ec2-N` | telemetry split in O11y/Galileo |
+| `ACCESS_KEY` | `deploy/ec2/access-keys.env` via `gen-access-keys.sh` | per-group credential, rotatable alone |
+| `OLLAMA_MODEL` (optional) | `--set OLLAMA_MODEL=…` | clean-vs-poisoned box splits |
+
+`gen-access-keys.sh N` maintains the key file: four-word keys
+(`goose-duck-shovel-blob` style, `secrets.choice` over a curated noun list),
+mode 600, gitignored, idempotent — an existing replica's key is never silently
+regenerated; `--rotate N` replaces exactly one. DemoBot itself has no
+generator: `backend/config.py` just reads `ACCESS_KEY` from `.env` at startup,
+so rotation requires an app restart and logs out that box's browser sessions
+(cookie = sha256 of the key).
+
+### GPU verification is not optional
+
+A CPU fallback passes every health check and is ~5× slower — the likeliest way
+to reach a workshop with a box that looks fine and is not. Always pass
+`--gpu require` on a g5/g6 instance. The bootstrap then checks three things:
+
+1. `nvidia-smi` returns a GPU
+2. Ollama's startup log reports a CUDA backend
+3. a model is warmed and `ollama ps` is read for actual placement — the decisive
+   test, since the backend can be CUDA while a given model still sits on CPU
+
+On GPU the bootstrap also raises `OLLAMA_MAX_LOADED_MODELS=3`,
+`OLLAMA_KEEP_ALIVE=60m`, and `OLLAMA_NUM_PARALLEL=4`: all three models total
+about 12 GB of the A10G's 24 GB, so nothing swaps and concurrency is cheap.
+
+### Cost — per box; multiply by the count you choose
+
+`g5.xlarge` is ~$1.006/hr in us-east-1:
+
+| Per box | 8 h/weekday (~176 h/mo) | always-on |
+|---|---|---|
+| Compute | ~$177/mo | ~$734/mo |
+| EBS (100 GB gp3, billed **even while stopped**) | ~$8/mo | ~$8/mo |
+| Cloudflare CNAME | $0 | $0 |
+| **Total** | **≈ $185/mo** | **≈ $742/mo** |
+
+**The count is a run-time decision — `FLEET_COUNT` has no default, and
+`provision` quotes the cost for the requested count before asking for "yes".**
+`schedule.sh install` creates start, stop, **and a nightly safety-stop** — a
+g5.xlarge left running is ~$24/day per box, so the backstop pays for itself the
+first time an evening stop silently fails.
+
+Quota is the gate: `g5.xlarge` is 4 vCPU of *Running On-Demand G and VT
+instances* (`L-DB2E81BA`) each. New accounts default to **0** and approval takes
+hours to days. `fleet.sh preflight` compares the quota against the requested
+count and prints the exact increase request.
+
+---
+
+## Operational notes
+
+- **Idempotent.** Re-run `push-replica.sh` to redeploy: it re-ships the current
+  `.env`, re-pulls models, rebuilds the poisoned model, and restarts the units.
+  It is the update path as well as the install path.
+- **No `set -x`.** The original bootstrap ran under `set -euxo pipefail`, which
+  echoed every line — including `.env` contents — to the console and any
+  capturing log. Tracing is now opt-in with `DEBUG=1`.
+- **Collector collision.** On the Splunk lab AMI an apt `splunk-otel-collector`
+  is installed and binds the same `:4317`. The bootstrap masks it.
+- **Python 3.11 is mandatory.** The venv is built with `python3.11` from
+  deadsnakes; `python3 -m venv` picks Ubuntu 22.04's 3.10, on which LangChain
+  1.x fails to install.
+- **Sizing.** Both models are CPU-resident (~9.3 GB combined at 8192 context).
+  Below ~16 GB RAM the box thrashes between the 3B and 8B models on every turn.
+- **OpenClaw is not deployed here.** `run-openclaw.sh` needs podman, which these
+  boxes do not have. It runs on the Mac only.

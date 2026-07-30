@@ -44,8 +44,12 @@ start "app"            8001 run.sh           /tmp/medadvice_app.log
 #    detached and returns, so nohup just captures its startup output.
 if [ "$WITH_AGENTIC" = true ]; then
   echo "  starting OpenClaw gateway (run-openclaw.sh) -> /tmp/medadvice_openclaw.log"
+  # Owner-only: this log captures the gateway's startup output in a world-
+  # readable /tmp. run-openclaw.sh now withholds the token from a non-TTY
+  # stdout, but the log still describes the agent surface.
+  install -m 600 /dev/null /tmp/medadvice_openclaw.log
   nohup ./run-openclaw.sh >/tmp/medadvice_openclaw.log 2>&1 &
-  echo "  -> gateway http://127.0.0.1:18789 ; details + token in that log"
+  echo "  -> gateway http://127.0.0.1:18789 ; token: cat ~/.demobot-openclaw/gateway-token"
 fi
 
 # 4) optional public tunnel

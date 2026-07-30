@@ -19,6 +19,14 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# This script writes two secret-bearing files into $STATE_DIR: the gateway auth
+# token and openclaw.json (which embeds that token AND the app's ACCESS_KEY —
+# the credential gating the public tunnel URL). Default umask left both 644.
+# Match the 600 discipline .env and the EC2 payload already use. umask only
+# covers files created from here on, so the writes below also chmod explicitly
+# to repair state dirs from earlier runs.
+umask 077
+
 # ---------- options ----------
 # --no-telemetry: run without exporting gateway spans/metrics/logs to the
 #   collector (Splunk + Galileo). Use while iterating on the plugin so dev
@@ -125,6 +133,7 @@ TOKEN_FILE="$STATE_DIR/gateway-token"
 if [ ! -s "$TOKEN_FILE" ]; then
   head -c 24 /dev/urandom | base64 | tr -d '/+=' > "$TOKEN_FILE"
 fi
+chmod 600 "$TOKEN_FILE"   # repair 644 left by pre-umask runs
 GATEWAY_TOKEN=$(cat "$TOKEN_FILE")
 
 # ---------- gateway config (regenerated each start; state dir persists the rest) ----------
@@ -196,6 +205,9 @@ cfg = {
 path = os.path.join(os.environ["STATE_DIR"], "openclaw.json")
 with open(path, "w") as f:
     json.dump(cfg, f, indent=2)
+# Embeds the gateway token and ACCESS_KEY: owner-only, and repair the mode on
+# configs written by pre-umask runs.
+os.chmod(path, 0o600)
 print(f"wrote {path}")
 PYCONF
 
@@ -206,20 +218,19 @@ echo "Starting OpenClaw gateway on http://127.0.0.1:${GATEWAY_PORT} (podman: $CO
 # instead — that hands the supervisor a foreground process to KeepAlive while
 # the container itself runs detached.
 #
-# --userns=keep-id is meant to let the container write the host-owned bind
-# mounts. KNOWN BROKEN as written (2026-07-28, pre-existing): it maps the host
-# user to the SAME uid in the container, but the image runs as `node` (uid
-# 1000), so $STATE_DIR (host uid 501) is still not writable and the gateway
-# dies on startup with EACCES creating /home/node/.openclaw/state. Neither
-# keep-id nor keep-id:uid=1000,gid=1000 remaps it on macOS podman. The fix is a
-# posture decision (run as container root, which rootless podman already maps
-# to the unprivileged host user, vs. relaxing $STATE_DIR perms), so it is left
-# for a separate change rather than silently altering the demo's sandboxing.
+# --user 0:0 (container root), NOT --userns=keep-id. The bind mounts are owned
+# by the host user; the image's default `node` user (uid 1000) maps to a subuid
+# that owns nothing, so the gateway died on startup with EACCES creating
+# /home/node/.openclaw/state (observed 2026-07-28; neither keep-id nor
+# keep-id:uid=1000,gid=1000 remaps it on macOS podman). Under ROOTLESS podman
+# container uid 0 is already mapped to this unprivileged host user, so running
+# as container root grants no host privilege — it just makes the uid match the
+# mount owner, which is what lets $STATE_DIR stay mode 600.
 # --restart=on-failure:3 recovers a transient crash mid-demo but never
 # resurrects after a clean `podman stop` or a machine reboot — so "off" stays
 # the default state when you're not demoing.
 podman run -d --replace --name "$CONTAINER" \
-  --userns=keep-id \
+  --user 0:0 \
   --restart=on-failure:3 \
   -p "127.0.0.1:${GATEWAY_PORT}:${GATEWAY_PORT}" \
   -e OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental \
@@ -260,7 +271,13 @@ fi
 TELEMETRY_STATE=$([ "$OTEL_ENABLED" = true ] && echo "on -> :4318" || echo "OFF (--no-telemetry)")
 echo ""
 echo "OpenClaw gateway up:  http://127.0.0.1:${GATEWAY_PORT}"
-echo "  Control UI token:   $GATEWAY_TOKEN"
+# Only echo the token to an interactive terminal. start-all.sh redirects this
+# script to a log file, which would otherwise persist the token in cleartext.
+if [ -t 1 ]; then
+  echo "  Control UI token:   $GATEWAY_TOKEN"
+else
+  echo "  Control UI token:   (hidden; cat $TOKEN_FILE)"
+fi
 echo "  Agent model:        $AGENT_MODEL   Workspace: $DECOY_DIR"
 echo "  Tool guard:         http://host.containers.internal:8001/api/toolguard/inspect (fail-closed)"
 echo "  Telemetry:          $TELEMETRY_STATE"
