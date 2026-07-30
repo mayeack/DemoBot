@@ -36,7 +36,12 @@ def check(name: str, cond: bool) -> None:
 
 
 class _FakeResponse:
-    """Minimal httpx.Response stand-in for the happy path."""
+    """Minimal httpx.Response stand-in.
+
+    ``raise_for_status`` raises like the real thing for 4xx/5xx, so a test can
+    reproduce the actual failure this deployment sees (``/evaluation`` answering
+    401 when no runtime token could be minted) instead of a lenient 200.
+    """
 
     def __init__(self, payload, status_code=200):
         self._payload = payload
@@ -44,6 +49,12 @@ class _FakeResponse:
         self.text = json.dumps(payload)
 
     def raise_for_status(self):
+        if self.status_code >= 400:
+            import httpx
+
+            raise httpx.HTTPStatusError(
+                f"HTTP {self.status_code}", request=None, response=self
+            )
         return None
 
     def json(self):
@@ -287,8 +298,261 @@ with mock.patch.object(
 check("non-blocking verdict does not terminate the turn", allowed.get("terminal") is None)
 check("non-blocking verdict still reaches governance via state", allowed.get("agent_control") is allow_verdict)
 
-# ---- 5. wiring ----------------------------------------------------------
-print("\n[5] wiring")
+# ---- 5. ported Luna comparison semantics --------------------------------
+# These pin the bug that made control 259 unable to ever fire: the `correctness`
+# scorer emits a BOOLEAN, and a numeric operator over a bool raises inside the
+# evaluator (reported as an evaluator error -> fail open). Do not "simplify"
+# coerce_number to treat bools as 0/1 — that silently changes every control's
+# verdict and diverges from what the server would decide.
+print("\n[5] Luna comparison semantics (ported verbatim)")
+check("eq/false matches a false score (control 259 as repaired)",
+      ac.score_matches(False, "eq", False) is True)
+check("eq/false does not match a true score", ac.score_matches(True, "eq", False) is False)
+try:
+    ac.score_matches(False, "lt", 0.5)
+    check("lt over a boolean score raises (the original 259 defect)", False)
+except ValueError:
+    check("lt over a boolean score raises (the original 259 defect)", True)
+check("any is INVERTED for correctness (fires on a correct answer)",
+      ac.score_matches(True, "any", None) is True
+      and ac.score_matches(False, "any", None) is False)
+check("numeric lt still works for float scorers",
+      ac.score_matches(0.2, "lt", 0.5) is True and ac.score_matches(0.8, "lt", 0.5) is False)
+check("string scores coerce numerically", ac.score_matches("0.2", "lt", 0.5) is True)
+check("ne compares directly", ac.score_matches(True, "ne", False) is True)
+check("contains over a list score (the PII SLM shape)",
+      ac.score_matches(["ssn", "phone_number"], "contains", "ssn") is True
+      and ac.score_matches([], "contains", "ssn") is False)
+check("coerce_number returns None for bool/None",
+      ac.coerce_number(True) is None and ac.coerce_number(None) is None)
+try:
+    ac.score_matches(0.2, "wat", 0.5)
+    check("an unsupported operator raises", False)
+except ValueError:
+    check("an unsupported operator raises", True)
+
+# A deny control whose evaluator errored comes back under `errors`, not
+# `matches`, while the engine still flips is_safe to False. Reading only
+# `matches` took that as a clean pass — neither blocking nor honoring fail-open.
+errored_deny = ac.AgentControlClient._parse_response(
+    {
+        "is_safe": False,
+        "confidence": 0.0,
+        "matches": [],
+        "errors": [
+            {
+                "control_name": "DemoBot-block-hallucinated-output",
+                "action": "deny",
+                "result": {"matched": False, "confidence": 0.0, "error": "not numeric"},
+            }
+        ],
+    }
+)
+check("is_safe=false with only errors is an ERROR, not a clean pass",
+      errored_deny.errored is True)
+check("the errored deny control is named in the message",
+      "DemoBot-block-hallucinated-output" in (errored_deny.error_message or ""))
+with mock.patch.object(settings, "galileo_agent_control_fail_open", False):
+    check("errored deny withholds under fail-closed", errored_deny.should_block is True)
+with mock.patch.object(settings, "galileo_agent_control_fail_open", True):
+    check("errored deny releases under fail-open", errored_deny.should_block is False)
+
+# ---- 6. client-side execution -------------------------------------------
+print("\n[6] client-side execution")
+
+# The live shape of GET /agents/{name}/controls: definition under "control".
+CONTROLS_BODY = {
+    "controls": [
+        {
+            "id": 259,
+            "name": "DemoBot-block-hallucinated-output",
+            "control": {
+                "enabled": True,
+                "execution": "server",
+                "scope": {"step_types": ["llm"], "stages": ["post"]},
+                "action": {"decision": "deny"},
+                "condition": {
+                    "selector": {"path": "*"},
+                    "evaluator": {
+                        "name": "galileo.luna",
+                        "config": {
+                            "scorer_label": "correctness",
+                            "scorer_id": "89d579ce",
+                            "operator": "eq",
+                            "threshold": False,
+                            "timeout_ms": 15000,
+                        },
+                    },
+                },
+            },
+        }
+    ]
+}
+
+
+def _client_transport(score_body, *, controls=None, runtime=False, calls=None):
+    """Build (post, get) fakes for a client-side evaluation.
+
+    runtime=False reproduces today's deployment: the exchange 502s, so the
+    server path cannot produce a verdict and the client path takes over.
+    """
+    calls = calls if calls is not None else []
+
+    def _post(url, **kwargs):
+        calls.append(url)
+        if url.endswith("/v2/login/api_key"):
+            return _FakeResponse({"access_token": "at.eyJleHAiOjk5OTk5OTk5OTl9.sig"})
+        if url.endswith("/runtime-token-exchange"):
+            if runtime:
+                return _FakeResponse({"token": "rt.eyJleHAiOjk5OTk5OTk5OTl9.sig"})
+            raise ac.httpx.ConnectError("no runtime grant")
+        if url.endswith("/api/v1/evaluation"):
+            if not runtime:
+                # What the live deployment actually answers when the console
+                # token is presented in place of a runtime token.
+                return _FakeResponse(
+                    {"detail": 'Runtime token is invalid: Token is missing the "iat" claim'},
+                    status_code=401,
+                )
+            return _FakeResponse({"is_safe": True, "confidence": 0.0, "matches": []})
+        if url.endswith("/scorers/invoke"):
+            _post.invoke_body = kwargs.get("json")
+            return _FakeResponse(score_body)
+        raise AssertionError(f"unexpected POST {url}")
+
+    def _get(url, **kwargs):
+        calls.append(url)
+        return _FakeResponse(CONTROLS_BODY if controls is None else controls)
+
+    _post.invoke_body = None
+    return _post, _get, calls
+
+
+def _evaluate(score_body, *, controls=None, runtime=False, execution="auto"):
+    post, get, calls = _client_transport(score_body, controls=controls, runtime=runtime)
+    client = ac.AgentControlClient()
+    with mock.patch.object(ac.httpx, "post", side_effect=post), mock.patch.object(
+        ac.httpx, "get", side_effect=get
+    ), mock.patch.object(settings, "galileo_agent_control_execution", execution):
+        verdict = client.evaluate_response("How much Tylenol is safe?", "12,000 mg a day.")
+    return verdict, post, calls, client
+
+
+# correctness=false -> incorrect -> the deny control matches
+deny, post, calls, _ = _evaluate({"score": False, "status": "success"})
+check("falls back to client-side when no runtime token can be minted",
+      deny.transport == "client")
+check("a false correctness score denies", deny.should_block is True)
+check("the matched control is named", deny.matched_controls == ["DemoBot-block-hallucinated-output"])
+check("decision is deny", deny.decisions == ["deny"])
+check("scorer invoked with query + response as plain strings",
+      (post.invoke_body or {}).get("inputs")
+      == {"query": "How much Tylenol is safe?", "response": "12,000 mg a day."})
+check("scorer id/label forwarded from the control definition",
+      (post.invoke_body or {}).get("scorer_id") == "89d579ce"
+      and (post.invoke_body or {}).get("scorer_label") == "correctness")
+
+allow, _, _, _ = _evaluate({"score": True, "status": "success"})
+check("a true correctness score releases", allow.should_block is False)
+check("released client verdict is not errored", allow.errored is False)
+
+# Today's real behavior: the LLM-judge scorers fail server-side.
+broken, _, _, _ = _evaluate(
+    {
+        "score": None,
+        "status": "failed",
+        "error_message": "'str' object has no attribute 'format_content_for_message'",
+    }
+)
+check("a failed scorer invoke is an evaluator error, never a match",
+      broken.errored is True and broken.matched_controls == [])
+check("the scorer's own error text is preserved",
+      "format_content_for_message" in (broken.error_message or ""))
+with mock.patch.object(settings, "galileo_agent_control_fail_open", True):
+    check("failed scorer releases under fail-open (today's path)", broken.should_block is False)
+with mock.patch.object(settings, "galileo_agent_control_fail_open", False):
+    check("failed scorer withholds under fail-closed", broken.should_block is True)
+
+# The server path stays preferred when a runtime token IS mintable.
+server_verdict, post_srv, calls_srv, _ = _evaluate(
+    {"score": False, "status": "success"}, runtime=True
+)
+check("runtime token available -> server transport", server_verdict.transport == "server")
+check("server path does not invoke scorers locally",
+      not any(u.endswith("/scorers/invoke") for u in calls_srv))
+check("execution=server never falls back",
+      _evaluate({"score": False, "status": "success"}, execution="server")[0].transport
+      == "server")
+check("execution=client skips the server entirely",
+      not any(
+          u.endswith("/api/v1/evaluation")
+          for u in _evaluate({"score": True, "status": "success"}, execution="client")[2]
+      ))
+
+# Scope / enabled / evaluator filtering — none of these may invoke a scorer.
+def _only(definition_overrides):
+    body = json.loads(json.dumps(CONTROLS_BODY))
+    body["controls"][0]["control"].update(definition_overrides)
+    return body
+
+
+for label, override in [
+    ("stage pre is skipped", {"scope": {"stages": ["pre"], "step_types": ["llm"]}}),
+    ("step_type tool is skipped", {"scope": {"stages": ["post"], "step_types": ["tool"]}}),
+    ("disabled control is skipped", {"enabled": False}),
+]:
+    verdict, post_f, calls_f, _ = _evaluate(
+        {"score": False, "status": "success"}, controls=_only(override)
+    )
+    check(f"{label} (no scorer call, no block)",
+          not any(u.endswith("/scorers/invoke") for u in calls_f)
+          and verdict.should_block is False)
+
+unsupported = _only(
+    {"condition": {"selector": {"path": "*"}, "evaluator": {"name": "regex", "config": {}}}}
+)
+verdict_u, _, calls_u, _ = _evaluate({"score": False, "status": "success"}, controls=unsupported)
+check("a non-Luna evaluator is reported unevaluated, not guessed at",
+      not any(u.endswith("/scorers/invoke") for u in calls_u)
+      and verdict_u.errored is True
+      and any("regex" in e for e in verdict_u.evaluator_errors))
+
+# Definition caching: one fetch serves many turns.
+post_c, get_c, calls_c = _client_transport({"score": True, "status": "success"})
+client_c = ac.AgentControlClient()
+with mock.patch.object(ac.httpx, "post", side_effect=post_c), mock.patch.object(
+    ac.httpx, "get", side_effect=get_c
+), mock.patch.object(settings, "galileo_agent_control_execution", "client"):
+    for _ in range(3):
+        client_c.evaluate_response("q", "a")
+fetches = [u for u in calls_c if u.endswith("/controls")]
+check("control definitions are fetched once across turns (TTL cache)", len(fetches) == 1)
+check("invoke still runs per turn",
+      len([u for u in calls_c if u.endswith("/scorers/invoke")]) == 3)
+
+# A refresh failure serves the stale set rather than failing the turn.
+fail_get = mock.Mock(side_effect=ac.httpx.ConnectError("management api down"))
+with mock.patch.object(ac.httpx, "post", side_effect=post_c), mock.patch.object(
+    ac.httpx, "get", fail_get
+), mock.patch.object(settings, "galileo_agent_control_execution", "client"), mock.patch.object(
+    settings, "galileo_agent_control_refresh_seconds", 0.0
+):
+    stale = client_c.evaluate_response("q", "a")
+check("a definition-refresh failure reuses the cached set", stale.errored is False)
+
+# Cold cache + fetch failure = errored verdict (fail-open decides).
+post_e, _, _ = _client_transport({"score": True, "status": "success"})
+client_e = ac.AgentControlClient()
+with mock.patch.object(ac.httpx, "post", side_effect=post_e), mock.patch.object(
+    ac.httpx, "get", mock.Mock(side_effect=ac.httpx.ConnectError("down"))
+), mock.patch.object(settings, "galileo_agent_control_execution", "client"):
+    cold = client_e.evaluate_response("q", "a")
+check("cold cache + unreachable management API -> errored verdict", cold.errored is True)
+with mock.patch.object(settings, "galileo_agent_control_fail_open", True):
+    check("...which fail-open releases", cold.should_block is False)
+
+# ---- 7. wiring ----------------------------------------------------------
+print("\n[7] wiring")
 from backend.agents.state import build_initial_state  # noqa: E402
 from backend.models.schemas import ChatRequest  # noqa: E402
 
@@ -329,6 +593,35 @@ check("legacy engine has the block handler", "def _handle_agent_control_block(" 
 check(
     "block handler attributes the guardrail to Galileo",
     'guardrail_ids=["galileo_agent_control"]' in engine_src,
+)
+check(
+    "block metadata records which transport decided",
+    '"transport": verdict.transport' in engine_src,
+)
+
+check(
+    "new settings exposed with documented defaults",
+    settings.galileo_agent_control_execution == "auto"
+    and settings.galileo_agent_control_refresh_seconds == 300.0,
+)
+
+script_src = (ROOT / "scripts/demo/register_agent_control.py").read_text()
+check(
+    "setup script reads the 'control' key this endpoint actually returns",
+    'control.get("control")' in script_src,
+)
+check("setup script can replace a control definition", "--set-data" in script_src)
+control_json = json.loads(
+    (ROOT / "scripts/demo/controls/259-block-hallucinated-output.json").read_text()
+)
+cfg_259 = control_json["condition"]["evaluator"]["config"]
+check(
+    "checked-in control 259 uses eq/false, not a numeric operator",
+    cfg_259["operator"] == "eq" and cfg_259["threshold"] is False,
+)
+check(
+    "checked-in control 259 stays execution=server (inherits the server path later)",
+    control_json["execution"] == "server",
 )
 
 gov_src = (ROOT / "backend/agents/nodes/governance.py").read_text()

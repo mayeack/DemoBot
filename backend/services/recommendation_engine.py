@@ -2030,6 +2030,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
                     "messages": verdict.messages,
                     "evaluator_errors": verdict.evaluator_errors,
                     "errored": verdict.errored,
+                    "transport": verdict.transport,
                     "stage": "response",
                 },
             },

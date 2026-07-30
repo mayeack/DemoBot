@@ -106,21 +106,57 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
   Do instead: always exchange the API key for the JWT first; the OpenAPI spec is
   public at `<base>/openapi.json` (no auth) — read it instead of guessing.
 - **`POST /api/v1/evaluation` takes ONLY a minted HS256 runtime token**
-  (`/api/v1/auth/runtime-token-exchange`), and that exchange currently returns
-  **502 AUTH_UPSTREAM_REJECTED** for org `splunkse` regardless of target_type —
-  a tenant-side grant, not a payload bug (`/control-bindings` 502s the same way).
-  So controls are created/attached but do NOT enforce yet; the app fails open and
-  logs once. Do instead: don't "fix" it by inventing a second scoring path —
-  Galileo Protect has no correctness/hallucination metric (`/v2/protect/invoke`
-  returns "Unknown metric (correctness)"). Re-test the exchange after Galileo
-  enables the runtime grant; enforcement then works with no code change.
+  (`/api/v1/auth/runtime-token-exchange`), and that exchange returns **502
+  AUTH_UPSTREAM_REJECTED** for org `splunkse` regardless of target_type (verified
+  2026-07-29) — a tenant-side grant, not a payload bug (`/control-bindings` 502s
+  identically). Presenting the console JWT instead gets
+  `401 Token is missing the "iat" claim`. Do instead: don't wait on it — the app
+  now falls back to **client-side execution** (below). Re-probe the exchange
+  periodically; when it clears, the server path resumes automatically.
+- **Client-side execution is the working transport today.** `execution: "sdk"`
+  semantics, hand-rolled in `backend/services/agent_control.py`: read the agent's
+  control definitions from the management API (console JWT is enough) and score
+  through the core API's `POST /scorers/invoke`. `galileo_agent_control_execution`
+  = `auto` (default, server-preferred) | `server` | `client`. Deliberate deviation:
+  the official engine SKIPS controls whose `execution` != its context
+  (`agent_control_engine/core.py`), we run `server` ones locally and log once —
+  keep 259 as `execution: "server"` so it inherits the server path for free later.
+  Don't add the `agent-control-sdk` dependency: its Luna evaluator mints an
+  internal JWT from a secret we don't have, so the public `/scorers/invoke` is the
+  only option, not a shortcut.
+- **`/scorers/invoke` works for SLM scorers and is BROKEN for every LLM-judge
+  scorer** (verified 2026-07-29): `correctness`, `context_adherence`,
+  `instruction_adherence`, `ground_truth_adherence`, custom LLM scorers → HTTP 200
+  with `status:"failed", error_message:"'str' object has no attribute
+  'format_content_for_message'"` for EVERY input shape (plain strings, message
+  lists, content parts). Both `code` scorers error in their own code. Working:
+  `Output PII (SLM)` → `["ssn","phone_number"]`, `context_adherence_luna` → float.
+  So hallucination cannot be measured at runtime yet — Galileo-side defect.
+  Do NOT substitute `context_adherence_luna` for factuality: with no retrieval
+  context it scored **0.025 on a badly hallucinated answer vs 0.111 on a correct
+  one**, so `lt 0.5` there blocks nearly everything. Galileo's OFFLINE metric path
+  for `correctness` works fine (that's the Logs-view column) — it is post-ingestion
+  and cannot gate a live response.
 - Controls are per-AGENT: a console control does nothing until attached to the
   registered agent (`demobot-agent`). Do instead:
   `venv/bin/python scripts/demo/register_agent_control.py --attach <id>`.
-- Hallucination control = evaluator `galileo.luna` + preset scorer
-  **`correctness`** (`89d579ce-…`, "factual errors or inconsistencies"), operator
-  `lt`, threshold 0.5, scope `stages:[post] step_types:[llm]`, selector `path:"*"`
-  (the judge needs the question AND the answer). Live control id **259**.
+- Hallucination control **259** = `galileo.luna` + preset scorer **`correctness`**
+  (`89d579ce-…`, alias `factuality`), scope `stages:[post] step_types:[llm]`,
+  selector `path:"*"` (the judge needs question AND answer), operator **`eq`**,
+  threshold **`false`**. Definition is checked in at
+  `scripts/demo/controls/259-block-hallucinated-output.json`; apply with
+  `register_agent_control.py --set-data 259 <file>` (`PATCH /controls/{id}` only
+  edits name/enabled — a condition change needs `PUT /controls/{id}/data`).
+  **The operator is load-bearing:** `correctness` emits a BOOLEAN, and
+  `coerce_number()` returns None for bools, so a numeric operator (`lt 0.5`, the
+  original config) raises `"score False is not numeric"` → evaluator error →
+  fail-open → the control can never fire. `any` is inverted (fires on *correct*).
+- **A deny control whose evaluator errored is reported under `errors`, not
+  `matches`,** while the engine still sets `is_safe:false`. Parsing only `matches`
+  reads that as a clean pass — neither blocking nor honoring fail-open. Guarded in
+  `_parse_response` + `tests/test_agent_control.py`.
+- `GET /agents/{name}/controls` nests the definition under **`control`**;
+  `/controls/{id}` uses **`data`**. Accept either or every field reads as None.
 - Node order is `compliance -> agent_control -> response_defense`, so Cisco AI
   Defense stays the last word on output. Regression:
   `venv/bin/python tests/test_agent_control.py`.

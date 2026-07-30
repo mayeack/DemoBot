@@ -256,6 +256,20 @@ class Settings(BaseSettings):
     # Luna scorer (correctness, PII, …) are an LLM-judge round-trip, so this is
     # deliberately looser than the AI Defense inspection timeout.
     galileo_agent_control_timeout: float = 25.0
+    # Which transport evaluates the controls.
+    #   auto   = prefer the server (POST /api/v1/evaluation) and fall back to
+    #            client-side when the deployment cannot mint a runtime token
+    #   server = server only (an unavailable runtime token means no verdict)
+    #   client = always evaluate in-process
+    # Client-side execution mirrors an Agent Control ``execution: "sdk"`` control:
+    # DemoBot reads the agent's control definitions from the management API and
+    # runs their Luna conditions itself via the console API's /scorers/invoke, so
+    # enforcement does not depend on the org's runtime-token grant.
+    galileo_agent_control_execution: str = "auto"
+    # How long a fetched set of control definitions is reused before refetching.
+    # Definitions change rarely; refetching per turn would add a round-trip to
+    # every response.
+    galileo_agent_control_refresh_seconds: float = 300.0
     # Behavior when the Agent Control server errors, is unreachable, or cannot
     # mint a runtime token. True = fail open (release the response, log the
     # error) — the default, because this is an observability-first control

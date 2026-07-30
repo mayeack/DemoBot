@@ -26,6 +26,24 @@ Mirroring the official SDK's ``auto`` runtime-auth mode, an unavailable exchange
 endpoint falls back to presenting the console token directly rather than failing
 the turn outright.
 
+Two transports, selected by ``galileo_agent_control_execution``:
+
+  - **server** — ``POST /api/v1/evaluation``, the Agent Control server resolves
+    and runs the agent's effective control set.
+  - **client** — the ``execution: "sdk"`` equivalent: read the agent's control
+    definitions from the management API (which needs only the console token) and
+    run their Luna conditions here, scoring through the console API's
+    ``POST /scorers/invoke``. This exists because a deployment whose org lacks a
+    runtime-token grant cannot use the server path at all: the exchange returns
+    502 and ``/evaluation`` then rejects the console token with
+    ``401 Token is missing the "iat" claim``. ``auto`` prefers the server and
+    falls back here, so a missing grant costs a transport, not the guardrail.
+
+The local comparison (``score_matches`` / ``coerce_number``) is ported verbatim
+from ``agent_control_evaluator_galileo`` so both transports decide identically —
+including the rule that a numeric operator over a boolean scorer is an error, not
+a 0/1 comparison.
+
 Fully defensive: a no-op when ``GALILEO_API_KEY`` is unset or the master switch
 is off, and errors are normalized into a verdict that honors
 ``galileo_agent_control_fail_open`` (default True — release the response and log,
@@ -58,6 +76,105 @@ _TOKEN_REFRESH_MARGIN_SECONDS = 60.0
 # Fallback lifetime when a token carries no parseable expiry.
 _TOKEN_ASSUMED_TTL_SECONDS = 1800.0
 
+# The only evaluator DemoBot can run client-side. Anything else (a custom
+# agent-scoped evaluator, regex/list/json/sql) is left to server execution —
+# guessing at its semantics would be worse than reporting it unevaluated.
+_LOCAL_EVALUATOR = "galileo.luna"
+
+
+def coerce_number(value: Any) -> Optional[float]:
+    """Numeric view of a JSON scalar, or None when it has none.
+
+    Ported verbatim from ``agent_control_evaluator_galileo.luna.config`` so
+    client-side execution decides exactly what the server would. The bool rule
+    is load-bearing, not an oversight: a boolean scorer (``correctness`` emits
+    true/false) has no numeric reading, so a numeric operator against it is a
+    configuration error that must surface, not silently compare as 0/1.
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _contains(score: Any, threshold: Any) -> bool:
+    """Membership test matching the upstream Luna evaluator's ``contains``."""
+    if threshold is None:
+        return False
+    if isinstance(score, str):
+        return str(threshold) in score
+    if isinstance(score, list):
+        return threshold in score
+    if isinstance(score, dict):
+        return threshold in score.values()
+    return False
+
+
+def score_matches(score: Any, operator: str, threshold: Any) -> bool:
+    """Apply a control's local comparison to a raw Luna score.
+
+    Mirrors ``LunaEvaluator._score_matches``. Raises ``ValueError`` for a
+    numeric operator against a non-numeric score — the same failure the server
+    reports as an evaluator error (which fails open), and the reason a
+    ``lt 0.5`` control over the boolean ``correctness`` scorer can never match.
+    """
+    if operator == "any":
+        return bool(score)
+    if operator == "eq":
+        return score == threshold
+    if operator == "ne":
+        return score != threshold
+    if operator == "contains":
+        return _contains(score, threshold)
+
+    score_number = coerce_number(score)
+    threshold_number = coerce_number(threshold)
+    if score_number is None:
+        raise ValueError(f"Luna score {score!r} is not numeric")
+    if threshold_number is None:
+        raise ValueError(f"Luna threshold {threshold!r} is not numeric")
+
+    if operator == "gt":
+        return score_number > threshold_number
+    if operator == "gte":
+        return score_number >= threshold_number
+    if operator == "lt":
+        return score_number < threshold_number
+    if operator == "lte":
+        return score_number <= threshold_number
+
+    raise ValueError(f"Unsupported Luna operator: {operator}")
+
+
+def _confidence_from_score(score: Any) -> float:
+    """Upstream's confidence mapping (bool -> 1.0/0.0, 0-1 float as-is)."""
+    if isinstance(score, bool):
+        return 1.0 if score else 0.0
+    number = coerce_number(score)
+    if number is not None and 0.0 <= number <= 1.0:
+        return number
+    return 1.0
+
+
+def _scope_matches(scope: Dict[str, Any], *, stage: str, step_type: str, step_name: str) -> bool:
+    """Whether a control's scope covers this step. Absent key = applies to all."""
+    stages = scope.get("stages")
+    if stages and stage not in stages:
+        return False
+    step_types = scope.get("step_types")
+    if step_types and step_type not in step_types:
+        return False
+    step_names = scope.get("step_names")
+    if step_names and step_name not in step_names:
+        return False
+    return True
+
 
 @dataclass
 class ControlVerdict:
@@ -77,6 +194,10 @@ class ControlVerdict:
     # True when this client could not obtain a real verdict (auth/network/parse).
     errored: bool = False
     error_message: Optional[str] = None
+    # Which transport produced this verdict: "server" (POST /api/v1/evaluation)
+    # or "client" (control definitions evaluated in-process). Recorded on the
+    # governance event so a block can be attributed to the right path.
+    transport: Optional[str] = None
 
     @property
     def should_block(self) -> bool:
@@ -117,6 +238,11 @@ class AgentControlClient:
         # holds the epoch after which we retry. 0.0 = never failed.
         self._runtime_retry_after: float = 0.0
         self._runtime_unavailable_logged = False
+        # Cached control definitions for client-side execution:
+        # [{"id", "name", <definition>}], plus the epoch it goes stale.
+        self._controls: Optional[List[Dict[str, Any]]] = None
+        self._controls_expires_at: float = 0.0
+        self._server_control_locally_logged: set = set()
 
     # ---------------------------------------------------------------- config
 
@@ -251,6 +377,11 @@ class AgentControlClient:
         ``output`` = the generated answer) because the controls in the console
         select ``path: "*"`` and their Luna evaluators score input and output
         together — a correctness/hallucination judgement needs the question.
+
+        Transport follows ``galileo_agent_control_execution``: ``auto`` (default)
+        prefers the server and falls back to client-side execution when the
+        deployment cannot mint a runtime token, so a missing runtime grant
+        degrades the transport rather than the guardrail.
         """
         if not self.is_configured:
             raise AgentControlError(
@@ -258,6 +389,41 @@ class AgentControlClient:
                 "and GALILEO_AGENT_CONTROL_ENABLED=True)."
             )
 
+        mode = (settings.galileo_agent_control_execution or "auto").strip().lower()
+        if mode == "client":
+            return self._evaluate_client_side(user_message, assistant_message)
+
+        verdict = self._evaluate_server_side(
+            user_message,
+            assistant_message,
+            enduser_id=enduser_id,
+            session_id=session_id,
+            theme=theme,
+            model=model,
+        )
+        if mode == "server" or not verdict.errored:
+            return verdict
+
+        # The server path could not produce a verdict (typically: this org has no
+        # runtime-token grant, so /evaluation rejects the console token). Evaluate
+        # the same controls locally rather than failing the guardrail open.
+        local = self._evaluate_client_side(user_message, assistant_message)
+        if local.errored and verdict.error_message:
+            # Keep the server's diagnosis; it is the actionable one.
+            local.error_message = f"{verdict.error_message}; client: {local.error_message}"
+        return local
+
+    def _evaluate_server_side(
+        self,
+        user_message: str,
+        assistant_message: str,
+        *,
+        enduser_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        theme: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> ControlVerdict:
+        """Evaluate via the Agent Control server (``POST /api/v1/evaluation``)."""
         context: Dict[str, Any] = {"app": settings.otel_service_name}
         if session_id:
             context["session_id"] = session_id
@@ -284,7 +450,9 @@ class AgentControlClient:
             token = self._bearer_token()
         except (httpx.HTTPError, ValueError, AgentControlError) as exc:
             logger.warning("Galileo Agent Control auth failed: %s", exc)
-            return ControlVerdict(errored=True, error_message=f"auth: {exc}")
+            return ControlVerdict(
+                errored=True, error_message=f"auth: {exc}", transport="server"
+            )
 
         try:
             response = httpx.post(
@@ -313,12 +481,219 @@ class AgentControlClient:
             return ControlVerdict(
                 errored=True,
                 error_message=f"HTTP {exc.response.status_code}: {detail}",
+                transport="server",
             )
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("Galileo Agent Control evaluation failed: %s", exc)
-            return ControlVerdict(errored=True, error_message=str(exc))
+            return ControlVerdict(
+                errored=True, error_message=str(exc), transport="server"
+            )
 
-        return self._parse_response(data)
+        verdict = self._parse_response(data)
+        verdict.transport = "server"
+        return verdict
+
+    # ------------------------------------------------- client-side execution
+
+    def _load_controls(self) -> List[Dict[str, Any]]:
+        """This agent's control definitions, cached for the configured TTL.
+
+        Mirrors an Agent Control SDK's local control set. A refresh failure
+        serves the last-known definitions rather than failing the turn; only a
+        cold cache with no definitions is an error.
+        """
+        now = time.time()
+        if self._controls is not None and now < self._controls_expires_at:
+            return self._controls
+
+        try:
+            response = httpx.get(
+                f"{self._base_url}/api/v1/agents/{self._agent_name}/controls",
+                headers={"Authorization": f"Bearer {self._fetch_access_token()}"},
+                timeout=self._timeout,
+            )
+            response.raise_for_status()
+            body = response.json() or {}
+        except (httpx.HTTPError, ValueError, AgentControlError) as exc:
+            if self._controls is not None:
+                logger.warning(
+                    "Galileo Agent Control definition refresh failed (%s); "
+                    "reusing the %d cached control(s).",
+                    exc,
+                    len(self._controls),
+                )
+                # Back off before hammering a broken endpoint every turn.
+                self._controls_expires_at = now + _TOKEN_RETRY_COOLDOWN_SECONDS
+                return self._controls
+            raise
+
+        controls: List[Dict[str, Any]] = []
+        for entry in body.get("controls") or []:
+            if not isinstance(entry, dict):
+                continue
+            # This endpoint nests the definition under "control"; the
+            # single-control endpoint uses "data". Accept either.
+            definition = entry.get("control") or entry.get("data") or {}
+            if isinstance(definition, dict) and definition:
+                controls.append(
+                    {
+                        "id": entry.get("id"),
+                        "name": entry.get("name") or str(entry.get("id")),
+                        "definition": definition,
+                    }
+                )
+
+        self._controls = controls
+        self._controls_expires_at = now + max(
+            0.0, settings.galileo_agent_control_refresh_seconds
+        )
+        logger.info(
+            "Galileo Agent Control loaded %d control definition(s) for agent %s",
+            len(controls),
+            self._agent_name,
+        )
+        return controls
+
+    def _log_server_control_run_locally(self, name: str) -> None:
+        """Announce once that a server-scoped control is being run in-process."""
+        if name in self._server_control_locally_logged:
+            return
+        self._server_control_locally_logged.add(name)
+        logger.warning(
+            "Galileo Agent Control '%s' is declared execution=server but is being "
+            "evaluated in-process, because this deployment cannot mint a runtime "
+            "token. The official engine would skip it; DemoBot runs it so the "
+            "guardrail still applies.",
+            name,
+        )
+
+    def _invoke_scorer(
+        self, config: Dict[str, Any], *, query: str, response_text: str
+    ) -> Any:
+        """Run one Luna scorer through the console API's ``/scorers/invoke``.
+
+        Returns the raw score. Raises ``AgentControlError`` when the scorer
+        itself could not produce one — the client-side equivalent of the
+        server's evaluator error, which fails open rather than matching.
+        """
+        payload: Dict[str, Any] = {
+            "inputs": {"query": query, "response": response_text},
+        }
+        for key in ("scorer_id", "scorer_version_id", "scorer_label"):
+            if config.get(key):
+                payload[key] = config[key]
+
+        timeout = float(config.get("timeout_ms") or 0) / 1000.0 or self._timeout
+        http_response = httpx.post(
+            f"{self.console_api_url}/scorers/invoke",
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {self._fetch_access_token()}",
+                "Content-Type": "application/json",
+                "accept": "application/json",
+            },
+            timeout=max(timeout, self._timeout),
+        )
+        http_response.raise_for_status()
+        body = http_response.json() or {}
+        if body.get("status") != "success":
+            raise AgentControlError(
+                f"scorer {body.get('scorer_label') or config.get('scorer_label')} "
+                f"{body.get('status')}: {body.get('error_message')}"
+            )
+        return body.get("score")
+
+    def _evaluate_client_side(
+        self, user_message: str, assistant_message: str
+    ) -> ControlVerdict:
+        """Evaluate this agent's controls in-process (``execution: "sdk"``).
+
+        Only leaf ``galileo.luna`` conditions are supported; composite
+        (and/or/not) conditions and other evaluators are reported as unevaluated
+        instead of being guessed at.
+
+        Deliberate deviation from the official engine, which skips any control
+        whose ``execution`` differs from its context: DemoBot also runs
+        ``execution: "server"`` controls here, because the alternative on a
+        deployment with no runtime-token grant is running nothing at all. It is
+        logged once per process so a control marked *server* being enforced by
+        the app is never a silent surprise. Flipping the control itself to
+        ``sdk`` would be worse — it would drop out of the server path we want to
+        inherit for free once the grant exists.
+        """
+        try:
+            controls = self._load_controls()
+        except (httpx.HTTPError, ValueError, AgentControlError) as exc:
+            logger.warning("Galileo Agent Control definition load failed: %s", exc)
+            return ControlVerdict(
+                errored=True, error_message=f"controls: {exc}", transport="client"
+            )
+
+        verdict = ControlVerdict(transport="client")
+        evaluated = 0
+
+        for control in controls:
+            definition = control["definition"]
+            name = control["name"]
+            if definition.get("enabled") is False:
+                continue
+            if not _scope_matches(
+                definition.get("scope") or {},
+                stage="post",
+                step_type="llm",
+                step_name=self._step_name,
+            ):
+                continue
+
+            condition = definition.get("condition") or {}
+            evaluator = condition.get("evaluator") or {}
+            if not evaluator or evaluator.get("name") != _LOCAL_EVALUATOR:
+                verdict.evaluator_errors.append(
+                    f"{name}: {evaluator.get('name') or 'composite condition'} "
+                    "not supported client-side"
+                )
+                continue
+
+            if (definition.get("execution") or "server") != "sdk":
+                self._log_server_control_run_locally(name)
+
+            config = evaluator.get("config") or {}
+            try:
+                score = self._invoke_scorer(
+                    config, query=user_message, response_text=assistant_message
+                )
+                matched = score_matches(
+                    score, config.get("operator") or "any", config.get("threshold")
+                )
+            except (httpx.HTTPError, ValueError, AgentControlError) as exc:
+                # Evaluator error: never a match, surfaced for triage.
+                logger.warning("Galileo Agent Control '%s' evaluator failed: %s", name, exc)
+                verdict.evaluator_errors.append(f"{name}: {exc}")
+                continue
+
+            evaluated += 1
+            if not matched:
+                continue
+
+            decision = str((definition.get("action") or {}).get("decision") or "observe").lower()
+            verdict.matched_controls.append(name)
+            verdict.decisions.append(decision)
+            verdict.confidence = max(verdict.confidence, _confidence_from_score(score))
+            verdict.messages.append(
+                f"{name}: score {score!r} {config.get('operator')} "
+                f"{config.get('threshold')!r}"
+            )
+
+        verdict.is_safe = not verdict.matched_controls
+        if evaluated == 0 and not verdict.matched_controls:
+            # Nothing could actually be judged — report it as an error so the
+            # fail-open/fail-closed policy decides, rather than claiming "safe".
+            verdict.errored = True
+            verdict.error_message = (
+                "; ".join(verdict.evaluator_errors)
+                or f"no post/llm controls attached to agent {self._agent_name}"
+            )
+        return verdict
 
     def _invalidate_tokens(self) -> None:
         self._access_token = None
@@ -349,14 +724,36 @@ class AgentControlClient:
             if isinstance(result, dict) and result.get("message"):
                 messages.append(str(result["message"]))
 
-        evaluator_errors = [
-            str(err.get("control_name") or "unknown")
-            for err in (data.get("errors") or [])
-            if isinstance(err, dict)
-        ]
+        errors = [err for err in (data.get("errors") or []) if isinstance(err, dict)]
+        evaluator_errors = [str(err.get("control_name") or "unknown") for err in errors]
+
+        # A deny control whose evaluator ERRORED is reported under ``errors``,
+        # not ``matches``, but the engine still flips is_safe to False for it
+        # ("fail closed if a deny control errored" — agent_control_engine.core).
+        # Reading only ``matches`` would take that as a clean pass, which is
+        # exactly the response a mis-typed operator produces: neither blocked nor
+        # subject to the fail-open policy. Treat it as errored so the configured
+        # policy decides.
+        is_safe = bool(data.get("is_safe", True))
+        if not is_safe and not any(d == "deny" for d in decisions) and errors:
+            denied = [
+                str(err.get("control_name") or "unknown")
+                for err in errors
+                if str(err.get("action") or "").lower() == "deny"
+            ] or evaluator_errors
+            return ControlVerdict(
+                is_safe=False,
+                confidence=float(data.get("confidence") or 0.0),
+                reason=data.get("reason"),
+                evaluator_errors=evaluator_errors,
+                errored=True,
+                error_message=(
+                    "deny control evaluator errored: " + ", ".join(denied)
+                ),
+            )
 
         return ControlVerdict(
-            is_safe=bool(data.get("is_safe", True)),
+            is_safe=is_safe,
             confidence=float(data.get("confidence") or 0.0),
             reason=data.get("reason"),
             matched_controls=matched_controls,
@@ -429,6 +826,48 @@ class AgentControlClient:
             timeout=self._timeout,
         )
         response.raise_for_status()
+        return response.json() or {}
+
+    def validate_control_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Dry-run a control definition (``POST /api/v1/controls/validate``)."""
+        if not self.is_configured:
+            raise AgentControlError("Galileo Agent Control is not configured.")
+
+        response = httpx.post(
+            f"{self._base_url}/api/v1/controls/validate",
+            json={"data": data},
+            headers={
+                "Authorization": f"Bearer {self._fetch_access_token()}",
+                "Content-Type": "application/json",
+            },
+            timeout=self._timeout,
+        )
+        response.raise_for_status()
+        return response.json() or {}
+
+    def set_control_data(self, control_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Replace a control's definition (``PUT /api/v1/controls/{id}/data``).
+
+        ``PATCH /api/v1/controls/{id}`` only accepts name/enabled, so editing a
+        condition — e.g. correcting an operator that can never match its
+        scorer's output type — has to go through this full replace.
+        """
+        if not self.is_configured:
+            raise AgentControlError("Galileo Agent Control is not configured.")
+
+        response = httpx.put(
+            f"{self._base_url}/api/v1/controls/{control_id}/data",
+            json={"data": data},
+            headers={
+                "Authorization": f"Bearer {self._fetch_access_token()}",
+                "Content-Type": "application/json",
+            },
+            timeout=self._timeout,
+        )
+        response.raise_for_status()
+        # A changed definition invalidates the client-side cache.
+        self._controls = None
+        self._controls_expires_at = 0.0
         return response.json() or {}
 
     def list_controls(self) -> List[Dict[str, Any]]:

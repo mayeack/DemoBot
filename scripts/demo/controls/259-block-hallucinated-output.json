@@ -1,0 +1,28 @@
+{
+  "description": "Blocks DemoBot LLM responses that Galileo's Correctness (factuality) scorer judges incorrect. The correctness preset emits a BOOLEAN, so the condition is score == false (false = incorrect). A numeric operator such as lt makes the Luna evaluator raise 'score False is not numeric', which the engine reports as an evaluator error and fails open — the control can then never fire. payload_field is inert here: selector path '*' selects the whole step, whose input/output keys are used directly. Post-LLM, deny.",
+  "enabled": true,
+  "execution": "server",
+  "scope": {
+    "step_types": ["llm"],
+    "stages": ["post"]
+  },
+  "action": {
+    "decision": "deny"
+  },
+  "condition": {
+    "selector": { "path": "*" },
+    "evaluator": {
+      "name": "galileo.luna",
+      "config": {
+        "scorer_label": "correctness",
+        "scorer_id": "89d579ce-5c94-4fe8-b8c9-ce42afdc0aa1",
+        "scorer_version_id": "817f3162-93f8-4d94-8e80-05612f517b45",
+        "operator": "eq",
+        "threshold": false,
+        "payload_field": "output",
+        "timeout_ms": 15000
+      }
+    }
+  },
+  "tags": ["hallucination", "demobot"]
+}
