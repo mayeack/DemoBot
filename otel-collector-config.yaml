@@ -16,6 +16,22 @@ receivers:
 
 processors:
   batch: {}
+  # Strip per-process resource attributes from METRICS only. Every app restart
+  # changes process.pid/command_args, which minted a brand-new MTS identity set
+  # per restart — cardinality churn that (a) needlessly multiplies MTS and
+  # (b) left every restart needing NEW MTS creations, which the org's per-metric
+  # cardinality protection has been refusing for gen_ai.client.* since
+  # 2026-07-29 (sf.org.numLimitedMetricTimeSeriesCreateCalls). With these
+  # stripped, the MTS identity is stable across restarts (service + host +
+  # datapoint attrs), so after the first successful creation restarts reuse the
+  # same series. Traces are untouched — span storage has no MTS cardinality.
+  transform/metrics_slim:
+    error_mode: ignore
+    metric_statements:
+      - context: resource
+        statements:
+          - delete_matching_keys(attributes, "^process\\..+")
+          - delete_key(attributes, "service.instance.id")
   # Galileo only ingests GenAI spans. Drop everything else (FastAPI HTTP
   # server/client spans) before the Galileo exporter so they don't trigger
   # Galileo's "No GenAI patterns detected in spans" partial-success drops. Keeps
@@ -53,7 +69,7 @@ service:
     # when GALILEO_API_KEY is set — see the exporters note above).
     metrics:
       receivers: [otlp]
-      processors: [batch]
+      processors: [transform/metrics_slim, batch]
       exporters: [signalfx]
   telemetry:
     logs:
