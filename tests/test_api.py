@@ -112,6 +112,54 @@ def main() -> int:
         check("GET /api/chat/session/{id} -> 200",
               c.get(f"/api/chat/session/{sid}", headers=AUTH).status_code in (200, 404))
         check("GET /api/chat/disclaimer -> 200", c.get("/api/chat/disclaimer", headers=AUTH).status_code == 200)
+        # Theme-aware: it used to return the MEDICAL disclaimer unconditionally,
+        # with no theme parameter, so five of six themes got wrong text.
+        rdm = c.get("/api/chat/disclaimer", headers=AUTH).json()
+        check("disclaimer: defaults to medadvice's medical text",
+              rdm.get("theme") == "medadvice" and "MEDICAL DISCLAIMER" in rdm.get("content", ""))
+        rdt = c.get("/api/chat/disclaimer?theme=telecomchatbot", headers=AUTH).json()
+        check("disclaimer: a non-medical theme gets non-medical text",
+              rdt.get("theme") == "telecomchatbot"
+              and "MEDICAL DISCLAIMER" not in rdt.get("content", "")
+              and "not professional advice" in rdt.get("content", ""),
+              str(rdt.get("title")))
+        check("disclaimer: unknown theme falls back rather than erroring",
+              c.get("/api/chat/disclaimer?theme=nonsense", headers=AUTH).status_code == 200)
+
+        # REQUIRE_DISCLAIMER_ACCEPTANCE had no readers: setting it False did
+        # nothing and the 400 gate was unconditional.
+        _saved_req = settings.require_disclaimer_acceptance
+        try:
+            settings.require_disclaimer_acceptance = True
+            _newsid = c.post("/api/chat/session/new", headers=AUTH).json()["session_id"]
+            check("disclaimer gate ON -> new session without acceptance is 400",
+                  c.post("/api/chat/message", headers=AUTH,
+                         json={"session_id": _newsid, "message": "hi",
+                               "disclaimer_accepted": False}).status_code == 400)
+            settings.require_disclaimer_acceptance = False
+            _newsid2 = c.post("/api/chat/session/new", headers=AUTH).json()["session_id"]
+            check("disclaimer gate OFF -> the flag is actually honored (no 400)",
+                  c.post("/api/chat/message", headers=AUTH,
+                         json={"session_id": _newsid2, "message": "hi",
+                               "disclaimer_accepted": False}).status_code == 200)
+        finally:
+            settings.require_disclaimer_acceptance = _saved_req
+
+        # MAX_CLARIFYING_QUESTIONS was likewise inert (a hardcoded 2 won).
+        from backend.services.clarifying_questions import ClarifyingQuestionsService  # noqa: E402
+        _svc = ClarifyingQuestionsService()
+        _saved_max = settings.max_clarifying_questions
+        try:
+            settings.max_clarifying_questions = 5
+            check("clarifying limit follows the setting", _svc.MAX_QUESTIONS == 5,
+                  str(_svc.MAX_QUESTIONS))
+        finally:
+            settings.max_clarifying_questions = _saved_max
+        # Assert the CODE default, not the live value: this box's .env sets 3, and
+        # now that the setting is honored that .env value is what actually applies.
+        check("clarifying limit code default is the shipped 2",
+              type(settings).model_fields["max_clarifying_questions"].default == 2,
+              str(type(settings).model_fields["max_clarifying_questions"].default))
         # /message: validation (no real LLM turn asserted — that's integration-tested)
         check("POST /api/chat/message bad body -> 422",
               c.post("/api/chat/message", headers=AUTH, json={}).status_code == 422)

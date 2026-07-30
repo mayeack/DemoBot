@@ -107,7 +107,10 @@ class AutoPrompterService:
         self._task: Optional[asyncio.Task] = None
         self._sessions_created = 0
         self._last_session_time: Optional[datetime] = None
-        self._base_url = "http://127.0.0.1:8001"
+        # Derived from settings.port, not hardcoded 8001: on any other PORT the
+        # toggle appeared to start but every self-call hit a dead port, so the
+        # demo produced no traffic at all. (incident.py already did this.)
+        self._base_url = f"http://127.0.0.1:{getattr(settings, 'port', 8001)}"
         
     @property
     def is_running(self) -> bool:

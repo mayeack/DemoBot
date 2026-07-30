@@ -153,7 +153,11 @@ class Settings(BaseSettings):
     hallucination_injection_rate: float = 0.25  # 25% of responses will include hallucinated content
     authority_injection_rate: float = 0.25  # 25% of responses will include outside-of-authority content
     require_disclaimer_acceptance: bool = True
-    max_clarifying_questions: int = 3
+    # 2, not 3: ClarifyingQuestionsService hardcoded 2 ("reduced from 3 to
+    # minimize unnecessary questions") and never read this setting, so the
+    # documented 3 was never the real limit. Keeping the shipped behavior and
+    # making the setting actually drive it.
+    max_clarifying_questions: int = 2
 
     # Cisco AI Defense (Inspection API - runtime policy review of user prompts)
     # https://developer.cisco.com/docs/ai-defense-inspection/

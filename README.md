@@ -8,7 +8,7 @@ A macOS-compatible advice web application built with Python, FastAPI, and config
 
 ### Core Functionality
 - **Natural Language Medical Queries**: Chat interface for submitting medical questions
-- **Clarifying Questions**: AI asks up to 3 targeted questions to gather necessary information
+- **Clarifying Questions**: AI asks up to 2 targeted questions (MAX_CLARIFYING_QUESTIONS) to gather necessary information
 - **Medical Recommendations**: General, non-prescriptive health guidance including:
   - Preliminary assessments
   - Lifestyle adjustments
@@ -26,7 +26,7 @@ A macOS-compatible advice web application built with Python, FastAPI, and config
   - Low AI confidence
   - User explicitly requests professional review
 - **Safety Guardrails**: Never provides prescription dosages or pediatric medication advice
-- **Natural PII/PHI Integration**: Realistic synthetic patient data naturally woven into responses for governance testing (5% rate, configurable)
+- **Natural PII/PHI Integration**: Realistic synthetic patient data naturally woven into responses for governance testing (25% background rate by default, configurable per category; the UI toggles force a category ON)
 
 ### AI Governance Logging
 Comprehensive logging following OpenTelemetry semantic conventions:
@@ -59,7 +59,7 @@ Off by default; see [Agentic Surface](#agentic-surface-openclaw-optional) below.
 - **FastAPI**: REST API framework
 - **LangChain + LangGraph**: multi-agent orchestration (supervisor + per-theme decomposed subgraphs)
 - **OpenTelemetry GenAI**: code-based Workflow / Agent / LLM span instrumentation exported over OTLP
-- **Configurable AI Providers**: Anthropic, AWS Bedrock, or OpenAI-compatible APIs
+- **Configurable AI Providers**: Ollama (local, the workshop default), Anthropic, AWS Bedrock, NVIDIA NIM, or any OpenAI-compatible API
 - **SQLAlchemy**: ORM for database management
 - **SQLite**: Embedded database
 
@@ -308,8 +308,8 @@ LOG_ROTATION_SIZE=10485760  # 10MB
 LOG_RETENTION_DAYS=90
 
 # Safety
-PII_INJECTION_RATE=0.05  # 5% for testing
-MAX_CLARIFYING_QUESTIONS=3
+PII_INJECTION_RATE=0.25  # matches the code default
+MAX_CLARIFYING_QUESTIONS=2
 
 # Session
 SESSION_TIMEOUT_MINUTES=30

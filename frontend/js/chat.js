@@ -964,10 +964,6 @@ function startNewSession() {
     });
 }
 
-function clearSession() {
-    startNewSession();
-}
-
 function togglePII() {
     const toggle = document.getElementById('piiToggle');
     piiEnabled = toggle.checked;
@@ -1318,22 +1314,6 @@ function toggleDrawer() {
     if (btn) btn.setAttribute('aria-expanded', String(!collapsed));
 }
 
-function toggleSettings() {
-    const panel = document.getElementById('settingsPanel');
-    const arrow = document.getElementById('settingsArrow');
-    const button = arrow ? arrow.closest('button') : null;
-    if (!panel) return;
-
-    const willExpand = panel.classList.contains('hidden');
-    panel.classList.toggle('hidden');
-
-    if (arrow) {
-        arrow.classList.toggle('-rotate-90', !willExpand);
-    }
-    if (button) {
-        button.setAttribute('aria-expanded', willExpand ? 'true' : 'false');
-    }
-}
 
 // ===========================================================================
 // Prompt Library
