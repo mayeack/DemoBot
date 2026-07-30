@@ -62,9 +62,11 @@ def clear_caches() -> None:
     """Drop cached chat models / react agents so a runtime provider/model change
     (e.g. from the Settings UI) takes effect on the next call.
 
-    The cache keys include the provider + token/temperature params but NOT the
-    model name, so switching the model *within* a provider would otherwise keep
-    serving a stale client. Called by ``settings_store.set_ai_provider``.
+    The cache keys include the provider, any explicit model_override, and the
+    token/temperature params — but NOT the provider's *configured default* model
+    (settings.<provider>_model). So changing that setting is exactly the case
+    that would otherwise keep serving a stale client, which is why
+    ``settings_store.set_ai_provider`` calls this.
     """
     _MODEL_CACHE.clear()
     _AGENT_CACHE.clear()
@@ -96,7 +98,7 @@ def get_chat_model(settings, *, max_tokens: int = 2048, temperature: float = 0.7
             from langchain_anthropic import ChatAnthropic
 
             model = ChatAnthropic(
-                model=settings.anthropic_model,
+                model=model_override or settings.anthropic_model,
                 api_key=settings.anthropic_api_key,
                 max_tokens=max_tokens,
                 temperature=temperature,
@@ -105,7 +107,7 @@ def get_chat_model(settings, *, max_tokens: int = 2048, temperature: float = 0.7
             from langchain_aws import ChatBedrockConverse
 
             model = ChatBedrockConverse(
-                model=settings.bedrock_model_id,
+                model=model_override or settings.bedrock_model_id,
                 region_name=settings.aws_region,
                 max_tokens=max_tokens,
                 temperature=temperature,
@@ -114,7 +116,7 @@ def get_chat_model(settings, *, max_tokens: int = 2048, temperature: float = 0.7
             from langchain_openai import ChatOpenAI
 
             model = ChatOpenAI(
-                model=settings.openai_model,
+                model=model_override or settings.openai_model,
                 api_key=settings.openai_api_key,
                 base_url=settings.openai_base_url,
                 max_tokens=max_tokens,

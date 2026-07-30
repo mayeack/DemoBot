@@ -25,6 +25,8 @@ from typing import Any, Callable, Dict, List
 
 from backend.agents.llm import ChatModelError, invoke_agent
 from backend.agents.nodes.agent_common import (
+    SYNTHESIZER_MAX_TOKENS,
+    SYNTHESIZER_TEMPERATURE,
     handle_agent_error,
     request_model,
     trace_entry,
@@ -41,6 +43,10 @@ from backend.telemetry import otel
 
 # Recommendation parsing is centralized on RecommendationEngine and reused here
 # via ``content_engine._parse_recommendation`` (see backend/agents/nodes/shared.py).
+
+# SYNTHESIZER_MAX_TOKENS / SYNTHESIZER_TEMPERATURE live in agent_common so the
+# router can log the real values on the governance INPUT event without importing
+# this module (see the import above).
 
 
 def _extract_directive_tail(output_text: str) -> str:
@@ -118,8 +124,8 @@ def make_synthesizer_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
                         # tokens). At local-8B decode speeds every extra token
                         # is user-visible wait, so don't leave 2048 on the
                         # table for a runaway generation.
-                        max_tokens=1024,
-                        temperature=0.7,
+                        max_tokens=SYNTHESIZER_MAX_TOKENS,
+                        temperature=SYNTHESIZER_TEMPERATURE,
                     )
                     otel.record_llm_result(
                         llm_sp,

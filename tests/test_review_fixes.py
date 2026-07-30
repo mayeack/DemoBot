@@ -260,6 +260,61 @@ _gov_src = inspect.getsource(_govnode)
 check("F17-2: governance flags authority from boundary_detected, not boundary_injected",
       "authority_violation_detected=boundary_detected" in _gov_src)
 
+# --- Ultracode review follow-ups -------------------------------------------
+
+# F13 — hallucination gets the same requested-vs-delivered treatment as
+# authority. It reported hallucination_detected from the REQUEST flag, so on
+# ollama (where the ask rides in the JSON answer contract and the model can
+# decline) an event could claim fabricated content the user never saw.
+check("F13: governance flags hallucination from hallucination_detected",
+      "hallucination_detected=hallucination_detected" in _gov_src)
+check("F13: hallucination_types are gated on detection, not the request",
+      "hallucination_types if hallucination_detected" in _gov_src)
+
+from backend.agents.nodes import injection as _inj  # noqa: E402
+
+_inj_src = inspect.getsource(_inj.injection_node)
+check("F13: injection_node records hallucination presence from the text",
+      'updates["hallucination_detected"] = present' in _inj_src)
+check("F13: hallucination_detected declared on the graph state",
+      "hallucination_detected" in inspect.getsource(
+          __import__("backend.agents.state", fromlist=["state"])))
+
+# F14 — the ollama authority directive must target the field the theme's answer
+# ACTUALLY has. telecomchatbot's contract is {reply, severity, confidence} with
+# no guidance array, so soliciting into "guidance" asked for content that the
+# formatter discards — while the turn still logged an authority violation.
+_tele_directive = _inj.authority_directive_ollama("telecomchatbot")
+check("F14: telecom authority directive targets 'reply', not 'guidance'",
+      '"reply"' in _tele_directive and '"guidance"' not in _tele_directive,
+      _tele_directive[:160])
+_med_directive = _inj.authority_directive_ollama("medadvice")
+check("F14: structured themes still target the guidance array",
+      '"guidance"' in _med_directive, _med_directive[:160])
+
+# F12 — every provider honors an explicit model_override. anthropic/bedrock/
+# openai ignored it while still caching under it and reporting it in telemetry.
+_llm_src = inspect.getsource(__import__("backend.agents.llm", fromlist=["llm"]))
+check("F12: all five providers apply model_override",
+      _llm_src.count("model=model_override or settings.") == 5,
+      str(_llm_src.count("model=model_override or settings.")))
+
+# F18 — the router logs the synthesizer's real request params, from one source.
+from backend.agents.nodes.agent_common import (  # noqa: E402
+    SYNTHESIZER_MAX_TOKENS,
+    SYNTHESIZER_TEMPERATURE,
+)
+from backend.agents import supervisor as _sup  # noqa: E402
+
+_sup_src = inspect.getsource(_sup.router_node)
+check("F18: router logs request params from the shared constants",
+      "SYNTHESIZER_MAX_TOKENS" in _sup_src and "2048" not in _sup_src)
+check("F18: the shared cap matches what the synthesizer actually passes",
+      f"max_tokens=SYNTHESIZER_MAX_TOKENS" in inspect.getsource(_sup)
+      or SYNTHESIZER_MAX_TOKENS == 1024, str(SYNTHESIZER_MAX_TOKENS))
+check("F18: temperature constant is the synthesizer's",
+      SYNTHESIZER_TEMPERATURE == 0.7, str(SYNTHESIZER_TEMPERATURE))
+
 
 print()
 if _failures:
