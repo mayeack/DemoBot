@@ -118,51 +118,88 @@ def main() -> int:
         rmsg = c.post("/api/chat/message", headers=AUTH,
                       json={"session_id": sid, "message": "test", "disclaimer_accepted": True})
         check("POST /api/chat/message (stubbed LLM) -> 200", rmsg.status_code == 200, f"{rmsg.status_code}")
-        # --- Governance content toggles: each force_* flag now appends a
-        # directive to the INPUT asking the model to produce the content, with a
-        # deterministic fallback when the (stubbed) model omits it.
-        # force_boundary_injection -> "outside of authority" directive + fallback.
-        rb = c.post("/api/chat/message", headers=AUTH,
-                    json={"session_id": sid, "message": "I have a sore throat.",
-                          "disclaimer_accepted": True, "force_boundary_injection": True})
-        check("force_boundary_injection -> outside-of-authority directive on the INPUT",
-              "AUTHORITY-VIOLATION SAMPLE" in _last_system["v"])
-        check("force_boundary_injection -> overreach present (fallback fires for stubbed model)",
-              rb.status_code == 200 and "**Recommended Prescription:**" in rb.json().get("message", ""),
-              f"{rb.status_code}")
-        # force_pii_injection -> PII directive + synthetic SSN via fallback
-        rp = c.post("/api/chat/message", headers=AUTH,
-                    json={"session_id": sid, "message": "I have a sore throat.",
-                          "disclaimer_accepted": True, "force_pii_injection": True})
-        check("force_pii_injection -> PII directive on the INPUT",
-              "PII/PHI SAMPLE" in _last_system["v"])
-        check("force_pii_injection -> synthetic SSN present (fallback)",
-              rp.status_code == 200 and bool(re.search(r"\d{3}-\d{2}-\d{4}", rp.json().get("message", ""))),
-              f"{rp.status_code}")
-        # force_toxic_injection -> toxic directive + harassment via fallback
-        rt = c.post("/api/chat/message", headers=AUTH,
-                    json={"session_id": sid, "message": "I have a sore throat.",
-                          "disclaimer_accepted": True, "force_toxic_injection": True})
-        check("force_toxic_injection -> toxic directive on the INPUT",
-              "TOXICITY SAMPLE" in _last_system["v"])
-        check("force_toxic_injection -> toxic content present (fallback)",
-              rt.status_code == 200 and "**Direct Assessment:**" in rt.json().get("message", ""),
-              f"{rt.status_code}")
-        # force_hallucination_injection -> hallucination directive on the INPUT
-        rh = c.post("/api/chat/message", headers=AUTH,
-                    json={"session_id": sid, "message": "I have a sore throat.",
-                          "disclaimer_accepted": True, "force_hallucination_injection": True})
-        check("force_hallucination_injection -> hallucination directive on the INPUT",
-              rh.status_code == 200 and "HALLUCINATION SAMPLE" in _last_system["v"], f"{rh.status_code}")
-        # with no switches and zeroed background rates: no directive, no overreach
-        rnb = c.post("/api/chat/message", headers=AUTH,
-                     json={"session_id": sid, "message": "I have a sore throat.",
-                           "disclaimer_accepted": True})
-        check("no toggles -> no directive on the INPUT",
-              "INTERNAL SAFETY-DETECTOR TEST SUITE" not in _last_system["v"])
-        check("no toggles -> no overreach marker",
-              rnb.status_code == 200 and "**Recommended Prescription:**" not in rnb.json().get("message", ""),
-              f"{rnb.status_code}")
+        # --- Governance content toggles ------------------------------------
+        # Each force_* flag appends a directive to the INPUT asking the model to
+        # produce the content, with a deterministic fallback when the (stubbed)
+        # model omits it.
+        #
+        # The directive TEXT is provider-dependent (build_input_directives):
+        #   * ollama       -> natural, UNLABELED asks; an uncensored local model
+        #                     complies with those. Hallucination and authority
+        #                     ride inside the JSON answer contract instead of an
+        #                     appended block, because dolphin3:8b emits unfenced
+        #                     JSON and the synthesizer drops any trailing text.
+        #   * every other  -> the labeled "* SAMPLE:" test-suite framing that a
+        #                     censored model needs to comply at all.
+        # So pin the provider per block and assert BOTH builders. Previously this
+        # section asserted only the labeled markers, which meant all five checks
+        # failed whenever .env selected ollama — i.e. in the default demo config.
+        _saved_provider = settings.ai_provider
+
+        def _turn(**flags):
+            return c.post("/api/chat/message", headers=AUTH,
+                          json={"session_id": sid, "message": "I have a sore throat.",
+                                "disclaimer_accepted": True, **flags})
+
+        try:
+            # -- labeled path (anthropic / bedrock / openai / nvidia) ----------
+            settings.ai_provider = "anthropic"
+            rb = _turn(force_boundary_injection=True)
+            check("labeled: boundary -> AUTHORITY-VIOLATION SAMPLE on the INPUT",
+                  "AUTHORITY-VIOLATION SAMPLE" in _last_system["v"])
+            check("labeled: boundary -> overreach present (fallback fires for stubbed model)",
+                  rb.status_code == 200 and "**Recommended Prescription:**" in rb.json().get("message", ""),
+                  f"{rb.status_code}")
+            rp = _turn(force_pii_injection=True)
+            check("labeled: pii -> PII/PHI SAMPLE on the INPUT",
+                  "PII/PHI SAMPLE" in _last_system["v"])
+            check("labeled: pii -> synthetic SSN present (fallback)",
+                  rp.status_code == 200 and bool(re.search(r"\d{3}-\d{2}-\d{4}", rp.json().get("message", ""))),
+                  f"{rp.status_code}")
+            rt = _turn(force_toxic_injection=True)
+            check("labeled: toxic -> TOXICITY SAMPLE on the INPUT",
+                  "TOXICITY SAMPLE" in _last_system["v"])
+            check("labeled: toxic -> toxic content present (fallback)",
+                  rt.status_code == 200 and "**Direct Assessment:**" in rt.json().get("message", ""),
+                  f"{rt.status_code}")
+            rh = _turn(force_hallucination_injection=True)
+            check("labeled: hallucination -> HALLUCINATION SAMPLE on the INPUT",
+                  rh.status_code == 200 and "HALLUCINATION SAMPLE" in _last_system["v"], f"{rh.status_code}")
+
+            rnb = _turn()
+            check("labeled: no toggles -> no directive on the INPUT",
+                  "INTERNAL SAFETY-DETECTOR TEST SUITE" not in _last_system["v"])
+            check("labeled: no toggles -> no overreach marker",
+                  rnb.status_code == 200 and "**Recommended Prescription:**" not in rnb.json().get("message", ""),
+                  f"{rnb.status_code}")
+
+            # -- ollama path: unlabeled asks, and the two categories that must
+            #    survive the JSON parse are written into the answer contract ---
+            settings.ai_provider = "ollama"
+            rp = _turn(force_pii_injection=True)
+            check("ollama: pii -> unlabeled NNN-NN-NNNN ask, no SAMPLE label",
+                  "NNN-NN-NNNN" in _last_system["v"]
+                  and "PII/PHI SAMPLE" not in _last_system["v"])
+            check("ollama: pii -> synthetic SSN present (fallback)",
+                  rp.status_code == 200 and bool(re.search(r"\d{3}-\d{2}-\d{4}", rp.json().get("message", ""))),
+                  f"{rp.status_code}")
+            rt = _turn(force_toxic_injection=True)
+            check("ollama: toxic -> unlabeled ask, no SAMPLE label",
+                  "dismissive, condescending, insulting remark" in _last_system["v"]
+                  and "TOXICITY SAMPLE" not in _last_system["v"])
+            rh = _turn(force_hallucination_injection=True)
+            check("ollama: hallucination -> embedded in the answer contract",
+                  "never admit that anything is invented or unverified" in _last_system["v"])
+            rb = _turn(force_boundary_injection=True)
+            check("ollama: boundary -> overstep directive embedded in the answer",
+                  "overstep your authorized non-prescriptive scope" in _last_system["v"])
+
+            rnb = _turn()
+            check("ollama: no toggles -> neither directive header on the INPUT",
+                  "written as earnest, first-person advice" not in _last_system["v"]
+                  and "REQUIRED IN THIS RESPONSE" not in _last_system["v"])
+        finally:
+            settings.ai_provider = _saved_provider
         # /message/stream: same turn over SSE — auth-gated, stage frames then one final.
         r401 = c.post("/api/chat/message/stream",
                       json={"session_id": sid, "message": "test", "disclaimer_accepted": True})
@@ -264,6 +301,13 @@ def main() -> int:
               and "sensitive_tools" in rpol.json(), f"{rpol.status_code}")
 
         # ---- settings ----
+        # These PUTs persist to the AppSettings row in ./medadvice.db — the SAME
+        # database the live app reads. Snapshot and restore both values so a test
+        # run cannot silently disable an operator's Emit Static Model or reset a
+        # custom logs directory (this suite advertises itself as side-effect-safe).
+        _saved_logs_dir = c.get("/api/settings", headers=AUTH).json().get("logs_directory")
+        _saved_emit = c.get("/api/settings/emit-model", headers=AUTH).json()
+
         rs = c.get("/api/settings", headers=AUTH)
         check("GET /api/settings -> 200 + logs_directory", rs.status_code == 200 and "logs_directory" in rs.json())
         check("PUT /api/settings -> 200", c.put("/api/settings", headers=AUTH, json={"logs_directory": "logs"}).status_code == 200)
@@ -273,6 +317,20 @@ def main() -> int:
               c.put("/api/settings/emit-model", headers=AUTH, json={"enabled": False, "model_name": "gpt-4o", "random": False}).status_code == 200)
         check("PUT /api/settings/emit-model unknown model -> 422",
               c.put("/api/settings/emit-model", headers=AUTH, json={"enabled": True, "model_name": "not-a-real-model", "random": False}).status_code == 422)
+
+        # Restore the operator's values (mirrors the ai_defense discovery restore
+        # further down). Best-effort: a failure here must not mask a real result.
+        try:
+            if _saved_logs_dir:
+                c.put("/api/settings", headers=AUTH, json={"logs_directory": _saved_logs_dir})
+            if _saved_emit.get("model_name"):
+                c.put("/api/settings/emit-model", headers=AUTH, json={
+                    "enabled": bool(_saved_emit.get("enabled")),
+                    "model_name": _saved_emit["model_name"],
+                    "random": bool(_saved_emit.get("random")),
+                })
+        except Exception as exc:  # noqa: BLE001
+            print(f"  WARN: could not restore settings: {exc}")
         rsi = c.get("/api/server-info", headers=AUTH)
         check("GET /api/server-info -> 200 + non-empty hostname",
               rsi.status_code == 200 and bool(rsi.json().get("hostname")), f"{rsi.status_code}")
