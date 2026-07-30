@@ -42,12 +42,32 @@ processors:
     traces:
       span:
         - 'attributes["gen_ai.operation.name"] == nil'
+  # Keep ONLY the gen_ai histograms for the classic (flattened) fan-out below —
+  # everything else already reaches o11y natively via the main metrics pipeline
+  # and must not be double-exported.
+  filter/genai_hist_only:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'not IsMatch(name, "^gen_ai\\.(client\\.(token\\.usage|operation\\.duration)|agent\\.duration)$")'
 
 exporters:
   signalfx:
     access_token: "${env:SPLUNK_ACCESS_TOKEN}"
     realm: "${env:SPLUNK_REALM}"
     send_otlp_histograms: true
+  # Classic-mode fan-out for the gen_ai histograms ONLY (see filter above).
+  # The org's cardinality limiter has been refusing NEW native-histogram MTS for
+  # gen_ai.client.* since 2026-07-29 while classic flattened series
+  # (_bucket/_count/_sum/_min/_max) still create freely — the k8s workshop
+  # stacks mint them continuously. This leg stores our token/duration data in
+  # that flattened form under distinct metric names, so it survives the freeze
+  # and stays chartable; the native leg above keeps sending so data resumes
+  # under the bare names the moment the limiter is lifted. Remove this exporter
+  # + its pipeline once native creation works again.
+  signalfx/classic:
+    access_token: "${env:SPLUNK_ACCESS_TOKEN}"
+    realm: "${env:SPLUNK_REALM}"
   otlphttp/traces:
     traces_endpoint: "https://ingest.${env:SPLUNK_REALM}.signalfx.com/v2/trace/otlp"
     headers:
@@ -71,6 +91,12 @@ service:
       receivers: [otlp]
       processors: [transform/metrics_slim, batch]
       exporters: [signalfx]
+    # gen_ai histograms additionally in classic flattened form (see
+    # signalfx/classic note). Same slim resource shape.
+    metrics/genai_classic:
+      receivers: [otlp]
+      processors: [transform/metrics_slim, filter/genai_hist_only, batch]
+      exporters: [signalfx/classic]
   telemetry:
     logs:
       level: info
