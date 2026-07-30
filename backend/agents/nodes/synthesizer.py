@@ -29,7 +29,11 @@ from backend.agents.nodes.agent_common import (
     request_model,
     trace_entry,
 )
-from backend.agents.nodes.injection import build_input_directives, relax_scope_rules
+from backend.agents.nodes.injection import (
+    build_input_directives,
+    embed_hallucination_contract,
+    relax_scope_rules,
+)
 from backend.agents.nodes.shared import build_llm_messages, content_engine
 from backend.agents.themes.base import build_synthesizer_prompt
 from backend.config import settings
@@ -88,6 +92,12 @@ def make_synthesizer_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
         # directive; ordinary turns keep the safe OTC-only rules untouched.
         if requested_categories.get("authority"):
             system_prompt = relax_scope_rules(system_prompt, theme_config.key)
+        # Same idea for the hallucination category on the local model: an appended
+        # directive alone is ignored, so the fabrication requirement is written into
+        # the theme's own answer contract. Censored providers already comply with the
+        # labeled-sample directive, so they keep the prompt untouched.
+        if requested_categories.get("hallucination") and settings.ai_provider == "ollama":
+            system_prompt = embed_hallucination_contract(system_prompt, theme_config.key)
         if findings:
             system_prompt = f"{system_prompt}\n\nSPECIALIST FINDINGS:\n{findings}"
         system_prompt = system_prompt + directive_text
