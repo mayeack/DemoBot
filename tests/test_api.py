@@ -456,6 +456,25 @@ def main() -> int:
         check("DELETE /api/hec/destinations/{id} -> 200", c.delete(f"/api/hec/destinations/{did}", headers=AUTH).status_code == 200)
         check("GET /api/hec/destinations/{bad} -> 404", c.get("/api/hec/destinations/nope", headers=AUTH).status_code == 404)
 
+        # HEC envelope: a key in BOTH the indexed "fields" block and the event
+        # body is indexed *and* extracted at search time (gen_ai:json sets
+        # KV_MODE=json), so Splunk returns it as a two-value multivalue field and
+        # every `stats ... by <key>` silently doubles -- including the ES prompt
+        # injection rule's per-actor risk. Pin the invariant here.
+        from backend.hec.config import HECConfig as _HECConfig
+        from backend.hec.forwarder import HECForwarder as _HECFwd, _BODY_OWNED_KEYS
+        _fwd = _HECFwd(_HECConfig(id="t", name="t", url="https://localhost:8088"), "tok")
+        _body = {"session_id": "s1", "request_id": "r1", "trace_id": "t1",
+                 "enduser_id": "t.nguyen", "risk_score": 60}
+        _env = _fwd._build_event("governance", _body)
+        _dupes = sorted(set(_env["fields"]) & set(_env["event"]))
+        check("HEC envelope: no field is both indexed and in the event body",
+              not _dupes, f"duplicated: {_dupes}")
+        check("HEC envelope: correlation ids stay in the event body",
+              all(k in _env["event"] for k in _BODY_OWNED_KEYS))
+        check("HEC envelope: forwarder-owned log_type is still indexed",
+              _env["fields"].get("log_type") == "governance")
+
         # ---- admin ----
         for path in ("/admin/logs/interactions", "/admin/logs/escalations", "/admin/logs/metrics", "/admin/logs/export"):
             check(f"GET {path} -> 200", c.get(path, headers=AUTH).status_code == 200)

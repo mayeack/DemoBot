@@ -23,9 +23,23 @@ from backend.hec.config import (DEFAULT_HOST, DEFAULT_INDEX, DEFAULT_SOURCE,
 
 logger = logging.getLogger(__name__)
 
-# Correlation ids promoted to HEC indexed fields so they're searchable via
-# tstats and line up with the OTel trace data in Splunk Observability.
-_INDEXED_KEYS = ("session_id", "request_id", "trace_id", "enduser_id")
+# These correlation ids used to be promoted into the HEC envelope's "fields"
+# block as indexed fields, so they'd be searchable via tstats. They are ALSO in
+# the event body, and the canonical sourcetype extracts that body at SEARCH time
+# (gen_ai:json sets KV_MODE = json) -- so Splunk saw each id twice and returned
+# it as a two-value multivalue field.
+#
+# That silently doubled every `stats ... by enduser_id`: a spray campaign whose
+# true total was 260 risk over 5 turns reported 520 over 10. The ES rule
+# "AI Governance - Prompt Injection Attack Correlation - Rule" groups by an
+# actor coalesced from enduser.id, so its correlation_risk -- and the severity
+# derived from it -- were inflated the same way. A bare `| stats count` was
+# unaffected; only the `by <field>` form.
+#
+# Nothing actually used the tstats path, so the body copy wins and these are no
+# longer promoted. Do NOT put a key here that also exists in the event body;
+# add genuinely forwarder-owned metadata (like log_type) instead.
+_BODY_OWNED_KEYS = ("session_id", "request_id", "trace_id", "enduser_id")
 
 
 def _epoch_from(log_data: Dict[str, Any]) -> Optional[float]:
@@ -164,12 +178,13 @@ class HECForwarder:
             "index": self._cfg.index or DEFAULT_INDEX,
             "event": log_data,
         }
+        # Only forwarder-owned metadata belongs in "fields". Anything also present
+        # in the event body is dropped here rather than trusted to review: the
+        # duplicate would be indexed AND extracted at search time, and the
+        # resulting multivalue field double-counts every `stats ... by <key>`.
         fields: Dict[str, str] = {"log_type": log_type}
-        for key in _INDEXED_KEYS:
-            value = log_data.get(key)
-            if value:
-                fields[key] = str(value)
-        event["fields"] = fields
+        event["fields"] = {k: v for k, v in fields.items()
+                           if k not in _BODY_OWNED_KEYS}
         return event
 
     # ------------------------------------------------------------------
