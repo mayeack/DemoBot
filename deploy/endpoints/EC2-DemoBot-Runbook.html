@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DemoBot EC2 — Configuration Reference &amp; Rebuild Runbook</title>
+<style>
+:root{--bg:#ffffff;--fg:#1c1e21;--muted:#5c6370;--border:#d7dbe0;--accent:#0b6bcb;--code-bg:#f5f7f9;--th:#eef2f6;--warn:#8a5a00}
+@media (prefers-color-scheme: dark){:root{--bg:#14171a;--fg:#e6e8ea;--muted:#9aa3ad;--border:#2c3238;--accent:#63a9f0;--code-bg:#1c2126;--th:#1f252b;--warn:#e0b050}}
+*{box-sizing:border-box}
+body{margin:0;padding:2.5rem 1.5rem 5rem;background:var(--bg);color:var(--fg);
+ font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+ -webkit-font-smoothing:antialiased}
+main{max-width:60rem;margin:0 auto}
+h1{font-size:2rem;line-height:1.25;margin:0 0 .5rem;letter-spacing:-.02em}
+h2{font-size:1.4rem;margin:3rem 0 .75rem;padding-bottom:.4rem;border-bottom:1px solid var(--border);letter-spacing:-.01em}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+h4{font-size:1rem;margin:1.5rem 0 .4rem;color:var(--muted)}
+p,li{margin:.6rem 0}
+a{color:var(--accent)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.875em;
+ background:var(--code-bg);padding:.15em .4em;border-radius:4px;border:1px solid var(--border)}
+pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:1rem;
+ overflow-x:auto;line-height:1.5}
+pre code{background:none;border:none;padding:0;font-size:.85rem}
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--th);font-weight:600}
+tbody tr:nth-child(even){background:color-mix(in srgb,var(--th) 45%,transparent)}
+blockquote{margin:1.2rem 0;padding:.6rem 1rem;border-left:3px solid var(--warn);
+ background:color-mix(in srgb,var(--warn) 8%,transparent);color:var(--fg)}
+blockquote p{margin:.3rem 0}
+hr{border:none;border-top:1px solid var(--border);margin:2.5rem 0}
+strong{font-weight:650}
+ul,ol{padding-left:1.4rem}
+@media print{body{padding:0}pre,table{page-break-inside:avoid}}
+</style></head>
+<body><main>
+<h1 id="demobot-ec2-configuration-reference-rebuild-runbook">DemoBot EC2 — Configuration Reference &amp; Rebuild Runbook</h1>
+<p><strong>Captured:</strong> 2026-07-27 from <code>i-0883a0ddedf54e4e8</code> (35.175.173.5)
+<strong>Purpose:</strong> document the running instance completely enough to rebuild it, or a
+replica of it, from a raw EC2 instance.</p>
+<hr />
+<h2 id="1-scope-what-is-actually-reproducible">1. Scope — what is actually reproducible</h2>
+<p>The instance runs two independent stacks. Only the second one is part of the
+workshop deliverable.</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Origin</th>
+<th>Reproducible on a raw EC2?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>A. Corporate base image</strong> — CrowdStrike Falcon, Nessus agent, PBIS/AD join, fail2ban, ansible, SSM, CloudWatch agent, collectd, <code>AllowGroups</code> SSH policy</td>
+<td>Cisco-managed AMI <code>ami-09860bb56ed1a5925</code> + Ansible</td>
+<td><strong>No.</strong> Comes from launching the same managed AMI in the same account. Not required for DemoBot.</td>
+</tr>
+<tr>
+<td><strong>B. Splunk Enterprise 10.4.1</strong> (<code>/opt/splunk</code>, ports 8443/8089/8088) + Universal Forwarder</td>
+<td>Pre-installed on the lab AMI</td>
+<td>Optional. Independent of DemoBot; DemoBot exports to Splunk <strong>Observability Cloud</strong> (SaaS), not to this local Splunkd.</td>
+</tr>
+<tr>
+<td><strong>C. DemoBot workload</strong> — Ollama, DemoBot app, OTel collector, Cloudflare tunnel</td>
+<td>Built 2026-07-27 by <code>~/ec2-bootstrap.sh</code></td>
+<td><strong>Yes, fully.</strong> Section 6 rebuilds it end to end.</td>
+</tr>
+</tbody>
+</table>
+<p>If the goal is "another DemoBot replica," you only need <strong>§6</strong>. Sections 2–5 are
+the as-built record of this box.</p>
+<hr />
+<h2 id="2-aws-instance-facts">2. AWS / instance facts</h2>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Instance ID</td>
+<td><code>i-0883a0ddedf54e4e8</code></td>
+</tr>
+<tr>
+<td>Instance type</td>
+<td><code>c6i.2xlarge</code> (8 vCPU, 15 GiB RAM)</td>
+</tr>
+<tr>
+<td>AMI</td>
+<td><code>ami-09860bb56ed1a5925</code> (Ubuntu 22.04.5 LTS, jammy)</td>
+</tr>
+<tr>
+<td>Kernel</td>
+<td><code>6.5.0-1014-aws</code>, x86_64</td>
+</tr>
+<tr>
+<td>Region / AZ</td>
+<td><code>us-east-1</code> / <code>us-east-1a</code></td>
+</tr>
+<tr>
+<td>Private IP</td>
+<td><code>172.31.27.241</code></td>
+</tr>
+<tr>
+<td>Public IP</td>
+<td><code>35.175.173.5</code></td>
+</tr>
+<tr>
+<td>Security group</td>
+<td><code>SOAR-Hunter-Lab</code></td>
+</tr>
+<tr>
+<td>IAM instance profile</td>
+<td><code>aws_cloudwatch_role_for_ec2</code> (acct <code>754184243988</code>)</td>
+</tr>
+<tr>
+<td>Root volume</td>
+<td>100 GiB gp3, ext4, single partition + 106 MB EFI. 31 GB used</td>
+</tr>
+<tr>
+<td>Swap</td>
+<td>none</td>
+</tr>
+<tr>
+<td>Hostname</td>
+<td><code>show-demo-i-0883a0ddedf54e4e8</code></td>
+</tr>
+<tr>
+<td>Timezone</td>
+<td><code>Etc/UTC</code>, chrony synced</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Sizing note.</strong> Both Ollama models are CPU-only (no GPU on <code>c6i</code>). Resident
+footprint is ~9.3 GB across <code>dolphin3:8b</code> (6.2 GB) + <code>llama3.2:3b</code> (3.1 GB), on
+top of Splunk Enterprise. The box sits at ~10 GB/15 GB used. A rebuild that
+drops Splunk Enterprise runs comfortably on the same instance type; anything
+smaller than ~16 GB RAM will thrash between the two models.</p>
+<h3 id="ports-that-must-be-reachable">Ports that must be reachable</h3>
+<table>
+<thead>
+<tr>
+<th>Port</th>
+<th>Bind</th>
+<th>Purpose</th>
+<th>Exposure needed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2222</td>
+<td><code>0.0.0.0</code></td>
+<td>SSH (non-standard port)</td>
+<td>inbound from admin IPs</td>
+</tr>
+<tr>
+<td>8001</td>
+<td><code>0.0.0.0</code></td>
+<td>DemoBot / uvicorn</td>
+<td><strong>not</strong> publicly required — Cloudflare tunnel is outbound-only</td>
+</tr>
+<tr>
+<td>11434</td>
+<td><code>127.0.0.1</code></td>
+<td>Ollama</td>
+<td>local only</td>
+</tr>
+<tr>
+<td>4317 / 4318</td>
+<td><code>0.0.0.0</code></td>
+<td>OTel collector OTLP gRPC / HTTP</td>
+<td>local only</td>
+</tr>
+<tr>
+<td>8888</td>
+<td><code>127.0.0.1</code></td>
+<td>Collector self-metrics</td>
+<td>local only</td>
+</tr>
+<tr>
+<td>8443 / 8089 / 8088</td>
+<td><code>0.0.0.0</code></td>
+<td>Splunk Enterprise web / mgmt / HEC</td>
+<td>only if keeping layer B</td>
+</tr>
+</tbody>
+</table>
+<p>Outbound egress required: <code>*.signalfx.com</code>, <code>api.multitenant.galileocloud.io</code>,
+<code>*.argotunnel.com</code> / Cloudflare edge, <code>ollama.com</code>, <code>github.com</code>,
+<code>us.api.inspect.aidefense.security.cisco.com</code>.</p>
+<p><code>ufw</code> is <strong>inactive</strong>. The only iptables rule is a fail2ban chain on 22/2222.
+Network policy is enforced entirely by the AWS security group.</p>
+<hr />
+<h2 id="3-users-access-and-ssh">3. Users, access, and SSH</h2>
+<pre><code>splunk:x:1003:1004  /home/splunk  /bin/bash   groups: splunk, wheel, ollama
+ubuntu:x:1000:1000  (cloud-init default)
+ansible:x:1001:100  (config management)
+ssm-user:x:1002:1003 (SSM Session Manager)
+</code></pre>
+<p>DemoBot runs entirely as <strong><code>splunk</code></strong>. That user needs:
+- membership in <code>wheel</code> (passwordless sudo via <code>/etc/sudoers.d/wheel</code>) — also
+  granted directly by <code>/etc/sudoers.d/splunk</code> and <code>/etc/sudoers.d/newuser</code>
+- membership in <code>ollama</code> (created by the Ollama installer)
+- inclusion in sshd's <code>AllowGroups</code> list</p>
+<p><code>/etc/ssh/sshd_config</code> — the non-default settings:</p>
+<pre><code>Port 2222
+LogLevel VERBOSE
+PasswordAuthentication yes          # inherited from 60-cloudimg-settings.conf
+PubkeyAuthentication yes
+Banner /etc/ssh/banner
+AllowGroups sg-it-scip-dvo sg-it-scip-dvo-awf ssg-its-nspire-platform-services-all \
+            sg-srv-rpa ssg-sgs-gso-splunkcirt-ic wheel ansible
+</code></pre>
+<blockquote>
+<p><code>AllowGroups</code> is the gate that matters: a new user cannot SSH in unless it is
+in one of those groups. <code>splunk</code> gets in via <code>wheel</code>.</p>
+</blockquote>
+<p><code>/home/splunk/.ssh/authorized_keys</code> holds two keys:</p>
+<table>
+<thead>
+<tr>
+<th>Comment</th>
+<th>Type</th>
+<th>Fingerprint</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>demo-migrate</code></td>
+<td>RSA 2048</td>
+<td><code>SHA256:Fz9ftTJOHH4T0Asq7Z+bclNsIvWIGScqAKQqwjnvqUU</code></td>
+</tr>
+<tr>
+<td><code>demobot-deploy</code></td>
+<td>ED25519</td>
+<td><code>SHA256:lACYZxASafU0zNuZCY145FOUHf9wSqv31G4MC/gejms</code></td>
+</tr>
+</tbody>
+</table>
+<p>The workstation-side private key for <code>demobot-deploy</code> is <code>~/.ssh/demobot_ec2</code>.</p>
+<pre><code class="language-bash">ssh -i ~/.ssh/demobot_ec2 -p 2222 splunk@35.175.173.5
+</code></pre>
+<hr />
+<h2 id="4-software-inventory">4. Software inventory</h2>
+<h3 id="installed-outside-the-base-image">Installed outside the base image</h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Version</th>
+<th>Path</th>
+<th>Installed from</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Python 3.11</td>
+<td>3.11.15</td>
+<td><code>/usr/bin/python3.11</code></td>
+<td><strong>deadsnakes PPA</strong> (system default is 3.10.12)</td>
+</tr>
+<tr>
+<td>Ollama</td>
+<td>0.32.4</td>
+<td><code>/usr/local/bin/ollama</code></td>
+<td><code>https://ollama.com/install.sh</code></td>
+</tr>
+<tr>
+<td>cloudflared</td>
+<td>2026.7.3</td>
+<td><code>/usr/local/bin/cloudflared</code></td>
+<td>GitHub <code>.deb</code> release</td>
+</tr>
+<tr>
+<td>otelcol-contrib</td>
+<td>(415 MB binary)</td>
+<td><code>~/DemoBot/bin/otelcol-contrib</code></td>
+<td>GitHub release tarball</td>
+</tr>
+<tr>
+<td>AWS CLI</td>
+<td>—</td>
+<td><code>/usr/local/bin/aws</code></td>
+<td>base image</td>
+</tr>
+<tr>
+<td>Splunk Enterprise</td>
+<td>10.4.1 (5a009d941268)</td>
+<td><code>/opt/splunk</code></td>
+<td>base image</td>
+</tr>
+</tbody>
+</table>
+<p>Not present: <code>node</code>/<code>npm</code>, <code>podman</code>, <code>docker</code>, <code>sqlite3</code> CLI, <code>uv</code>.
+The OpenClaw gateway (<code>run-openclaw.sh</code>) therefore <strong>does not run on this box</strong> —
+it needs podman. It runs only on the Mac replica.</p>
+<h3 id="apt-sources-added">APT sources added</h3>
+<pre><code>deb https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu/ jammy main
+deb https://ppa.launchpadcontent.net/ansible/ansible/ubuntu/ jammy main
+deb https://splunk.jfrog.io/splunk/otel-collector-deb release main
+</code></pre>
+<p>The apt-installed <code>splunk-otel-collector</code> service is <strong>masked and inactive</strong> —
+DemoBot uses its own <code>otelcol-contrib</code> binary instead. Leave it masked; two
+collectors fighting over :4317 is a common failure mode here.</p>
+<h3 id="ollama-models">Ollama models</h3>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>ID</th>
+<th>Size</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dolphin3:8b</code></td>
+<td><code>d5ab9ae8e1f2</code></td>
+<td>4.9 GB</td>
+<td>user-facing synthesizer (clean)</td>
+</tr>
+<tr>
+<td><code>dolphin3:8b-poisoned</code></td>
+<td><code>d22293974766</code></td>
+<td>4.9 GB</td>
+<td>demo variant with an injected prescribing directive</td>
+</tr>
+<tr>
+<td><code>llama3.2:3b</code></td>
+<td><code>a80c4f17acd5</code></td>
+<td>2.0 GB</td>
+<td>internal coordinator/specialist agents</td>
+</tr>
+</tbody>
+</table>
+<p><code>dolphin3:8b-poisoned</code> is built locally from <code>/home/splunk/Modelfile.poisoned</code>
+(138 lines) — it is a <code>FROM dolphin3:8b</code> overlay whose TEMPLATE injects a
+system-level directive after the app's own system prompt. <strong>This is the
+workshop's guardrail-failure exhibit; it is not a stock model and must be
+rebuilt with <code>ollama create</code>, not pulled.</strong> Keep <code>Modelfile.poisoned</code> in your
+backup set — it is not in the git repo.</p>
+<p>Systemd drop-in <code>/etc/systemd/system/ollama.service.d/keepalive.conf</code>:</p>
+<pre><code class="language-ini">[Service]
+Environment=&quot;OLLAMA_MAX_LOADED_MODELS=2&quot;
+Environment=&quot;OLLAMA_KEEP_ALIVE=30m&quot;
+</code></pre>
+<h3 id="python-environment">Python environment</h3>
+<p><code>~/DemoBot/venv</code> built on <strong>python3.11</strong> (not the system 3.10 — LangChain 1.x
+requires it). 102 packages; pinned by <code>requirements.txt</code>. Load-bearing ones:</p>
+<pre><code>fastapi 0.109.0 / uvicorn 0.27.0 / starlette 0.35.1
+langchain 1.3.2 / langgraph 1.2.2 / langchain-ollama 1.1.0 / langchain-anthropic 1.4.6
+anthropic 0.109.2 / openai 2.43.0 / ollama 0.6.2
+opentelemetry-* 1.38.0 (sdk/api/exporters), instrumentation 0.59b0
+splunk-opentelemetry 2.8.0
+splunk-otel-util-genai 0.1.14 / splunk-otel-genai-emitters-splunk 0.1.8
+splunk-otel-instrumentation-langchain 0.1.14   # present but DISABLED at runtime
+galileo 2.3.0 / galileo-core 4.4.0
+SQLAlchemy 2.0.25
+</code></pre>
+<hr />
+<h2 id="5-demobot-application-configuration">5. DemoBot application configuration</h2>
+<h3 id="layout">Layout</h3>
+<pre><code>/home/splunk/
+├── DemoBot/                     # git clone, branch main @ edfcb88 (PR #32)
+│   ├── .env                     # 0600, secrets — NOT in git
+│   ├── venv/                    # python3.11
+│   ├── bin/otelcol-contrib      # 415 MB, not in git
+│   ├── medadvice.db             # SQLite, per-instance state
+│   ├── otel-collector-config.yaml
+│   ├── run.sh  run-collector.sh  start-all.sh
+│   └── logs/
+├── .cloudflared/
+│   ├── config.yml
+│   └── 52a942e8-…-7865fc94c41b.json    # tunnel credentials — NOT in git
+├── Modelfile.poisoned           # poisoned-model recipe — NOT in git
+└── ec2-bootstrap.sh             # the build script that produced this box
+</code></pre>
+<p>Repo: <code>https://github.com/mayeack/DemoBot.git</code>, <code>main</code> @
+<code>edfcb88f089c09e5d0cd7b32d8016d2f64da86c1</code>.</p>
+<h3 id="env-non-secret-values-verbatim"><code>.env</code> — non-secret values (verbatim)</h3>
+<pre><code class="language-ini"># --- AI provider: local uncensored model -------------------------------
+AI_PROVIDER=ollama
+OLLAMA_MODEL=dolphin3:8b
+OLLAMA_MODEL_INTERNAL=llama3.2:3b
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_NUM_CTX=8192
+OLLAMA_KEEP_ALIVE=30m
+ANTHROPIC_MODEL=claude-sonnet-4-5-20250929   # used when AI_PROVIDER=anthropic
+
+# --- Cisco AI Defense guardrail ----------------------------------------
+AI_DEFENSE_ENABLED=True
+AI_DEFENSE_REGION=us
+AI_DEFENSE_ENDPOINT=https://us.api.inspect.aidefense.security.cisco.com
+AI_DEFENSE_TIMEOUT=10.0
+AI_DEFENSE_FAIL_OPEN=False
+
+# --- App / server ------------------------------------------------------
+APP_NAME=DemoBot v3
+APP_VERSION=3.0.0
+ENVIRONMENT=development
+DEBUG=False
+HOST=0.0.0.0
+PORT=8001
+DATABASE_URL=sqlite:///./medadvice.db
+SESSION_TIMEOUT_MINUTES=30
+
+# --- Logging -----------------------------------------------------------
+LOG_LEVEL=INFO
+LOG_TO_FILE=True
+LOG_TO_CONSOLE=True
+LOG_TO_DATABASE=True
+LOG_ROTATION_SIZE=10485760
+LOG_RETENTION_DAYS=90
+
+# --- Governance demo injection rates (0 = toggles fully control) -------
+PII_INJECTION_RATE=0
+TOXIC_INJECTION_RATE=0
+HALLUCINATION_INJECTION_RATE=0
+AUTHORITY_INJECTION_RATE=0
+REQUIRE_DISCLAIMER_ACCEPTANCE=True
+MAX_CLARIFYING_QUESTIONS=3
+
+# --- Splunk Observability Cloud ----------------------------------------
+SPLUNK_REALM=us1
+OTEL_ENABLED=True
+OTEL_SERVICE_NAME=demobot-v3
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=DELTA
+OTEL_PYTHON_EXCLUDED_URLS=^(https?://)?[^/]+/health$
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_ONLY
+OTEL_INSTRUMENTATION_GENAI_EMITTERS=span_metric,splunk
+OTEL_LOGS_EXPORTER=none
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment=demobot-ec2-1   # &lt;-- PER-REPLICA
+
+# --- Galileo -----------------------------------------------------------
+GALILEO_CONSOLE_URL=https://console.multitenant.galileocloud.io
+GALILEO_PROJECT=DemoBot
+GALILEO_LOG_STREAM=DemoBot
+</code></pre>
+<h3 id="env-secrets-values-withheld-copy-from-the-mac-at-applicationsdemobotenv"><code>.env</code> — secrets (values withheld; copy from the Mac at <code>/Applications/DemoBot/.env</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ANTHROPIC_API_KEY</code></td>
+<td>only used if <code>AI_PROVIDER=anthropic</code></td>
+</tr>
+<tr>
+<td><code>AI_DEFENSE_API_KEY</code></td>
+<td>Cisco AI Defense inspection key</td>
+</tr>
+<tr>
+<td><code>ACCESS_KEY</code></td>
+<td>HTTP Basic password gating public access — <strong>required</strong> when the tunnel is up</td>
+</tr>
+<tr>
+<td><code>SPLUNK_ACCESS_TOKEN</code></td>
+<td>O11y <strong>ingest</strong> token, realm us1</td>
+</tr>
+<tr>
+<td><code>SPLUNK_API_TOKEN</code></td>
+<td>O11y <strong>API</strong> token — ⚠️ currently expired (401), see §8</td>
+</tr>
+<tr>
+<td><code>GALILEO_API_KEY</code></td>
+<td>Galileo ingest key</td>
+</tr>
+</tbody>
+</table>
+<h3 id="otel_resource_attributes-the-one-value-you-must-change-per-replica"><code>OTEL_RESOURCE_ATTRIBUTES</code> — the one value you must change per replica</h3>
+<p>Each replica sets a distinct <code>deployment.environment</code> so Splunk O11y and Galileo
+can separate them:</p>
+<ul>
+<li>Mac (<code>/Applications/DemoBot</code>) → <code>demobot-local</code></li>
+<li>this EC2 → <code>demobot-ec2-1</code></li>
+<li>next replica → <code>demobot-ec2-2</code>, and so on</li>
+</ul>
+<p>Everything else in <code>.env</code> is copied verbatim between replicas.</p>
+<h3 id="cloudflare-tunnel">Cloudflare tunnel</h3>
+<p><code>~/.cloudflared/config.yml</code>:</p>
+<pre><code class="language-yaml">tunnel: 52a942e8-dddf-4a19-81fe-7865fc94c41b
+credentials-file: /home/splunk/.cloudflared/52a942e8-dddf-4a19-81fe-7865fc94c41b.json
+protocol: http2
+
+ingress:
+  - hostname: medadvice.yeackbot.com
+    service: http://localhost:8001
+  - service: http_status:404
+</code></pre>
+<p><strong>Architecture:</strong> every host runs the <em>same named tunnel</em> (<code>medadvice</code>, id
+<code>52a942e8-dddf-4a19-81fe-7865fc94c41b</code>) as a replica. Cloudflare load-balances
+across whichever replicas are connected. Per-instance SQLite means sessions are
+not shared between replicas — accepted for the demo.</p>
+<p>Only the tunnel <strong>credentials JSON</strong> is copied to the boxes. The Cloudflare
+account cert (<code>cert.pem</code>) stays on the Mac. Consequence: <code>cloudflared tunnel
+list</code> / <code>create</code> / <code>route</code> fail on the EC2 with <em>"Cannot determine default origin
+certificate path"</em> — this is expected and harmless. <code>tunnel run</code> works because it
+only needs the credentials file.</p>
+<h3 id="otel-collector-pipelines-otel-collector-configyaml">OTel collector pipelines (<code>otel-collector-config.yaml</code>)</h3>
+<p>Three pipelines off one OTLP receiver (:4317 gRPC, :4318 HTTP):</p>
+<table>
+<thead>
+<tr>
+<th>Pipeline</th>
+<th>Processors</th>
+<th>Exporter</th>
+<th>Destination</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>traces</code></td>
+<td>batch</td>
+<td><code>otlphttp/traces</code></td>
+<td><code>https://ingest.us1.signalfx.com/v2/trace/otlp</code> (Splunk APM) — full traces incl. HTTP spans</td>
+</tr>
+<tr>
+<td><code>traces/galileo</code></td>
+<td><code>filter/genai_only</code>, batch</td>
+<td><code>otlphttp/galileo</code></td>
+<td><code>https://api.multitenant.galileocloud.io/otel/traces</code> — <strong>gen_ai spans only</strong></td>
+</tr>
+<tr>
+<td><code>metrics</code></td>
+<td>batch</td>
+<td><code>signalfx</code> (<code>send_otlp_histograms: true</code>)</td>
+<td>Splunk O11y metrics</td>
+</tr>
+</tbody>
+</table>
+<p>Two non-obvious settings, both load-bearing:</p>
+<ol>
+<li><code>send_otlp_histograms: true</code> — without it the GenAI histograms that Splunk AI
+   Agent Monitoring depends on (<code>gen_ai.evaluation.score</code>, token usage) never
+   ingest.</li>
+<li><code>filter/genai_only</code> drops spans without <code>gen_ai.operation.name</code> before the
+   Galileo exporter. Galileo rejects batches with no GenAI patterns, so
+   unfiltered FastAPI HTTP spans cause partial-success drops.</li>
+</ol>
+<h3 id="instrumentation-quirk">Instrumentation quirk</h3>
+<p><code>run.sh</code> sets <code>OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=langchain</code> before launching
+under <code>opentelemetry-instrument</code>. The preview Splunk LangChain auto-instrumentor
+reports the model as <code>"unknown"</code> and emits no AgentInvocation for
+<code>create_react_agent</code>; the app emits GenAI entities itself in
+<code>backend/telemetry/otel.py</code>. FastAPI instrumentation stays enabled.</p>
+<h3 id="systemd-units">systemd units</h3>
+<p>Three units, all <code>User=splunk</code>, <code>Restart=always</code>, <code>RestartSec=5</code>, enabled:</p>
+<table>
+<thead>
+<tr>
+<th>Unit</th>
+<th>ExecStart</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>demobot-collector</code></td>
+<td><code>~/DemoBot/run-collector.sh</code></td>
+<td><code>network-online.target</code></td>
+</tr>
+<tr>
+<td><code>demobot-app</code></td>
+<td><code>/bin/bash ~/DemoBot/run.sh</code></td>
+<td><code>network-online</code>, <code>ollama</code>, <code>demobot-collector</code></td>
+</tr>
+<tr>
+<td><code>demobot-tunnel</code></td>
+<td><code>/usr/bin/cloudflared --config ~/.cloudflared/config.yml tunnel run medadvice</code></td>
+<td><code>network-online</code>, <code>demobot-app</code></td>
+</tr>
+</tbody>
+</table>
+<p>Plus <code>ollama.service</code> (installed by Ollama, <code>User=ollama</code>, <code>WantedBy=default.target</code>).</p>
+<p><code>demobot-app</code> sets <code>Environment=PATH=/home/splunk/DemoBot/venv/bin:/usr/local/bin:/usr/bin:/bin</code>
+so <code>run.sh</code> finds <code>opentelemetry-instrument</code> in the venv.</p>
+<hr />
+<h2 id="6-rebuild-procedure-raw-ec2-working-replica">6. Rebuild procedure — raw EC2 → working replica</h2>
+<h3 id="60-launch">6.0 Launch</h3>
+<p>Ubuntu 22.04 LTS, <strong>≥ 8 vCPU / 16 GiB RAM</strong> (<code>c6i.2xlarge</code> matches), 100 GiB gp3
+root. Security group: inbound TCP 22 (or 2222) from admin IPs only; all egress
+allowed. No inbound rule is needed for 8001 — the Cloudflare tunnel dials out.</p>
+<h3 id="61-prepare-the-account">6.1 Prepare the account</h3>
+<p>If not using the corporate AMI, create the service user (skip if <code>splunk</code> already
+exists from the image):</p>
+<pre><code class="language-bash">sudo useradd -m -s /bin/bash splunk
+echo 'splunk ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/splunk
+sudo install -d -m700 -o splunk -g splunk /home/splunk/.ssh
+sudo cp ~/.ssh/authorized_keys /home/splunk/.ssh/ &amp;&amp; sudo chown splunk:splunk /home/splunk/.ssh/authorized_keys
+</code></pre>
+<p>If sshd has an <code>AllowGroups</code> line, add <code>splunk</code> to one of the listed groups
+(<code>sudo usermod -aG wheel splunk</code>) <strong>before</strong> you disconnect — otherwise you lock
+yourself out.</p>
+<h3 id="62-run-the-deploy">6.2 Run the deploy</h3>
+<p>From the <strong>Mac</strong>, inside the repo. One command builds the whole replica:</p>
+<pre><code class="language-bash">cd /Applications/DemoBot &amp;&amp; ./deploy/ec2/push-replica.sh --host NEW_HOST --replica 2
+</code></pre>
+<p>Two scripts, both in <code>deploy/ec2/</code> (the Linux mirror of <code>deploy/launchd/</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Script</th>
+<th>Runs on</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>push-replica.sh</code></td>
+<td>Mac</td>
+<td>stages the secret payload, ships it, invokes the bootstrap</td>
+</tr>
+<tr>
+<td><code>ec2-bootstrap.sh</code></td>
+<td>target</td>
+<td>installs and configures everything, starts, health-checks</td>
+</tr>
+</tbody>
+</table>
+<p><code>push-replica.sh</code> assembles a payload of the four things a fresh box cannot
+obtain on its own — <code>.env</code>, the Mac's <code>config.yml</code>, the tunnel credentials JSON,
+and <code>Modelfile.poisoned</code> (exported from the Mac's live Ollama if no file exists)
+— <code>scp</code>s them to <code>~/demobot-payload</code>, runs the bootstrap, and deletes the
+payload afterwards. <strong><code>cert.pem</code> is never staged.</strong></p>
+<p><code>ec2-bootstrap.sh</code> is idempotent and arch-aware (x86_64 / aarch64):</p>
+<ol>
+<li>base packages; <code>ppa:deadsnakes</code>; <code>python3.11</code> + venv + dev headers</li>
+<li><code>cloudflared</code> from the GitHub <code>.deb</code></li>
+<li>Ollama + the <code>OLLAMA_MAX_LOADED_MODELS=2</code> / <code>KEEP_ALIVE=30m</code> drop-in</li>
+<li>clone DemoBot, build the venv on 3.11, install requirements</li>
+<li><code>otelcol-contrib</code> binary; mask any apt <code>splunk-otel-collector</code> (:4317 clash)</li>
+<li>install <code>.env</code> (0600) and tunnel credentials; rewrite <code>credentials-file:</code> in
+   <code>config.yml</code> to the target's <code>$HOME</code>; warn if <code>cert.pem</code> is present</li>
+<li>set <code>deployment.environment</code> (see §6.3)</li>
+<li><strong>pull every model <code>.env</code> references</strong>, then <strong>build the poisoned model</strong></li>
+<li>write the three systemd units</li>
+<li>enable + start, then health-check all four endpoints</li>
+</ol>
+<p>Flags: <code>--replica N</code>, <code>--env-name NAME</code>, <code>--stage-only</code>, <code>--no-start</code>,
+<code>DEBUG=1</code> for tracing. Re-running is the update path as well as the install path.</p>
+<h3 id="63-what-used-to-be-manual-and-now-is-not">6.3 What used to be manual, and now is not</h3>
+<p>The four post-bootstrap steps this runbook previously listed are automated. What
+each one became:</p>
+<table>
+<thead>
+<tr>
+<th>Was</th>
+<th>Now</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ollama pull llama3.2:3b</code> by hand</td>
+<td>every <code>OLLAMA_MODEL*</code> key in <code>.env</code> is pulled — adding an internal agent is a <code>.env</code> edit, not a script edit</td>
+</tr>
+<tr>
+<td><code>ollama create</code> the poisoned model by hand</td>
+<td>built every run from one canonical <code>Modelfile.poisoned</code>, with its <code>FROM</code> base pulled first</td>
+</tr>
+<tr>
+<td><code>scp</code> secrets, hand-edit the Mac paths out of <code>config.yml</code></td>
+<td><code>push-replica.sh</code> stages them; the bootstrap rewrites only the <code>credentials-file:</code> line and asserts the rewrite took</td>
+</tr>
+<tr>
+<td><code>sed</code> the replica number into <code>.env</code></td>
+<td><code>--replica N</code> / <code>--env-name</code>, or an IMDS-derived unique default</td>
+</tr>
+</tbody>
+</table>
+<p>Full rationale for each in <a href="../DemoBot/deploy/ec2/README.md"><code>deploy/ec2/README.md</code></a>.</p>
+<blockquote>
+<p><strong>Drift this fixes.</strong> On 2026-07-27 the Mac's poisoned model was
+<code>b5eec43102c3</code> and the EC2's was <code>d22293974766</code> — two different models behind
+one demo, because each was built by hand at a different time.</p>
+</blockquote>
+<p><strong><code>deployment.environment</code> is still the one value that differs per replica</strong>
+(<code>demobot-local</code>, <code>demobot-ec2-1</code>, <code>demobot-ec2-2</code>, …). It is the only thing
+separating replicas in Splunk O11y and Galileo — everything else, including
+<code>service.name=demobot-v3</code>, is identical by design. Two replicas sharing a value
+merge into one apparent service, so a sick box hides behind a healthy one. The
+bootstrap rewrites only that key inside <code>OTEL_RESOURCE_ATTRIBUTES</code>, preserving
+sibling attributes.</p>
+<h3 id="64-manual-start-only-with-no-start">6.4 Manual start (only with <code>--no-start</code>)</h3>
+<pre><code class="language-bash">sudo systemctl enable --now demobot-collector demobot-app demobot-tunnel
+systemctl --no-pager status demobot-collector demobot-app demobot-tunnel
+</code></pre>
+<p>Order matters on a cold box: the collector must own :4317 before the app starts,
+or the app's first spans are dropped. The unit dependencies handle this.</p>
+<hr />
+<h2 id="7-verification">7. Verification</h2>
+<pre><code class="language-bash">curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8001/health        # 200
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:11434/api/tags     # 200
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8888/metrics       # 200
+curl -s -o /dev/null -w '%{http_code}\n' https://medadvice.yeackbot.com/health  # 200
+ollama list        # expect dolphin3:8b, dolphin3:8b-poisoned, llama3.2:3b
+</code></pre>
+<p>All four returned <code>200</code> on this instance at capture time.</p>
+<p>Then confirm telemetry actually lands: in Splunk O11y (realm us1) filter on
+<code>deployment.environment = demobot-ec2-N</code> and confirm the new replica appears
+separately from <code>demobot-local</code>. Repo-side, <code>tests/observability/verify_observability.sh</code>
+runs the same checks in tiers.</p>
+<hr />
+<h2 id="8-known-issues-and-gotchas">8. Known issues and gotchas</h2>
+<ul>
+<li><strong><code>SPLUNK_API_TOKEN</code> is expired</strong> (401). It only affects tier 3 of
+  <code>verify_observability.sh</code>, which queries O11y to confirm metrics landed. The
+  <em>ingest</em> token (<code>SPLUNK_ACCESS_TOKEN</code>) is valid and telemetry flows normally.
+  See <strong>§10</strong> for the reissue procedure.</li>
+<li><strong><code>cloudflared tunnel list</code> fails on EC2</strong> — no <code>cert.pem</code> by design. Only
+  <code>tunnel run</code> is supported on replicas. Not a fault.</li>
+<li><strong>Two collectors, one port.</strong> The apt <code>splunk-otel-collector</code> package is
+  installed (from the Splunk apt repo on the base image) and must stay masked;
+  unmasking it collides with <code>otelcol-contrib</code> on :4317.</li>
+<li><strong>Python 3.10 will not work.</strong> The venv must be built with <code>python3.11</code> from
+  deadsnakes. <code>python3 -m venv</code> picks 3.10 and LangChain 1.x fails to install.</li>
+<li><strong>OpenClaw is Mac-only.</strong> <code>run-openclaw.sh</code> requires podman, which is not
+  installed here. Note also that Cisco Secure Endpoint quarantines host-installed
+  OpenClaw and deletes working-tree copies of <code>openclaw/Containerfile</code> — hence
+  the podman-based approach on the Mac.</li>
+<li><strong>Per-instance SQLite.</strong> <code>medadvice.db</code> is local to each replica; conversation
+  history does not follow a user across Cloudflare's load balancing. Accepted for
+  the demo; would need Postgres (the <code>psycopg2-binary</code> dep is already present) to
+  fix.</li>
+<li><strong>CPU-only inference.</strong> No GPU on <code>c6i</code>. Both models sit at 100% CPU with an
+  8192 context. Keep-alive of 30m and <code>OLLAMA_MAX_LOADED_MODELS=2</code> avoid a cold
+  reload between the internal 3B agents and the user-facing 8B synthesizer.</li>
+</ul>
+<hr />
+<h2 id="9-backup-set-what-is-not-in-git">9. Backup set — what is not in git</h2>
+<p>Losing these means the instance cannot be rebuilt from the repo alone:</p>
+<ol>
+<li><code>/Applications/DemoBot/.env</code> on the Mac (secrets — the source of truth that
+   <code>push-replica.sh</code> ships to every replica)</li>
+<li><code>~/.cloudflared/52a942e8-dddf-4a19-81fe-7865fc94c41b.json</code> (tunnel credentials)</li>
+<li><code>Modelfile.poisoned</code> (poisoned demo model recipe). Currently only on disk —
+   <code>push-replica.sh</code> can re-export it from the Mac's live Ollama with
+   <code>ollama show --modelfile dolphin3:8b-poisoned</code>, but that only works while the
+   Mac still has the model built. Committing it to <code>deploy/ec2/</code> would make it
+   durable; it is an adversarial prompt payload, so that is your call.</li>
+<li>Cloudflare account <code>cert.pem</code> — Mac only, never on a replica</li>
+<li><code>~/.ssh/demobot_ec2</code> on the workstation (access key)</li>
+</ol>
+<p>The build scripts are now in the repo at <code>deploy/ec2/</code> and no longer need
+separate backup.</p>
+<p><code>~/DemoBot/medadvice.db</code> is demo state and does not need backing up.</p>
+<hr />
+<h2 id="10-reissuing-splunk_api_token">10. Reissuing <code>SPLUNK_API_TOKEN</code></h2>
+<h3 id="what-kind-of-token">What kind of token</h3>
+<p>Both consumers call <code>https://api.us1.signalfx.com</code> with an <code>X-SF-Token</code> header,
+so this must be a token with <strong>API authorization scope</strong> — <em>not</em> an ingest token
+(<code>SPLUNK_ACCESS_TOKEN</code> is the ingest one and is a separate value).</p>
+<table>
+<thead>
+<tr>
+<th>Consumer</th>
+<th>Call</th>
+<th>Minimum role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tests/observability/check_o11y_metadata.py</code></td>
+<td><code>GET /v2/metrictimeseries</code></td>
+<td><code>read_only</code></td>
+</tr>
+<tr>
+<td><code>scripts/observability/create_apm_detectors.py</code></td>
+<td><code>POST</code> (creates detectors)</td>
+<td><code>power</code></td>
+</tr>
+</tbody>
+</table>
+<p>Choose <strong><code>power</code></strong> so both work.</p>
+<h3 id="create-it">Create it</h3>
+<p>In Splunk Observability Cloud — realm <strong>us1</strong>, <code>https://app.us1.signalfx.com</code>:</p>
+<ol>
+<li><strong>Settings → Access Tokens → New Token</strong></li>
+<li>Name it (e.g. <code>demobot-api</code>); <strong>Authorization scope = API token</strong>; select role
+   <strong><code>power</code></strong></li>
+<li>Set visibility, then <strong>set a long expiration date</strong>. The default is 30 days —
+   that is why the previous token expired. Max is 18 years.</li>
+<li><strong>Create</strong>, expand the token, <strong>Show Token</strong>, <strong>Copy</strong></li>
+</ol>
+<p>Creating org access tokens requires org admin. Alternatives:</p>
+<ul>
+<li><strong>Rotate</strong> an existing token (Settings → Access Tokens → select → <em>Rotate
+  token</em>) — only possible <em>before</em> it expires. Not an option for an already-dead
+  token.</li>
+<li>Use a <strong>personal user API access token</strong> from your account settings: same
+  header, no admin rights needed, but tied to your user account.</li>
+</ul>
+<h3 id="install-it">Install it</h3>
+<p>Three places (Mac + each EC2 replica), same value.</p>
+<p>Mac — BSD sed needs the empty <code>-i</code> argument:</p>
+<pre><code class="language-bash">cd /Applications/DemoBot &amp;&amp; cp .env .env.bak &amp;&amp; read -rs NEWTOK \
+  &amp;&amp; sed -i '' &quot;s|^SPLUNK_API_TOKEN=.*|SPLUNK_API_TOKEN=${NEWTOK}|&quot; .env \
+  &amp;&amp; grep -c '^SPLUNK_API_TOKEN=' .env
+</code></pre>
+<p>EC2 — GNU sed, no <code>''</code>:</p>
+<pre><code class="language-bash">cd ~/DemoBot &amp;&amp; cp .env .env.bak &amp;&amp; read -rs NEWTOK \
+  &amp;&amp; sed -i &quot;s|^SPLUNK_API_TOKEN=.*|SPLUNK_API_TOKEN=${NEWTOK}|&quot; .env \
+  &amp;&amp; chmod 600 .env &amp;&amp; grep -c '^SPLUNK_API_TOKEN=' .env
+</code></pre>
+<p><code>read -rs</code> keeps the secret out of shell history. Expect <code>1</code> from <code>grep -c</code>.</p>
+<p><strong>No service restart is required.</strong> <code>SPLUNK_API_TOKEN</code> is read only by the two
+test/script files, at invocation, directly from <code>.env</code>. Neither <code>run.sh</code> nor
+<code>run-collector.sh</code> references it — the live telemetry path uses
+<code>SPLUNK_ACCESS_TOKEN</code> and is unaffected.</p>
+<h3 id="verify">Verify</h3>
+<p>Test the token in isolation before blaming telemetry:</p>
+<pre><code class="language-bash">curl -s -o /dev/null -w '%{http_code}\n' -H &quot;X-SF-Token: $NEWTOK&quot; \
+  'https://api.us1.signalfx.com/v2/metrictimeseries?query=sf_metric:gen_ai.client.token.usage&amp;limit=1'
+</code></pre>
+<p><code>200</code> = good; <code>401</code> = wrong token or missing API scope. Then run the suite:</p>
+<pre><code class="language-bash">cd ~/DemoBot &amp;&amp; ./tests/observability/verify_observability.sh
+</code></pre>
+<h3 id="two-script-side-gotchas">Two script-side gotchas</h3>
+<ul>
+<li><strong><code>verify_observability.sh</code> hard-codes <code>demobot-local</code></strong> as the
+  <code>deployment.environment</code> argument (line 76). On a replica whose environment is
+  <code>demobot-ec2-N</code>, tier 3 queries the wrong replica and fails even with a good
+  token. Run the checker directly instead:</li>
+</ul>
+<p><code>bash
+  python3 tests/observability/check_o11y_metadata.py us1 "$NEWTOK" demobot-v3 demobot-ec2-1</code></p>
+<ul>
+<li><strong>A token containing <code>=</code> breaks tier 3.</strong> Line 71 parses <code>.env</code> with
+  <code>cut -d= -f2</code>, truncating at the first <code>=</code> (<code>run-collector.sh</code> correctly uses
+  <code>-f2-</code>). Rare with Splunk tokens, but it explains a <code>curl</code>-succeeds /
+  script-fails split.</li>
+</ul>
+</main></body></html>
