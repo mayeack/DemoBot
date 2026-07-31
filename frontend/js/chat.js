@@ -1324,7 +1324,9 @@ async function toggleSpray() {
             resp = await fetch('/api/spray/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ actor, duration_s, intensity, secondary_actors, drive_turns: true })
+                // Send the theme on screen so the campaign's governance events
+                // are attributed to the app the operator actually sprayed from.
+                body: JSON.stringify({ actor, duration_s, intensity, secondary_actors, theme: currentTheme, drive_turns: true })
             });
         } else {
             resp = await fetch('/api/spray/stop', { method: 'POST' });
