@@ -1343,7 +1343,6 @@ async function toggleSpray() {
 function updateSprayStatus(data) {
     const status = document.getElementById('sprayStatus');
     const remaining = document.getElementById('sprayRemaining');
-    const stats = document.getElementById('sprayStats');
     const toggle = document.getElementById('sprayToggle');
     if (!status) return;
     if (data && data.active) {
@@ -1359,12 +1358,6 @@ function updateSprayStatus(data) {
         status.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
         if (toggle) toggle.checked = false;
         if (remaining) remaining.classList.add('hidden');
-    }
-    // Keep the tally visible after the campaign ends - it's the demo's result.
-    if (stats && data && data.turns_sent > 0) {
-        stats.textContent = `${data.turns_sent} turns · ${data.blocked} blocked · `
-            + `${data.allowed} allowed · ${data.distinct_sessions} sessions`;
-        stats.classList.remove('hidden');
     }
 }
 
