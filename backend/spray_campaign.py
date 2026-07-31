@@ -15,6 +15,8 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional, Set
 
+from backend.agents.themes import get_theme
+
 logger = logging.getLogger(__name__)
 
 # Rotated per turn so the campaign shows a source pivot rather than a single
@@ -22,14 +24,25 @@ logger = logging.getLogger(__name__)
 # are documentation/test-range style addresses, not real hosts.
 CLIENT_ADDRESSES: List[str] = ["76.87.129.168", "203.0.113.42", "198.51.100.77"]
 
-# Themes double as the governed application identity: the governance event's
-# ``app_name`` is its ``service_name`` (backend/logging/executive_fields.py),
-# so varying these populates the spec's ``apps_targeted``.
-TARGET_APPS: List[Dict[str, str]] = [
-    {"theme": "medadvice", "service_name": "demobot-medadvice", "deployment_id": "demobot-medadvice-prod"},
-    {"theme": "legaladvice", "service_name": "demobot-legaladvice", "deployment_id": "demobot-legaladvice-prod"},
-    {"theme": "financeadvice", "service_name": "demobot-financeadvice", "deployment_id": "demobot-financeadvice-prod"},
-]
+
+def app_for_theme(theme_key: Optional[str]) -> Dict[str, str]:
+    """Resolve the governed application identity for a UI theme.
+
+    The theme *is* the app: the governance event's ``app_name`` is its
+    ``service_name`` (backend/logging/executive_fields.py), so a spray started
+    from the medadvice UI has to land as ``demobot-medadvice`` on every turn.
+    The campaign used to rotate a fixed roster to populate ``apps_targeted``,
+    which attributed turns to apps the operator never touched.
+
+    ``get_theme`` resolves an unknown or missing key to the default theme, so
+    this can never mint an app identity with no theme behind it.
+    """
+    key = get_theme(theme_key).key
+    return {
+        "theme": key,
+        "service_name": f"demobot-{key}",
+        "deployment_id": f"demobot-{key}-prod",
+    }
 
 
 class SprayCampaign:

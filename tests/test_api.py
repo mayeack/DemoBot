@@ -388,6 +388,25 @@ def main() -> int:
         check("spray start rejects an out-of-range intensity",
               c.post("/api/spray/start", headers=AUTH,
                      json={"intensity": 0, "drive_turns": False}).status_code == 422)
+        # The campaign is attributed to the app that triggered it. It used to
+        # rotate a fixed roster, so a spray launched from medadvice stamped
+        # governance events with demobot-financeadvice/-legaladvice too. Planned
+        # directly: drive_turns=False records no turns, so `apps_targeted` on the
+        # status response can't observe this.
+        import random as _random  # noqa: PLC0415 - local to this check
+        from backend.routers.spray import SprayStart, _build_plan  # noqa: PLC0415
+
+        def _plan_apps(theme):
+            body = SprayStart(drive_turns=False) if theme is None else \
+                SprayStart(theme=theme, drive_turns=False)
+            return sorted({t.app["service_name"] for t in _build_plan(body, _random.Random(11))})
+
+        check("spray plan stamps only the triggering app",
+              _plan_apps("medadvice") == ["demobot-medadvice"], str(_plan_apps("medadvice")))
+        check("spray plan follows a non-default theme",
+              _plan_apps("taxadvice") == ["demobot-taxadvice"], str(_plan_apps("taxadvice")))
+        check("spray plan defaults to medadvice when no theme is sent",
+              _plan_apps(None) == ["demobot-medadvice"], str(_plan_apps(None)))
 
         # ---- agentic tool guard ----
         # 401 without the key (auth gate), 200 with it. Use a benign read whose

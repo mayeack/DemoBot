@@ -33,7 +33,7 @@ from pydantic import BaseModel, Field
 from backend.agents.graph import run_turn
 from backend.services import spray_corpus
 from backend.services.enduser_pool import ENDUSER_IDS
-from backend.spray_campaign import CLIENT_ADDRESSES, TARGET_APPS, spray_campaign
+from backend.spray_campaign import CLIENT_ADDRESSES, app_for_theme, spray_campaign
 
 router = APIRouter(prefix="/api/spray", tags=["spray"])
 logger = logging.getLogger(__name__)
@@ -55,6 +55,10 @@ class SprayStart(BaseModel):
     duration_s: int = Field(default=600, ge=10, le=3600)
     intensity: int = Field(default=15, ge=1, le=200)
     secondary_actors: int = Field(default=2, ge=0, le=10)
+    # The app the campaign is attributed to. The UI sends whichever theme it is
+    # currently showing, so the governance events name the app that actually
+    # triggered the spray. Unknown/omitted keys fall back to the default theme.
+    theme: Optional[str] = None
     # Lets the regression suite exercise start/stop/status without generating
     # real AI Defense traffic (mirrors the incident router's drive_traffic).
     drive_turns: bool = True
@@ -76,9 +80,12 @@ def _build_plan(body: SprayStart, rng: random.Random) -> List[_Turn]:
     """Lay out the whole campaign up front.
 
     Guarantees the spec's shape at the default settings: >=5 technique families,
-    >=3 distinct sessions, >=2 target apps, and ~15% subtle prompts intended to
-    be allowed. Everything is planned deterministically here so the driver just
-    walks the list.
+    >=3 distinct sessions, and ~15% subtle prompts intended to be allowed.
+    Everything is planned deterministically here so the driver just walks the
+    list.
+
+    Every turn is attributed to the app that triggered the campaign, so
+    ``apps_targeted`` reports exactly one app rather than a rotating roster.
     """
     plan: List[_Turn] = []
     primary = body.actor
@@ -88,8 +95,7 @@ def _build_plan(body: SprayStart, rng: random.Random) -> List[_Turn]:
     # persistence across sessions rather than one long thread.
     session_pool = [f"spray-{rng.getrandbits(48):012x}" for _ in range(3)]
 
-    def app_for(i: int) -> Dict[str, str]:
-        return TARGET_APPS[i % len(TARGET_APPS)]
+    app = app_for_theme(body.theme)
 
     budget = body.intensity
 
@@ -99,10 +105,9 @@ def _build_plan(body: SprayStart, rng: random.Random) -> List[_Turn]:
     if budget >= 8:
         escalation = list(spray_corpus.pick_escalation(rng))
         esc_session = f"spray-{rng.getrandbits(48):012x}"
-        esc_app = app_for(rng.randrange(len(TARGET_APPS)))
         for prompt in escalation:
             plan.append(_Turn(actor=primary, session_id=esc_session, prompt=prompt,
-                              technique=spray_corpus.MULTI_TURN_FAMILY, app=esc_app))
+                              technique=spray_corpus.MULTI_TURN_FAMILY, app=app))
         budget -= len(escalation)
 
     # 2. The ~15% that should get through (spec §5) — at least one whenever the
@@ -114,7 +119,7 @@ def _build_plan(body: SprayStart, rng: random.Random) -> List[_Turn]:
         _, prompt = spray_corpus.pick_subtle(rng)
         subtle_turns.append(_Turn(
             actor=primary, session_id=rng.choice(session_pool), prompt=prompt,
-            technique="subtle_probe", app=app_for(i)))
+            technique="subtle_probe", app=app))
     budget -= n_subtle
 
     # 3. Fill the remainder with blocked-cohort prompts, cycling the families so
@@ -125,7 +130,7 @@ def _build_plan(body: SprayStart, rng: random.Random) -> List[_Turn]:
         _, prompt = spray_corpus.pick_blocked(family, rng)
         blocked_turns.append(_Turn(
             actor=primary, session_id=rng.choice(session_pool), prompt=prompt,
-            technique=family, app=app_for(i)))
+            technique=family, app=app))
 
     # 4. Secondary actors — low volume, so the correlation rule has something to
     #    rank the primary against.
@@ -137,7 +142,7 @@ def _build_plan(body: SprayStart, rng: random.Random) -> List[_Turn]:
             _, prompt = spray_corpus.pick_blocked(family, rng)
             secondary_turns.append(_Turn(
                 actor=actor, session_id=f"spray-{rng.getrandbits(48):012x}",
-                prompt=prompt, technique=family, app=app_for(i)))
+                prompt=prompt, technique=family, app=app))
 
     # Shuffle everything except the escalation, then weave the escalation back in
     # at random positions with its order preserved — it has to read benign-first.
