@@ -12,6 +12,7 @@ import time
 from typing import Any, Dict
 
 from backend.agents.nodes.shared import content_engine
+from backend.agents.state import governance_identity_overrides
 from backend.services.ai_defense import ai_defense_client
 from backend.telemetry import otel
 
@@ -45,6 +46,7 @@ def prompt_defense_node(state: Dict[str, Any]) -> Dict[str, Any]:
             start_time=state["start_time"],
             client_address=state.get("client_address"),
             enduser_id=state.get("enduser_id"),
+            governance_overrides=governance_identity_overrides(state),
         )
 
     return {
@@ -88,6 +90,7 @@ def response_defense_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 "usage_output_tokens": output_tokens,
                 "usage_total_tokens": input_tokens + output_tokens,
             },
+            governance_overrides=governance_identity_overrides(state),
         )
 
     return {

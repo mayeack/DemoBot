@@ -458,6 +458,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Check auto-prompt status on load
         checkAutoPromptStatus();
+        // Same for the spray campaign, so a refresh mid-run shows it running
+        checkSprayStatus();
     }
     
     // Add event listener to new session button as fallback
@@ -1301,6 +1303,98 @@ function startIncidentStatusPolling() {
 
 function stopIncidentStatusPolling() {
     if (incidentStatusInterval) { clearInterval(incidentStatusInterval); incidentStatusInterval = null; }
+}
+
+// ---- Prompt-Injection Spray (drives real AI Defense turns for the ES demo) ----
+// Server-owned state, like the incident toggle: the campaign lives in the
+// backend so it survives a page reload and auto-stops on its own. Nothing here
+// is cached in localStorage.
+let sprayStatusInterval = null;
+
+async function toggleSpray() {
+    const toggle = document.getElementById('sprayToggle');
+    const on = toggle.checked;
+    try {
+        let resp;
+        if (on) {
+            const actor = (document.getElementById('sprayActor').value || 't.nguyen').trim();
+            const duration_s = parseInt(document.getElementById('sprayDuration').value, 10) || 600;
+            const intensity = parseInt(document.getElementById('sprayIntensity').value, 10) || 15;
+            const secondary_actors = parseInt(document.getElementById('spraySecondary').value, 10) || 0;
+            resp = await fetch('/api/spray/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ actor, duration_s, intensity, secondary_actors, drive_turns: true })
+            });
+        } else {
+            resp = await fetch('/api/spray/stop', { method: 'POST' });
+        }
+        if (!resp.ok) throw new Error('spray toggle failed');
+        const data = await resp.json();
+        updateSprayStatus(data);
+        if (data.active) startSprayStatusPolling(); else stopSprayStatusPolling();
+    } catch (e) {
+        console.error('Error toggling spray campaign:', e);
+        toggle.checked = !on;
+        alert('Failed to toggle the prompt-injection spray. Please try again.');
+    }
+}
+
+function updateSprayStatus(data) {
+    const status = document.getElementById('sprayStatus');
+    const remaining = document.getElementById('sprayRemaining');
+    const stats = document.getElementById('sprayStats');
+    const toggle = document.getElementById('sprayToggle');
+    if (!status) return;
+    if (data && data.active) {
+        status.textContent = 'SPRAYING';
+        status.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-700 animate-pulse';
+        if (toggle) toggle.checked = true;
+        if (remaining && data.remaining_s != null) {
+            remaining.textContent = data.remaining_s + 's left';
+            remaining.classList.remove('hidden');
+        }
+    } else {
+        status.textContent = 'OFF';
+        status.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
+        if (toggle) toggle.checked = false;
+        if (remaining) remaining.classList.add('hidden');
+    }
+    // Keep the tally visible after the campaign ends - it's the demo's result.
+    if (stats && data && data.turns_sent > 0) {
+        stats.textContent = `${data.turns_sent} turns · ${data.blocked} blocked · `
+            + `${data.allowed} allowed · ${data.distinct_sessions} sessions`;
+        stats.classList.remove('hidden');
+    }
+}
+
+function startSprayStatusPolling() {
+    if (sprayStatusInterval) clearInterval(sprayStatusInterval);
+    sprayStatusInterval = setInterval(async () => {
+        try {
+            const r = await fetch('/api/spray/status');
+            if (r.ok) {
+                const data = await r.json();
+                updateSprayStatus(data);
+                if (!data.active) stopSprayStatusPolling();
+            }
+        } catch (e) { console.error('Error polling spray status:', e); }
+    }, 5000);
+}
+
+function stopSprayStatusPolling() {
+    if (sprayStatusInterval) { clearInterval(sprayStatusInterval); sprayStatusInterval = null; }
+}
+
+// Rehydrate on load so a mid-campaign refresh doesn't show a stale OFF badge.
+async function checkSprayStatus() {
+    try {
+        const r = await fetch('/api/spray/status');
+        if (!r.ok) return;
+        const data = await r.json();
+        updateSprayStatus(data);
+        if (data.active) startSprayStatusPolling();
+    } catch (e) { console.error('Error checking spray status:', e); }
 }
 
 // ---- Left settings drawer (pull-out) expand/contract ----

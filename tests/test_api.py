@@ -99,6 +99,7 @@ def main() -> int:
 
         # ---- auth gating: gated endpoints reject without the key (401 JSON) ----
         for path in ("/api/chat/auto-prompt/status", "/api/incident/status",
+                     "/api/spray/status",
                      "/api/settings", "/api/hec/destinations", "/admin/logs/metrics",
                      "/api/settings/emit-model"):
             r = c.get(path)
@@ -360,6 +361,33 @@ def main() -> int:
               rinc.status_code == 200 and rinc.json().get("active") is True, f"{rinc.status_code}")
         check("POST /api/incident/stop -> 200 + inactive",
               c.post("/api/incident/stop", headers=AUTH).json().get("active") is False)
+
+        # ---- prompt-injection spray (no real turns: drive_turns false) ----
+        # drive_turns=False keeps the suite off the live AI Defense API; the
+        # control plane (state, counters, auto-stop wiring) is still exercised.
+        check("GET /api/spray/status -> 200", c.get("/api/spray/status", headers=AUTH).status_code == 200)
+        rspray = c.post("/api/spray/start", headers=AUTH,
+                        json={"actor": "t.nguyen", "duration_s": 10, "intensity": 5,
+                              "secondary_actors": 1, "drive_turns": False})
+        check("POST /api/spray/start (no turns) -> 200 + active",
+              rspray.status_code == 200 and rspray.json().get("active") is True,
+              f"{rspray.status_code}")
+        check("POST /api/spray/start reports the requested actor",
+              rspray.json().get("actor") == "t.nguyen", str(rspray.json().get("actor")))
+        _first_campaign = rspray.json().get("campaign_id")
+        check("POST /api/spray/start mints a campaign_id", bool(_first_campaign))
+        # Re-running must produce a *fresh* campaign, not a no-op: a demo gets
+        # rehearsed, and stale ids would collide in Splunk.
+        rspray2 = c.post("/api/spray/start", headers=AUTH,
+                         json={"actor": "t.nguyen", "duration_s": 10, "intensity": 5,
+                               "secondary_actors": 1, "drive_turns": False})
+        check("POST /api/spray/start twice -> new campaign_id (re-runnable)",
+              rspray2.json().get("campaign_id") not in (None, _first_campaign))
+        check("POST /api/spray/stop -> 200 + inactive",
+              c.post("/api/spray/stop", headers=AUTH).json().get("active") is False)
+        check("spray start rejects an out-of-range intensity",
+              c.post("/api/spray/start", headers=AUTH,
+                     json={"intensity": 0, "drive_turns": False}).status_code == 422)
 
         # ---- agentic tool guard ----
         # 401 without the key (auth gate), 200 with it. Use a benign read whose

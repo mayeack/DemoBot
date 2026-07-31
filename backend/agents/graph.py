@@ -187,6 +187,8 @@ def _build_turn_state(
     multi_agent_mode: Optional[bool] = None,
     agent_control_review: Optional[bool] = None,
     enduser_id: Optional[str] = None,
+    service_name: Optional[str] = None,
+    deployment_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build the initial workflow state shared by run_turn / run_turn_stream."""
     state = build_initial_state(
@@ -204,6 +206,8 @@ def _build_turn_state(
         internal_policy_review=internal_policy_review,
         multi_agent_mode=multi_agent_mode,
         agent_control_review=agent_control_review,
+        service_name=service_name,
+        deployment_id=deployment_id,
     )
     state["request_id"] = str(uuid.uuid4())
     state["trace_id"] = str(uuid.uuid4())
@@ -227,6 +231,8 @@ def run_turn(
     multi_agent_mode: Optional[bool] = None,
     agent_control_review: Optional[bool] = None,
     enduser_id: Optional[str] = None,
+    service_name: Optional[str] = None,
+    deployment_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run one chat turn through the multi-agent workflow.
 
@@ -251,6 +257,8 @@ def run_turn(
         internal_policy_review=internal_policy_review,
         multi_agent_mode=multi_agent_mode,
         agent_control_review=agent_control_review,
+        service_name=service_name,
+        deployment_id=deployment_id,
     )
     request_id = state["request_id"]
     trace_id = state["trace_id"]
