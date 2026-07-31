@@ -35,7 +35,13 @@ def _epoch_from(log_data: Dict[str, Any]) -> Optional[float]:
         return None
     try:
         s = ts.replace("Z", "+00:00") if isinstance(ts, str) else ts
-        return datetime.fromisoformat(s).timestamp()
+        dt = datetime.fromisoformat(s)
+        # Producer timestamps are datetime.utcnow().isoformat() — naive UTC.
+        # Naive .timestamp() reinterprets them as LOCAL time, skewing _time by
+        # the UTC offset, so pin naive values to UTC before converting.
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
     except Exception:
         return None
 
