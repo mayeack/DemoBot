@@ -1,0 +1,38 @@
+# Logs overlay — layered on by run-collector.sh ONLY when SPLUNK_HEC_TOKEN is
+# set in .env, exactly like the Galileo overlay. Without a token the base config
+# has no logs pipeline at all, so a keyless deployment drops OTLP log records at
+# the receiver instead of buffering them for a destination that isn't there.
+#
+# WHY NOT Splunk Observability Cloud directly: this org has no log ingest.
+# `POST https://ingest.us1.signalfx.com/v1/log` with the working ingest token
+# (the same one that successfully ships traces to /v2/trace/otlp) returns 404,
+# and GET /v2/organization lists no logs feature (no Log Observer, no
+# loConnect). Logs therefore go to the Splunk platform HEC — which is also the
+# substrate Log Observer Connect federates against, so this is the same pipe
+# whether or not LO Connect is turned on later.
+exporters:
+  splunk_hec/platform:
+    token: "${env:SPLUNK_HEC_TOKEN}"
+    endpoint: "${env:SPLUNK_HEC_URL}/services/collector"
+    index: "${env:SPLUNK_HEC_INDEX}"
+    source: "demobot"
+    sourcetype: "demobot:otel"
+    # The local Splunk Enterprise HEC listener uses a self-signed cert.
+    tls:
+      insecure_skip_verify: true
+
+processors:
+  # Carry service.name / deployment.environment onto every event so a log can be
+  # pivoted back to the same APM environment the traces land in (demobot-local).
+  resource/logs:
+    attributes:
+      - key: com.splunk.sourcetype
+        value: "demobot:otel"
+        action: upsert
+
+service:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [resource/logs, batch]
+      exporters: [splunk_hec/platform]

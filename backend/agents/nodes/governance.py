@@ -12,6 +12,7 @@ import time
 from typing import Any, Dict
 
 from backend.agents.nodes.shared import clarifying_service, escalation_rules
+from backend.agents.state import governance_identity_overrides
 from backend.config import settings
 from backend.logging.governance_logger import governance_logger
 from backend.models.schemas import MessageType
@@ -115,6 +116,7 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
             trace_id=trace_id,
             client_address=client_address,
             enduser_id=enduser_id,
+            **governance_identity_overrides(state),
         )
 
         if should_escalate:

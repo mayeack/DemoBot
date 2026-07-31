@@ -99,6 +99,7 @@ def main() -> int:
 
         # ---- auth gating: gated endpoints reject without the key (401 JSON) ----
         for path in ("/api/chat/auto-prompt/status", "/api/incident/status",
+                     "/api/spray/status",
                      "/api/settings", "/api/hec/destinations", "/admin/logs/metrics",
                      "/api/settings/emit-model"):
             r = c.get(path)
@@ -361,6 +362,33 @@ def main() -> int:
         check("POST /api/incident/stop -> 200 + inactive",
               c.post("/api/incident/stop", headers=AUTH).json().get("active") is False)
 
+        # ---- prompt-injection spray (no real turns: drive_turns false) ----
+        # drive_turns=False keeps the suite off the live AI Defense API; the
+        # control plane (state, counters, auto-stop wiring) is still exercised.
+        check("GET /api/spray/status -> 200", c.get("/api/spray/status", headers=AUTH).status_code == 200)
+        rspray = c.post("/api/spray/start", headers=AUTH,
+                        json={"actor": "t.nguyen", "duration_s": 10, "intensity": 5,
+                              "secondary_actors": 1, "drive_turns": False})
+        check("POST /api/spray/start (no turns) -> 200 + active",
+              rspray.status_code == 200 and rspray.json().get("active") is True,
+              f"{rspray.status_code}")
+        check("POST /api/spray/start reports the requested actor",
+              rspray.json().get("actor") == "t.nguyen", str(rspray.json().get("actor")))
+        _first_campaign = rspray.json().get("campaign_id")
+        check("POST /api/spray/start mints a campaign_id", bool(_first_campaign))
+        # Re-running must produce a *fresh* campaign, not a no-op: a demo gets
+        # rehearsed, and stale ids would collide in Splunk.
+        rspray2 = c.post("/api/spray/start", headers=AUTH,
+                         json={"actor": "t.nguyen", "duration_s": 10, "intensity": 5,
+                               "secondary_actors": 1, "drive_turns": False})
+        check("POST /api/spray/start twice -> new campaign_id (re-runnable)",
+              rspray2.json().get("campaign_id") not in (None, _first_campaign))
+        check("POST /api/spray/stop -> 200 + inactive",
+              c.post("/api/spray/stop", headers=AUTH).json().get("active") is False)
+        check("spray start rejects an out-of-range intensity",
+              c.post("/api/spray/start", headers=AUTH,
+                     json={"intensity": 0, "drive_turns": False}).status_code == 422)
+
         # ---- agentic tool guard ----
         # 401 without the key (auth gate), 200 with it. Use a benign read whose
         # path is inside the workspace so tool_policy short-circuits locally and
@@ -427,6 +455,25 @@ def main() -> int:
         check("GET /api/hec/stats -> 200 + destinations", "destinations" in c.get("/api/hec/stats", headers=AUTH).json())
         check("DELETE /api/hec/destinations/{id} -> 200", c.delete(f"/api/hec/destinations/{did}", headers=AUTH).status_code == 200)
         check("GET /api/hec/destinations/{bad} -> 404", c.get("/api/hec/destinations/nope", headers=AUTH).status_code == 404)
+
+        # HEC envelope: a key in BOTH the indexed "fields" block and the event
+        # body is indexed *and* extracted at search time (gen_ai:json sets
+        # KV_MODE=json), so Splunk returns it as a two-value multivalue field and
+        # every `stats ... by <key>` silently doubles -- including the ES prompt
+        # injection rule's per-actor risk. Pin the invariant here.
+        from backend.hec.config import HECConfig as _HECConfig
+        from backend.hec.forwarder import HECForwarder as _HECFwd, _BODY_OWNED_KEYS
+        _fwd = _HECFwd(_HECConfig(id="t", name="t", url="https://localhost:8088"), "tok")
+        _body = {"session_id": "s1", "request_id": "r1", "trace_id": "t1",
+                 "enduser_id": "t.nguyen", "risk_score": 60}
+        _env = _fwd._build_event("governance", _body)
+        _dupes = sorted(set(_env["fields"]) & set(_env["event"]))
+        check("HEC envelope: no field is both indexed and in the event body",
+              not _dupes, f"duplicated: {_dupes}")
+        check("HEC envelope: correlation ids stay in the event body",
+              all(k in _env["event"] for k in _BODY_OWNED_KEYS))
+        check("HEC envelope: forwarder-owned log_type is still indexed",
+              _env["fields"].get("log_type") == "governance")
 
         # ---- admin ----
         for path in ("/admin/logs/interactions", "/admin/logs/escalations", "/admin/logs/metrics", "/admin/logs/export"):

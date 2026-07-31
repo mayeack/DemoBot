@@ -1,0 +1,144 @@
+# DemoBot's complete otel-collector-config.yaml WITH the workshop log fan-out
+# added -- as deployed to medadvice1 on 2026-07-29 and verified on
+# otelcol-contrib 0.157.0.
+#
+# The log-specific parts are: the file_storage/checkpoints extension, the
+# filelog/demobot receiver, the resource/workshop_logs processor, the
+# splunk_hec/workshop exporter, and the service.pipelines.logs entry. Everything
+# else is DemoBot's pre-existing traces + metrics config and must keep working.
+#
+# ${env:WORKSHOP_*} values are exported by run-collector.sh from .env.
+# See ../SKILL.md step 3.
+
+# Local OpenTelemetry Collector — forwards the app's OTLP telemetry to
+# Splunk Observability Cloud.
+#   metrics -> signalfx exporter. send_otlp_histograms:true is required so the
+#              GenAI histograms AI Agent Monitoring relies on (e.g.
+#              gen_ai.evaluation.score, token-usage histograms) are ingested.
+#   traces  -> Splunk APM via the OTLP/HTTP trace ingest endpoint.
+#   logs    -> Splunk Cloud HEC backing the workshop org's Log Observer Connect.
+# Realm + token come from the container environment (SPLUNK_REALM /
+# SPLUNK_ACCESS_TOKEN), injected by run-collector.sh from .env.
+extensions:
+  # Checkpoints filelog read offsets so a collector restart resumes where it
+  # left off instead of re-shipping every log file from the top.
+  file_storage/checkpoints:
+    directory: /home/ubuntu/DemoBot/.otel-storage
+    create_directory: true
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  # DemoBot writes newline-delimited JSON governance/audit logs to logs/*.json.
+  # Each file becomes its own sourcetype so Log Observer can facet on them.
+  filelog/demobot:
+    include: [/home/ubuntu/DemoBot/logs/*.json]
+    start_at: beginning
+    include_file_name: true
+    include_file_path: false
+    storage: file_storage/checkpoints
+    operators:
+      - type: json_parser
+        parse_from: body
+        parse_to: body
+        on_error: send_quiet
+      - type: add
+        field: resource["com.splunk.sourcetype"]
+        value: EXPR("demobot:" + attributes["log.file.name"])
+
+processors:
+  batch: {}
+  # Galileo only ingests GenAI spans. Drop everything else (FastAPI HTTP
+  # server/client spans) before the Galileo exporter so they don't trigger
+  # Galileo's "No GenAI patterns detected in spans" partial-success drops. Keeps
+  # only spans carrying gen_ai.operation.name (workflow / invoke_agent / chat).
+  # Splunk APM still receives the full trace via the separate traces pipeline.
+  filter/genai_only:
+    error_mode: ignore
+    traces:
+      span:
+        - 'attributes["gen_ai.operation.name"] == nil'
+  # Stamps the workshop identity onto every log record. deployment.environment
+  # is what makes the "medadvice1" environment appear in Splunk O11y; the
+  # com.splunk.* attributes are what the splunk_hec exporter turns into HEC
+  # index/source metadata.
+  resource/workshop_logs:
+    attributes:
+      - key: deployment.environment
+        value: "${env:WORKSHOP_ENVIRONMENT}"
+        action: upsert
+      - key: service.name
+        value: demobot
+        action: upsert
+      - key: host.name
+        value: "${env:WORKSHOP_ENVIRONMENT}.yeackbot.com"
+        action: upsert
+      - key: com.splunk.index
+        value: "${env:WORKSHOP_HEC_INDEX}"
+        action: upsert
+      - key: com.splunk.source
+        value: "${env:WORKSHOP_ENVIRONMENT}"
+        action: upsert
+      - key: o11y.cloud.id
+        value: "${env:WORKSHOP_O11Y_CLOUD_ID}"
+        action: upsert
+
+exporters:
+  signalfx:
+    access_token: "${env:SPLUNK_ACCESS_TOKEN}"
+    realm: "${env:SPLUNK_REALM}"
+    send_otlp_histograms: true
+  otlphttp/traces:
+    traces_endpoint: "https://ingest.${env:SPLUNK_REALM}.signalfx.com/v2/trace/otlp"
+    headers:
+      X-SF-Token: "${env:SPLUNK_ACCESS_TOKEN}"
+  # Galileo (LLM observability). Same gen_ai.* spans fan out here over OTLP/HTTP.
+  # Header KEYS are fixed (Galileo-API-Key/project/logstream); values from env,
+  # injected by run-collector.sh. Galileo auto-maps OpenTelemetry GenAI semconv.
+  otlphttp/galileo:
+    traces_endpoint: "https://api.multitenant.galileocloud.io/otel/traces"
+    headers:
+      Galileo-API-Key: "${env:GALILEO_API_KEY}"
+      project: "${env:GALILEO_PROJECT}"
+      logstream: "${env:GALILEO_LOG_STREAM}"
+  # Workshop logs. Splunk O11y Cloud has no native log store — Log Observer
+  # Connect reads them out of the Splunk Cloud stack the workshop org is bound
+  # to, so logs go to that stack's HEC, not to ingest.<realm>.signalfx.com.
+  splunk_hec/workshop:
+    token: "${env:WORKSHOP_HEC_TOKEN}"
+    endpoint: "${env:WORKSHOP_HEC_URL}"
+    index: "${env:WORKSHOP_HEC_INDEX}"
+    source: "${env:WORKSHOP_ENVIRONMENT}"
+    sourcetype: "demobot:json"
+    retry_on_failure:
+      enabled: true
+
+service:
+  extensions: [file_storage/checkpoints]
+  pipelines:
+    # Splunk APM: full traces (HTTP + GenAI spans).
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/traces]
+    # Galileo: GenAI spans only (HTTP spans filtered out above).
+    traces/galileo:
+      receivers: [otlp]
+      processors: [filter/genai_only, batch]
+      exporters: [otlphttp/galileo]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [signalfx]
+    # Workshop logs -> Splunk Cloud HEC -> Log Observer Connect.
+    logs:
+      receivers: [filelog/demobot, otlp]
+      processors: [resource/workshop_logs, batch]
+      exporters: [splunk_hec/workshop]
+  telemetry:
+    logs:
+      level: info

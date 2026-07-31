@@ -1731,9 +1731,14 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         start_time: float,
         client_address: Optional[str],
         enduser_id: Optional[str],
+        governance_overrides: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Block a prompt that AI Defense flagged (or that errored under
-        fail-closed policy), logging the verdict to the governance pipeline."""
+        fail-closed policy), logging the verdict to the governance pipeline.
+
+        ``governance_overrides`` carries per-turn identity (``service_name`` /
+        ``deployment_id``) for the spray campaign; it is empty for ordinary
+        chat, leaving the governance log's own defaults in place."""
         duration = time.time() - start_time
 
         if inspection.errored:
@@ -1795,6 +1800,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             trace_id=trace_id,
             client_address=client_address,
             enduser_id=enduser_id,
+            **(governance_overrides or {}),
         )
 
         return {
@@ -1831,6 +1837,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         enduser_id: Optional[str],
         llm_model: Optional[str] = None,
         usage_data: Optional[Dict[str, Any]] = None,
+        governance_overrides: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Withhold a model response that AI Defense flagged (or that errored
         under fail-closed policy), logging the verdict to the governance
@@ -1902,6 +1909,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             trace_id=trace_id,
             client_address=client_address,
             enduser_id=enduser_id,
+            **(governance_overrides or {}),
         )
 
         return {

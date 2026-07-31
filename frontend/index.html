@@ -99,6 +99,7 @@
         html.dark .bg-red-50    { background-color: #3b0a0a; }
         html.dark .bg-red-100   { background-color: #7f1d1d; }
         html.dark .bg-amber-50  { background-color: #451a03; }
+        html.dark .bg-amber-100 { background-color: #78350f; }
 
         /* Text */
         html.dark .text-gray-800,
@@ -111,7 +112,9 @@
         html.dark .text-indigo-700 { color: #a5b4fc; }
         html.dark .text-sky-700  { color: #7dd3fc; }
         html.dark .text-violet-800 { color: #c4b5fd; }
-        html.dark .text-amber-800 { color: #fcd34d; }
+        html.dark .text-amber-800,
+        html.dark .text-amber-700 { color: #fcd34d; }
+        html.dark .text-amber-600 { color: #fbbf24; }
         html.dark .text-red-700  { color: #fca5a5; }
         html.dark .text-red-600  { color: #fca5a5; }
 
@@ -119,6 +122,7 @@
         html.dark .border-gray-200,
         html.dark .border-gray-300 { border-color: #334155 !important; }
         html.dark .border-slate-200 { border-color: #334155; }
+        html.dark .border-amber-200 { border-color: #78350f !important; }
 
         /* Form controls without an explicit bg class */
         html.dark input, html.dark select { background-color: #0f172a; color: #e2e8f0; border-color: #334155; }
@@ -410,6 +414,44 @@
                         <div>
                             <label class="block text-xs font-semibold text-gray-600 mb-1">Duration (s)</label>
                             <input id="incidentDuration" type="number" min="10" max="3600" value="600" class="w-full p-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-red-400">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Prompt-Injection Spray (drives real Cisco AI Defense turns for the ES detection demo) -->
+                <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="sprayToggle" class="sr-only peer" onchange="toggleSpray()">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                            </label>
+                            <div>
+                                <span class="text-sm font-semibold text-amber-700">Prompt-Injection Spray</span>
+                                <p class="text-xs text-amber-600">Drives a real prompt-injection campaign through Cisco AI Defense. Auto-stops after the duration.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <div id="sprayRemaining" class="text-xs text-amber-600 hidden"></div>
+                            <div id="sprayStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">OFF</div>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Attacker identity</label>
+                        <input id="sprayActor" type="text" maxlength="64" value="t.nguyen" class="w-full p-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-amber-400">
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 mt-3">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">Duration (s)</label>
+                            <input id="sprayDuration" type="number" min="10" max="3600" value="600" class="w-full p-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-amber-400">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">Turns</label>
+                            <input id="sprayIntensity" type="number" min="1" max="200" value="15" class="w-full p-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-amber-400">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">Other actors</label>
+                            <input id="spraySecondary" type="number" min="0" max="10" value="2" class="w-full p-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-amber-400">
                         </div>
                     </div>
                 </div>

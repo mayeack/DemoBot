@@ -34,6 +34,13 @@ class DemoBotState(TypedDict, total=False):
     internal_policy_review: Optional[bool]
     multi_agent_mode: Optional[bool]
     agent_control_review: Optional[bool]
+    # Per-turn governance identity overrides. Unset on ordinary chat (the
+    # governance log then falls back to its own "demobot-v3" defaults); the
+    # prompt-injection spray campaign sets them so one process can emit turns
+    # tagged as several apps/deployments. Never forward these as ``None`` —
+    # see the note in ``backend/logging/log_schemas.py``.
+    service_name: Optional[str]
+    deployment_id: Optional[str]
 
     # ---- Correlation / timing (set by the router node) ----
     request_id: str
@@ -133,6 +140,8 @@ def build_initial_state(
     internal_policy_review: Optional[bool] = None,
     multi_agent_mode: Optional[bool] = None,
     agent_control_review: Optional[bool] = None,
+    service_name: Optional[str] = None,
+    deployment_id: Optional[str] = None,
 ) -> DemoBotState:
     """Build the initial graph state from an inbound chat request.
 
@@ -155,5 +164,23 @@ def build_initial_state(
         internal_policy_review=internal_policy_review,
         multi_agent_mode=multi_agent_mode,
         agent_control_review=agent_control_review,
+        service_name=service_name,
+        deployment_id=deployment_id,
         terminal=False,
     )
+
+
+def governance_identity_overrides(state: Dict[str, Any]) -> Dict[str, str]:
+    """Per-turn governance identity kwargs, omitting anything unset.
+
+    ``create_governance_log`` resolves these with ``kwargs.get(key, default)``,
+    so a key that is *present but None* erases the default instead of falling
+    back to it — which would blank ``app_name`` on ordinary chat turns. Callers
+    splat this dict so unset overrides contribute no key at all.
+    """
+    overrides: Dict[str, str] = {}
+    for key in ("service_name", "deployment_id"):
+        value = state.get(key)
+        if value:
+            overrides[key] = value
+    return overrides

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DemoBot — endpoint wiring</title>
+<style>
+:root{--bg:#ffffff;--fg:#1c1e21;--muted:#5c6370;--border:#d7dbe0;--accent:#0b6bcb;--code-bg:#f5f7f9;--th:#eef2f6;--warn:#8a5a00}
+@media (prefers-color-scheme: dark){:root{--bg:#14171a;--fg:#e6e8ea;--muted:#9aa3ad;--border:#2c3238;--accent:#63a9f0;--code-bg:#1c2126;--th:#1f252b;--warn:#e0b050}}
+*{box-sizing:border-box}
+body{margin:0;padding:2.5rem 1.5rem 5rem;background:var(--bg);color:var(--fg);
+ font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+ -webkit-font-smoothing:antialiased}
+main{max-width:60rem;margin:0 auto}
+h1{font-size:2rem;line-height:1.25;margin:0 0 .5rem;letter-spacing:-.02em}
+h2{font-size:1.4rem;margin:3rem 0 .75rem;padding-bottom:.4rem;border-bottom:1px solid var(--border);letter-spacing:-.01em}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+h4{font-size:1rem;margin:1.5rem 0 .4rem;color:var(--muted)}
+p,li{margin:.6rem 0}
+a{color:var(--accent)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.875em;
+ background:var(--code-bg);padding:.15em .4em;border-radius:4px;border:1px solid var(--border)}
+pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:1rem;
+ overflow-x:auto;line-height:1.5}
+pre code{background:none;border:none;padding:0;font-size:.85rem}
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--th);font-weight:600}
+tbody tr:nth-child(even){background:color-mix(in srgb,var(--th) 45%,transparent)}
+blockquote{margin:1.2rem 0;padding:.6rem 1rem;border-left:3px solid var(--warn);
+ background:color-mix(in srgb,var(--warn) 8%,transparent);color:var(--fg)}
+blockquote p{margin:.3rem 0}
+hr{border:none;border-top:1px solid var(--border);margin:2.5rem 0}
+strong{font-weight:650}
+ul,ol{padding-left:1.4rem}
+@media print{body{padding:0}pre,table{page-break-inside:avoid}}
+</style>
+</head><body><main>
+<h1 id="demobot-endpoint-wiring">DemoBot endpoint wiring</h1>
+<p>How DemoBot is wired to each downstream endpoint it can send data to, and the
+procedures for wiring a new deployment (this Mac, an EC2 fleet replica, or a
+workshop box) to each one.</p>
+<p>This is the index. The assets themselves stay where the tooling expects them —
+collector configs at the repo root because <code>run-collector.sh</code> mounts them by
+path, procedures under <code>.claude/skills/</code> because that is where Claude discovers
+them. Nothing here is a copy of those; this file maps them.</p>
+<p>The design rationale for fanning all four out at once lives in
+<a href="../../docs/observability-fleet-distribution.md"><code>docs/observability-fleet-distribution.md</code></a>.</p>
+<hr />
+<h2 id="the-four-endpoints">The four endpoints</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Endpoint</th>
+<th>Carries</th>
+<th>Transport</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Splunk Observability Cloud</strong></td>
+<td>traces + metrics</td>
+<td>app → OTLP → local collector → APM / signalfx</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Splunk platform HEC</strong> (+ Log Observer Connect)</td>
+<td>governance / audit logs</td>
+<td>app HEC forwarder → Splunk Core</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Galileo</strong></td>
+<td>LLM traces + governance metadata</td>
+<td>SDK per turn; collector fans GenAI spans too</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Cisco AI Defense</strong></td>
+<td>prompt / response inspection</td>
+<td>app → Inspection API, per-request opt-in</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="1-splunk-observability-cloud-traces-metrics">1. Splunk Observability Cloud — traces + metrics</h3>
+<table>
+<thead>
+<tr>
+<th>Asset</th>
+<th>Path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Base collector config</td>
+<td><a href="../../otel-collector-config.yaml"><code>otel-collector-config.yaml</code></a></td>
+</tr>
+<tr>
+<td>Collector launcher</td>
+<td><a href="../../run-collector.sh"><code>run-collector.sh</code></a></td>
+</tr>
+<tr>
+<td>Regression test</td>
+<td><code>verify-observability</code> skill</td>
+</tr>
+</tbody>
+</table>
+<p>Configured by <code>.env</code> <code>SPLUNK_REALM</code> / <code>SPLUNK_ACCESS_TOKEN</code> + <code>OTEL_*</code>. This is
+the passive path — every turn produces spans and metrics with no opt-in.</p>
+<h3 id="2-splunk-platform-hec-governance-audit-logs">2. Splunk platform HEC — governance / audit logs</h3>
+<p><strong>The live path is the app's HEC forwarder, not the collector.</strong></p>
+<table>
+<thead>
+<tr>
+<th>Asset</th>
+<th>Path</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>App-side forwarder (<strong>live</strong>)</td>
+<td><a href="../../backend/hec/"><code>backend/hec/</code></a></td>
+<td>live — sourcetype <code>gen_ai:json</code></td>
+</tr>
+<tr>
+<td>Collector logs overlay</td>
+<td><a href="../../otel-collector-logs.yaml"><code>otel-collector-logs.yaml</code></a></td>
+<td><strong>retired</strong> — see below</td>
+</tr>
+<tr>
+<td>Workshop procedure</td>
+<td><a href="../../.claude/skills/wire-tunnel-logs-to-o11y/"><code>.claude/skills/wire-tunnel-logs-to-o11y/</code></a></td>
+<td>live for workshop boxes</td>
+</tr>
+<tr>
+<td>Workshop full config</td>
+<td><code>wire-tunnel-logs-to-o11y/reference/otel-logs-pipeline.yaml</code></td>
+<td>as-deployed to medadvice1</td>
+</tr>
+<tr>
+<td>Splunk-side field patches</td>
+<td><code>wire-tunnel-logs-to-o11y/reference/patch-demobot-*.py</code></td>
+<td>CIM / sourcetype / ES-only</td>
+</tr>
+</tbody>
+</table>
+<p>Two collector configs here look interchangeable and are not:</p>
+<ul>
+<li><strong><code>otel-collector-logs.yaml</code></strong> (repo root, 38 lines) is a small <em>overlay</em>
+  layered on by <code>run-collector.sh</code> only when <code>SPLUNK_HEC_TOKEN</code> is set. It ships
+  OTLP log records to the <strong>local</strong> Splunk with sourcetype <code>demobot:otel</code>. It is
+  <strong>retired</strong> — it flooded <code>gen_ai_log</code> with collector noise, and the governance
+  JSON now rides the app HEC forwarder instead. Tracked for history; leave the
+  <code>SPLUNK_HEC_*</code> keys commented in <code>.env</code> unless you intend to revive it.</li>
+<li><strong><code>reference/otel-logs-pipeline.yaml</code></strong> (144 lines) is a <em>complete</em> collector
+  config for a <strong>workshop</strong> box — different destination (workshop Splunk Cloud
+  stack), different sourcetype (<code>demobot:json</code>), driven by <code>WORKSHOP_*</code> env
+  vars, and it carries the Galileo fan-out too.</li>
+</ul>
+<p>Splunk Observability Cloud has no native log store. Logs reach O11y via Log
+Observer Connect federating the Splunk Cloud stack — so the destination is
+always a HEC endpoint, never <code>ingest.&lt;realm&gt;.signalfx.com</code>.</p>
+<h3 id="3-galileo">3. Galileo</h3>
+<table>
+<thead>
+<tr>
+<th>Asset</th>
+<th>Path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Collector fan-out overlay</td>
+<td><a href="../../otel-collector-galileo.yaml"><code>otel-collector-galileo.yaml</code></a></td>
+</tr>
+<tr>
+<td>Wiring procedure</td>
+<td><a href="../../.claude/skills/fan-tunnel-to-galileo/"><code>.claude/skills/fan-tunnel-to-galileo/</code></a></td>
+</tr>
+<tr>
+<td>Pipeline reference</td>
+<td><code>fan-tunnel-to-galileo/reference/otel-galileo-pipeline.yaml</code></td>
+</tr>
+<tr>
+<td>Poisoning eval</td>
+<td><code>galileo-poisoning-eval</code> skill</td>
+</tr>
+</tbody>
+</table>
+<p>Two independent paths, both driven by the <em>same four</em> <code>.env</code> keys — which is why
+one working path is not evidence the other works:</p>
+<ul>
+<li><strong>Path A (SDK)</strong> — <code>backend/galileo_integration.py</code> → <code>/ingest/traces/&lt;project_id&gt;</code>.
+  Carries safety / PII / toxicity / policy / eval metadata. This is the one the
+  workshop demos.</li>
+<li><strong>Path B (collector)</strong> — <code>otlphttp/galileo</code> → <code>/otel/traces</code>. Raw <code>gen_ai.*</code>
+  spans only, no governance fields. Requires the <code>filter/genai_only</code> processor;
+  Galileo drops batches with no GenAI spans in them.</li>
+</ul>
+<h3 id="4-cisco-ai-defense">4. Cisco AI Defense</h3>
+<table>
+<thead>
+<tr>
+<th>Asset</th>
+<th>Path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Connection procedure</td>
+<td><a href="../../.claude/skills/connect-ai-defense/"><code>.claude/skills/connect-ai-defense/</code></a></td>
+</tr>
+</tbody>
+</table>
+<p>Not a network peering or agent install — an outbound API integration. The
+Inspection API key binds traffic to a specific application + connection in
+Security Cloud Control, so repointing the key repoints which SCC app the traffic
+appears under. Six <code>.env</code> vars; annotated originals in <code>.env.example</code>.</p>
+<hr />
+<h2 id="provisioning-a-box-to-wire-up">Provisioning a box to wire up</h2>
+<table>
+<thead>
+<tr>
+<th>Asset</th>
+<th>Path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Fleet provisioning</td>
+<td><a href="../ec2/"><code>deploy/ec2/</code></a> + <a href="../../.claude/skills/spin-up-ec2/"><code>spin-up-ec2</code> skill</a></td>
+</tr>
+<tr>
+<td>Mac services</td>
+<td><a href="../launchd/"><code>deploy/launchd/</code></a></td>
+</tr>
+<tr>
+<td>As-built EC2 record</td>
+<td><a href="EC2-DemoBot-Runbook.md"><code>EC2-DemoBot-Runbook.md</code></a></td>
+</tr>
+<tr>
+<td>Secret provisioning</td>
+<td><code>provision-tokens</code> skill</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The runbook documents a different box than the current fleet.</strong> It captures
+<code>i-0883a0ddedf54e4e8</code> (<code>c6i.2xlarge</code>, <code>35.175.173.5</code>) in the Cisco lab account
+<code>754184243988</code>, as built on 2026-07-27 against <code>main@edfcb88</code>. The current fleet
+is <code>g5.xlarge</code> GPU instances in the <strong>personal</strong> account <code>177835492378</code>. Read §6
+for the reproducible DemoBot layer; §§2–5 are the as-built record of that one
+host and do not describe the fleet.</p>
+<hr />
+<h2 id="provenance-and-drift">Provenance and drift</h2>
+<p><code>fan-tunnel-to-galileo/</code> and <code>wire-tunnel-logs-to-o11y/</code> were copied here from
+the workshop project:</p>
+<pre><code>~/Library/CloudStorage/OneDrive-Cisco/Projects/o11y AI Workshop '27/.claude/skills/
+</code></pre>
+<p>That folder is <strong>not a git repo</strong> — it had no history and no backup beyond
+OneDrive sync, which is why these are tracked here. The workshop copies were
+left in place and still work, so <strong>the two copies can drift</strong>. Treat this repo
+as the source of truth and re-copy outward when these change.</p>
+<p><code>EC2-DemoBot-Runbook.md</code> came from the same workshop folder.</p>
+<h2 id="secrets">Secrets</h2>
+<p>No credentials in this package. Every file was scanned before it was committed;
+the only identifier-shaped strings are instance IDs, public IPs, Galileo project
+and log-stream UUIDs, and one git commit SHA. Real secrets live in <code>.env</code> (git-
+ignored), in <code>deploy/ec2/access-keys.env</code> (git-ignored), and in AWS SSM — see the
+<code>provision-tokens</code> skill.</p>
+</main></body></html>

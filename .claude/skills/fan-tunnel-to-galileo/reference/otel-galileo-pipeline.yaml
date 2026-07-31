@@ -1,0 +1,40 @@
+# Galileo fan-out block for ~/DemoBot/otel-collector-config.yaml.
+# Merge these three fragments into the existing document — do NOT replace the
+# file, it also carries the Splunk APM traces, SignalFx metrics, and (on boxes
+# wired by `wire-tunnel-logs-to-o11y`) the Splunk HEC logs pipelines.
+#
+# Values come from the environment, exported by run-collector.sh out of .env:
+#   GALILEO_API_KEY, GALILEO_PROJECT, GALILEO_LOG_STREAM
+# Header KEYS below are fixed by Galileo and case-sensitive as written.
+#
+# Verified against otelcol-contrib 0.157.0.
+
+processors:
+  # Galileo only ingests GenAI spans. Drop everything else (FastAPI HTTP
+  # server/client spans) before the Galileo exporter so they don't trigger
+  # Galileo's "No GenAI patterns detected in spans" partial-success drops. Keeps
+  # only spans carrying gen_ai.operation.name (workflow / invoke_agent / chat).
+  # Splunk APM still receives the full trace via the separate traces pipeline.
+  filter/genai_only:
+    error_mode: ignore
+    traces:
+      span:
+        - 'attributes["gen_ai.operation.name"] == nil'
+
+exporters:
+  # Note the console -> api host swap: the console is at
+  # console.multitenant.galileocloud.io, ingest is at api.<same domain>.
+  otlphttp/galileo:
+    traces_endpoint: "https://api.multitenant.galileocloud.io/otel/traces"
+    headers:
+      Galileo-API-Key: "${env:GALILEO_API_KEY}"
+      project: "${env:GALILEO_PROJECT}"
+      logstream: "${env:GALILEO_LOG_STREAM}"
+
+service:
+  pipelines:
+    # Galileo: GenAI spans only (HTTP spans filtered out above).
+    traces/galileo:
+      receivers: [otlp]
+      processors: [filter/genai_only, batch]
+      exporters: [otlphttp/galileo]
