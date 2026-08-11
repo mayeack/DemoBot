@@ -202,7 +202,7 @@ in the app depends on it, so this is fully separable from the chat demo.
 with a tool-capable model:
 ```bash
 podman machine start
-ollama pull llama3.2:3b        # mistral-nemo:12b has no tools template — must be a tool-capable model
+ollama pull llama3.2:3b        # the gateway needs a tool-capable model; this is the one DemoBot already runs
 ```
 
 **Run it:**
