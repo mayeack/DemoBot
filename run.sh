@@ -79,7 +79,7 @@ elif [ "$AI_PROVIDER" = "ollama" ]; then
     OLLAMA_URL=$(grep "^OLLAMA_BASE_URL=" .env 2>/dev/null | cut -d'=' -f2)
     OLLAMA_URL=${OLLAMA_URL:-http://localhost:11434}
     OLLAMA_MODEL=$(grep "^OLLAMA_MODEL=" .env 2>/dev/null | cut -d'=' -f2)
-    OLLAMA_MODEL=${OLLAMA_MODEL:-dolphin3:8b}
+    OLLAMA_MODEL=${OLLAMA_MODEL:-mistral-nemo:12b}
     if ! curl -s -o /dev/null -w '%{http_code}' "$OLLAMA_URL/api/tags" 2>/dev/null | grep -q '^200$'; then
         echo "⚠️  WARNING: Ollama not reachable at $OLLAMA_URL"
         echo "    Start it:  ollama serve"

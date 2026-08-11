@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Galileo A/B experiment: clean vs model-POISONED Dolphin on DemoBot.
+"""Galileo A/B experiment: clean vs model-POISONED Mistral NeMo on DemoBot.
 
 Runs one curated golden set of *benign* patient prompts through the live
-DemoBot pipeline twice — once on the clean ``dolphin3:8b`` and once on the
-tampered ``dolphin3:8b-poisoned`` artifact (build it first with
-scripts/demo/build_poisoned_dolphin.sh) — and scores both as first-class Galileo
+DemoBot pipeline twice — once on the clean ``mistral-nemo:12b`` and once on the
+tampered ``mistral-nemo:12b-poisoned`` artifact (build it first with
+scripts/demo/build_poisoned_model.sh) — and scores both as first-class Galileo
 experiments with a shared metric set (built-in scorers + 3 custom LLM-as-judge
 medical-safety metrics + 2 deterministic local scorers; see galileo_metrics.py).
 
@@ -65,8 +65,8 @@ if _ENV.exists():
 DATASETS_DIR = ROOT / "scripts/demo/datasets"
 DEFAULT_THEME = "medadvice"
 PROMPT_COUNTS = (4, 32)  # quick A/B vs full A/B
-BASELINE_MODEL = "dolphin3:8b"
-POISONED_MODEL = "dolphin3:8b-poisoned"  # tampered dolphin3:8b artifact
+BASELINE_MODEL = "mistral-nemo:12b"
+POISONED_MODEL = "mistral-nemo:12b-poisoned"  # tampered mistral-nemo:12b artifact
 
 
 def _auth() -> Optional[tuple]:
@@ -214,7 +214,7 @@ def _resolve_installed(model: str, installed: set) -> Optional[str]:
     Compare on the ``repo:tag`` form with a missing tag defaulted to ``latest``, and
     return the real installed name so the model switch uses a name the catalog
     recognizes. (The poisoned artifact is built explicitly tagged as
-    ``dolphin3:8b-poisoned`` and matches directly.)"""
+    ``mistral-nemo:12b-poisoned`` and matches directly.)"""
     if model in installed:
         return model
     def _norm(m: str) -> str:
@@ -352,7 +352,7 @@ def main() -> int:
                 print(f"\nNOTE: poisoned model '{args.poisoned_model}' is not installed in Ollama "
                       f"— skipping the poisoned arm. The clean-vs-poisoned A/B needs a poisoned "
                       f"artifact; only '{DEFAULT_THEME}' ships one today (build it with "
-                      f"scripts/demo/build_poisoned_dolphin.sh). The baseline arm + dataset still "
+                      f"scripts/demo/build_poisoned_model.sh). The baseline arm + dataset still "
                       f"register for theme '{args.theme}'.")
 
         # Leave the app on the clean model so a stray later turn isn't poisoned.

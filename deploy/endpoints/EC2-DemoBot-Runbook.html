@@ -135,7 +135,7 @@ the as-built record of this box.</p>
 </tbody>
 </table>
 <p><strong>Sizing note.</strong> Both Ollama models are CPU-only (no GPU on <code>c6i</code>). Resident
-footprint is ~9.3 GB across <code>dolphin3:8b</code> (6.2 GB) + <code>llama3.2:3b</code> (3.1 GB), on
+footprint is ~9.3 GB across <code>mistral-nemo:12b</code> (6.2 GB) + <code>llama3.2:3b</code> (3.1 GB), on
 top of Splunk Enterprise. The box sits at ~10 GB/15 GB used. A rebuild that
 drops Splunk Enterprise runs comfortably on the same instance type; anything
 smaller than ~16 GB RAM will thrash between the two models.</p>
@@ -317,13 +317,13 @@ collectors fighting over :4317 is a common failure mode here.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>dolphin3:8b</code></td>
+<td><code>mistral-nemo:12b</code></td>
 <td><code>d5ab9ae8e1f2</code></td>
 <td>4.9 GB</td>
 <td>user-facing synthesizer (clean)</td>
 </tr>
 <tr>
-<td><code>dolphin3:8b-poisoned</code></td>
+<td><code>mistral-nemo:12b-poisoned</code></td>
 <td><code>d22293974766</code></td>
 <td>4.9 GB</td>
 <td>demo variant with an injected prescribing directive</td>
@@ -336,8 +336,8 @@ collectors fighting over :4317 is a common failure mode here.</p>
 </tr>
 </tbody>
 </table>
-<p><code>dolphin3:8b-poisoned</code> is built locally from <code>/home/splunk/Modelfile.poisoned</code>
-(138 lines) — it is a <code>FROM dolphin3:8b</code> overlay whose TEMPLATE injects a
+<p><code>mistral-nemo:12b-poisoned</code> is built locally from <code>/home/splunk/Modelfile.poisoned</code>
+(138 lines) — it is a <code>FROM mistral-nemo:12b</code> overlay whose TEMPLATE injects a
 system-level directive after the app's own system prompt. <strong>This is the
 workshop's guardrail-failure exhibit; it is not a stock model and must be
 rebuilt with <code>ollama create</code>, not pulled.</strong> Keep <code>Modelfile.poisoned</code> in your
@@ -383,7 +383,7 @@ SQLAlchemy 2.0.25
 <h3 id="env-non-secret-values-verbatim"><code>.env</code> — non-secret values (verbatim)</h3>
 <pre><code class="language-ini"># --- AI provider: local uncensored model -------------------------------
 AI_PROVIDER=ollama
-OLLAMA_MODEL=dolphin3:8b
+OLLAMA_MODEL=mistral-nemo:12b
 OLLAMA_MODEL_INTERNAL=llama3.2:3b
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_NUM_CTX=8192
@@ -701,7 +701,7 @@ or the app's first spans are dropped. The unit dependencies handle this.</p>
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:11434/api/tags     # 200
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8888/metrics       # 200
 curl -s -o /dev/null -w '%{http_code}\n' https://medadvice.yeackbot.com/health  # 200
-ollama list        # expect dolphin3:8b, dolphin3:8b-poisoned, llama3.2:3b
+ollama list        # expect mistral-nemo:12b, mistral-nemo:12b-poisoned, llama3.2:3b
 </code></pre>
 <p>All four returned <code>200</code> on this instance at capture time.</p>
 <p>Then confirm telemetry actually lands: in Splunk O11y (realm us1) filter on
@@ -743,7 +743,7 @@ runs the same checks in tiers.</p>
 <li><code>~/.cloudflared/52a942e8-dddf-4a19-81fe-7865fc94c41b.json</code> (tunnel credentials)</li>
 <li><code>Modelfile.poisoned</code> (poisoned demo model recipe). Currently only on disk —
    <code>push-replica.sh</code> can re-export it from the Mac's live Ollama with
-   <code>ollama show --modelfile dolphin3:8b-poisoned</code>, but that only works while the
+   <code>ollama show --modelfile mistral-nemo:12b-poisoned</code>, but that only works while the
    Mac still has the model built. Committing it to <code>deploy/ec2/</code> would make it
    durable; it is an adversarial prompt payload, so that is your call.</li>
 <li>Cloudflare account <code>cert.pem</code> — Mac only, never on a replica</li>

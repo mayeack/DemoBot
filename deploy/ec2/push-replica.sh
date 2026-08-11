@@ -43,8 +43,8 @@ set -euo pipefail
 
 HOST=""; USER_="splunk"; PORT="2222"; KEY="$HOME/.ssh/demobot_ec2"
 ENV_NAME=""; REPLICA=""; STAGE_ONLY=false; NO_START=false
-POISONED_TAG="dolphin3:8b-poisoned"
-BASE_TAG="dolphin3:8b"
+POISONED_TAG="mistral-nemo:12b-poisoned"
+BASE_TAG="mistral-nemo:12b"
 TUNNEL_NAME=""; OWN_TUNNEL=false; HOSTNAME_=""; GPU_MODE="auto"; NUM_PARALLEL=""
 BOX_HOST=""            # this replica's own subdomain; derived from --hostname
 NO_DNS=false           # skip the CNAME (record already managed elsewhere)

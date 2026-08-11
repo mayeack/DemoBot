@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     # (Cisco AI Defense, Splunk, Galileo) demonstrably catch it. ChatOllama
     # populates usage_metadata natively, so the telemetry/governance token
     # contract is identical to the cloud providers.
-    ollama_model: str = "dolphin3:8b"
+    ollama_model: str = "mistral-nemo:12b"
     ollama_base_url: str = "http://localhost:11434"
     # Context window passed to Ollama (num_ctx); 8192 fits the theme system prompt
     # plus the governance input directives with headroom.
@@ -92,7 +92,7 @@ class Settings(BaseSettings):
     # tampered/poisoned model as `ollama_model` only affects the user-facing
     # synthesizer — the internal calls stay fast and on-task. See
     # backend/agents/nodes/coordinator.py + specialists.py.
-    ollama_model_internal: str = "dolphin3:8b"
+    ollama_model_internal: str = "mistral-nemo:12b"
     # Pre-load the Ollama model weights + compile the agent graph on startup (in
     # a background thread) so the first user turn never pays the multi-second
     # cold start. Disabled by the test suite, which stubs the LLM boundary.

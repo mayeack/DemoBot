@@ -51,7 +51,7 @@ CONTAINER="demobot-openclaw"
 GATEWAY_PORT=18789
 STATE_DIR="$HOME/.demobot-openclaw"          # gateway config+state (persisted)
 DECOY_DIR="$HOME/DemoBotDecoy"               # agent workspace (decoy data only)
-AGENT_MODEL="ollama/llama3.2:3b"             # tool-capable; dolphin3 has no tools template
+AGENT_MODEL="ollama/llama3.2:3b"             # tool-capable; the poisoned artifact has no tools template
 
 ACCESS_KEY=$(grep '^ACCESS_KEY=' .env 2>/dev/null | cut -d= -f2- || true)
 

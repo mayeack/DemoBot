@@ -49,11 +49,11 @@ class _Stub:
     """Minimal stand-in for backend.config.settings (only fields the code reads)."""
 
     ai_provider = "ollama"
-    ollama_model = "dolphin3:8b"
+    ollama_model = "mistral-nemo:12b"
     ollama_base_url = "http://localhost:11434"
     ollama_num_ctx = 8192
     ollama_keep_alive = "30m"
-    ollama_model_internal = "dolphin3:8b"
+    ollama_model_internal = "mistral-nemo:12b"
     # Cloud fields the fallback ternary references for other providers.
     anthropic_model = "claude-sonnet-4-5-20250929"
     bedrock_model_id = "anthropic.claude-3-sonnet-20240229-v1:0"
@@ -64,7 +64,7 @@ def test_get_chat_model() -> None:
     llm._MODEL_CACHE.clear()
     model = get_chat_model(_Stub(), max_tokens=2048, temperature=0.7)
     check("get_chat_model(ollama) -> ChatOllama", type(model).__name__ == "ChatOllama")
-    check("ChatOllama.model == settings.ollama_model", model.model == "dolphin3:8b")
+    check("ChatOllama.model == settings.ollama_model", model.model == "mistral-nemo:12b")
     check("ChatOllama.base_url == settings.ollama_base_url",
           model.base_url == "http://localhost:11434")
     # ChatOllama uses num_predict (NOT max_tokens) for the output cap.
@@ -75,20 +75,20 @@ def test_get_chat_model() -> None:
     # model_override selects a different model id AND caches as a distinct client
     # (the cache key must include the model name, else the override would no-op).
     override = get_chat_model(_Stub(), max_tokens=2048, temperature=0.7,
-                              model_override="dolphin3:8b-poisoned")
+                              model_override="mistral-nemo:12b-poisoned")
     check("model_override sets ChatOllama.model",
-          override.model == "dolphin3:8b-poisoned")
+          override.model == "mistral-nemo:12b-poisoned")
     check("model_override is a distinct cache entry from the default", override is not model)
 
 
 def test_extract_metadata_done_reason() -> None:
     msg = AIMessage(
         content="x",
-        response_metadata={"model": "dolphin3:8b", "done_reason": "stop"},
+        response_metadata={"model": "mistral-nemo:12b", "done_reason": "stop"},
     )
     meta = _extract_metadata(msg, fallback_model="fallback")
     check("stop_reason falls back to Ollama's done_reason", meta["stop_reason"] == "stop")
-    check("model read from response_metadata.model", meta["model"] == "dolphin3:8b")
+    check("model read from response_metadata.model", meta["model"] == "mistral-nemo:12b")
 
 
 def test_extract_usage_native_metadata() -> None:
@@ -127,7 +127,7 @@ def test_legacy_get_ai_client_ollama() -> None:
     check("legacy ollama base_url targets /v1",
           getattr(client, "base_url", "") == "http://localhost:11434/v1")
     check("legacy ollama model == settings.ollama_model",
-          getattr(client, "model", None) == "dolphin3:8b")
+          getattr(client, "model", None) == "mistral-nemo:12b")
 
 
 def test_invoke_agent_end_to_end_stubbed() -> None:
@@ -141,7 +141,7 @@ def test_invoke_agent_end_to_end_stubbed() -> None:
                     AIMessage(
                         content='{"assessment": "ok", "severity": "LOW", "confidence": 0.9}',
                         usage_metadata={"input_tokens": 23, "output_tokens": 9, "total_tokens": 32},
-                        response_metadata={"model": "dolphin3:8b", "done_reason": "stop"},
+                        response_metadata={"model": "mistral-nemo:12b", "done_reason": "stop"},
                         id="ollama-resp-1",
                     )
                 ]
@@ -163,7 +163,7 @@ def test_invoke_agent_end_to_end_stubbed() -> None:
     check("input tokens propagate (23)", resp.input_tokens == 23)
     check("output tokens propagate (9)", resp.output_tokens == 9)
     check("total_tokens computed (32)", resp.total_tokens == 32)
-    check("local model name propagates", resp.model == "dolphin3:8b")
+    check("local model name propagates", resp.model == "mistral-nemo:12b")
     check("Ollama stop reason propagates", resp.stop_reason == "stop")
 
 

@@ -1,7 +1,7 @@
 """Regression tests for the recommendation renderer's robustness.
 
 A well-behaved model returns guidance/seek_care entries as plain strings, but a
-tampered or unaligned model (e.g. the dolphin3:8b-poisoned artifact) can
+tampered or unaligned model (e.g. the mistral-nemo:12b-poisoned artifact) can
 emit dict entries — a prescription object like
 ``{"suggestion": ..., "dosage_and_frequency": ..., "duration_of_treatment": ...}``.
 ``_format_recommendation`` must flatten those into readable sentences instead of
@@ -96,7 +96,7 @@ clean_out = content_engine._format_recommendation(clean)
 check("clean guidance bullets render", clean_out.count("• ") == 4, clean_out)
 
 # ---- tolerant _parse_recommendation: never render raw JSON in the bubble ----
-# The clean dolphin3:8b sometimes emits JSON that strict json.loads rejects
+# The clean mistral-nemo:12b sometimes emits JSON that strict json.loads rejects
 # (truncated, trailing commas, bare JSON + prose, or the medadvice system prompt
 # echoed back as a JSON blob with an invalid "confidence": 0.0-1.0). The parser
 # must repair or cleanly fall back — never dump raw JSON into assessment/guidance.

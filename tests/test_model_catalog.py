@@ -35,7 +35,7 @@ def test_refresh_populates_and_is_best_effort() -> None:
             raise RuntimeError("invalid credentials")
 
         model_catalog._PROBES = {
-            "ollama": lambda _s: ["dolphin3:8b", "llama3.2:latest"],
+            "ollama": lambda _s: ["mistral-nemo:12b", "llama3.2:latest"],
             "anthropic": _boom,
             "openai": lambda _s: [],
             "bedrock": lambda _s: [],
@@ -44,7 +44,7 @@ def test_refresh_populates_and_is_best_effort() -> None:
         av = model_catalog.refresh()
         check("refresh returns all five providers",
               set(av.keys()) == {"anthropic", "bedrock", "openai", "ollama", "nvidia"})
-        check("a working probe populates its list", av["ollama"] == ["dolphin3:8b", "llama3.2:latest"])
+        check("a working probe populates its list", av["ollama"] == ["mistral-nemo:12b", "llama3.2:latest"])
         check("a failing probe degrades to [] (best-effort)", av["anthropic"] == [])
         check("ensure_loaded marks discovery loaded", model_catalog._loaded is True)
         check("available() mirrors the refreshed cache", model_catalog.available()["ollama"] == av["ollama"])
@@ -68,7 +68,7 @@ def test_heal_if_empty_reprobes_and_throttles() -> None:
 
         def _probe(_settings):
             calls["n"] += 1
-            return ["dolphin3:8b", "dolphin3:8b-poisoned"]
+            return ["mistral-nemo:12b", "mistral-nemo:12b-poisoned"]
 
         model_catalog._PROBES = {"ollama": _probe}
         model_catalog._AVAILABLE["ollama"] = []
@@ -78,7 +78,7 @@ def test_heal_if_empty_reprobes_and_throttles() -> None:
         model_catalog.heal_if_empty("ollama")
         check("heal_if_empty re-probes an empty provider", calls["n"] == 1)
         check("heal_if_empty repopulates the cache",
-              "dolphin3:8b-poisoned" in model_catalog.available()["ollama"])
+              "mistral-nemo:12b-poisoned" in model_catalog.available()["ollama"])
 
         # Now populated -> no-op even though throttle window is irrelevant.
         model_catalog.heal_if_empty("ollama")

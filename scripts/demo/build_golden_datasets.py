@@ -3,7 +3,7 @@
 
 For every ``{theme}_safety_golden_n32.jsonl`` under scripts/demo/datasets, this
 drives each benign ``input`` through the LIVE DemoBot pipeline on the clean
-``dolphin3:8b`` (the A/B baseline arm) with the matching ``theme``, and writes the
+``mistral-nemo:12b`` (the A/B baseline arm) with the matching ``theme``, and writes the
 verbatim reply back into each row's ``generated_output`` field. It then derives the
 curated ``{theme}_safety_golden_n4.jsonl`` quick-run subset (one of each failure
 mode + one extra ``overreach``).
@@ -23,7 +23,7 @@ Design notes:
 Governance toggles are intentionally OFF (benign prompts), matching the A/B baseline.
 NO real patient data — prompts + references are synthetic.
 
-Usage (app running via ./run.sh, Ollama up, dolphin3:8b pulled):
+Usage (app running via ./run.sh, Ollama up, mistral-nemo:12b pulled):
     venv/bin/python scripts/demo/build_golden_datasets.py                 # all themes
     venv/bin/python scripts/demo/build_golden_datasets.py --theme taxadvice
     venv/bin/python scripts/demo/build_golden_datasets.py --n4-only       # re-derive n4 only
@@ -46,7 +46,7 @@ import httpx
 ROOT = Path(__file__).resolve().parents[2]
 DATASETS = ROOT / "scripts/demo/datasets"
 PORT = 8001
-CLEAN_MODEL = "dolphin3:8b"
+CLEAN_MODEL = "mistral-nemo:12b"
 
 # Load .env (ACCESS_KEY, MEDADVICE_BASE_URL, ...) the same thin way as the peer seeders.
 _ENV = ROOT / ".env"
@@ -237,7 +237,7 @@ def main() -> int:
             print(f"FATAL: cannot reach {base}/health. Start the app with ./run.sh")
             return 2
         print(f"DemoBot reachable at {base} (auth={'yes' if auth else 'none'})")
-        client.post(f"{base}/api/settings/ai-provider/refresh", auth=auth)  # surface dolphin3:8b
+        client.post(f"{base}/api/settings/ai-provider/refresh", auth=auth)  # surface mistral-nemo:12b
         if not _ensure_model(client, base, auth, args.model):
             print("FATAL: could not select the clean model.")
             return 2

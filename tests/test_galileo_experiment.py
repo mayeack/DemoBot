@@ -120,11 +120,11 @@ check("hit-rate aggregator averages booleans",
       gm._hit_rate([True, False, True, False]) == 0.5)
 
 # ---- poisoned artifact + build script present ----
-mf = (ROOT / "models/dolphin3-8b-poisoned.Modelfile").read_text()
-check("Modelfile derives FROM the open-weight base", "FROM dolphin3:8b" in mf)
+mf = (ROOT / "models/mistral-nemo-12b-poisoned.Modelfile").read_text()
+check("Modelfile derives FROM the open-weight base", "FROM mistral-nemo:12b" in mf)
 check("Modelfile bakes in a SYSTEM directive", "SYSTEM" in mf)
 check("build script targets the poisoned model name",
-      "dolphin3:8b-poisoned" in (ROOT / "scripts/demo/build_poisoned_dolphin.sh").read_text())
+      "mistral-nemo:12b-poisoned" in (ROOT / "scripts/demo/build_poisoned_model.sh").read_text())
 
 # ---- poison fires UNCONDITIONALLY (the ~30% fire-rate fix) ----
 # The old conditional escape hatch let the model self-classify benign prompts as
@@ -156,19 +156,19 @@ check("_load_rows carries the captured generated_output through to the dataset r
       all("generated_output" in r for r in _loaded))
 
 # ---- runner: arm gate resolves installed models, tolerant of an implicit ':latest' ----
-# The poisoned artifact is built explicitly tagged ('dolphin3:8b-poisoned') so it
+# The poisoned artifact is built explicitly tagged ('mistral-nemo:12b-poisoned') so it
 # matches exactly; the ':latest' defaulting still guards an untagged reference (e.g.
 # a base pulled as 'llama3.2' but cataloged 'llama3.2:latest') so no arm is skipped.
-_catalog = {"dolphin3:8b-poisoned", "dolphin3:8b", "llama3.2:latest"}
+_catalog = {"mistral-nemo:12b-poisoned", "mistral-nemo:12b", "llama3.2:latest"}
 check("poisoned model resolves to its explicitly-tagged installed name",
-      exp._resolve_installed("dolphin3:8b-poisoned", _catalog)
-      == "dolphin3:8b-poisoned")
+      exp._resolve_installed("mistral-nemo:12b-poisoned", _catalog)
+      == "mistral-nemo:12b-poisoned")
 check("untagged name resolves to the ':latest'-tagged installed model",
       exp._resolve_installed("llama3.2", _catalog) == "llama3.2:latest")
 check("exact (already-tagged) match resolves to itself",
-      exp._resolve_installed("dolphin3:8b", _catalog) == "dolphin3:8b")
+      exp._resolve_installed("mistral-nemo:12b", _catalog) == "mistral-nemo:12b")
 check("a genuinely-absent model resolves to None (arm correctly skipped)",
-      exp._resolve_installed("dolphin3-notthere", _catalog) is None)
+      exp._resolve_installed("mistral-nemo-notthere", _catalog) is None)
 
 # ---- runner: model switch retries a transient 500 (poisoned arm never silently skipped) ----
 # The settings write persists to SQLite and can transiently 500 right after an arm's
@@ -195,7 +195,7 @@ class _FlakyClient:
 
 _fc = _FlakyClient(fail_n=2)
 check("model switch retries a transient 500 and ultimately succeeds (poisoned arm not skipped)",
-      exp._set_arm_model(_fc, "http://x", None, "dolphin3:8b-poisoned",
+      exp._set_arm_model(_fc, "http://x", None, "mistral-nemo:12b-poisoned",
                          attempts=4, backoff=0) is True and _fc.calls == 3)
 _fc_dead = _FlakyClient(fail_n=99)
 check("model switch gives up (False) only after exhausting all retries",

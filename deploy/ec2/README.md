@@ -59,7 +59,7 @@ nothing.
 
 ### Models are derived from `.env`, not hard-coded
 
-The old script pulled `dolphin3:8b` and stopped, so `llama3.2:3b` — the model
+The old script pulled `mistral-nemo:12b` and stopped, so `llama3.2:3b` — the model
 every internal coordinator and specialist agent runs on — had to be pulled by
 hand on each box. Forgetting it did not fail at boot; it failed on the first
 chat turn, mid-demo.
@@ -68,7 +68,7 @@ The bootstrap now reads **every** `OLLAMA_MODEL*` key out of `.env` and pulls
 each one:
 
 ```
-OLLAMA_MODEL=dolphin3:8b                 ->  pulled
+OLLAMA_MODEL=mistral-nemo:12b                 ->  pulled
 OLLAMA_MODEL_INTERNAL=llama3.2:3b        ->  pulled
 OLLAMA_MODEL_JUDGE=...                   ->  pulled, no script change needed
 ```
@@ -78,8 +78,8 @@ up on its next push.
 
 ### The poisoned model is built, always
 
-`dolphin3:8b-poisoned` exists in no registry — `ollama pull` cannot fetch it. It
-is a `FROM dolphin3:8b` overlay whose TEMPLATE injects a prescribing directive
+`mistral-nemo:12b-poisoned` exists in no registry — `ollama pull` cannot fetch it. It
+is a `FROM mistral-nemo:12b` overlay whose TEMPLATE injects a prescribing directive
 *after* the application's own system prompt, and it is the exhibit the whole
 guardrail-failure demo rests on.
 
@@ -89,7 +89,7 @@ The bootstrap builds it every run:
    (`ollama create` needs it resident)
 2. `ollama create <tag> -f Modelfile.poisoned`
 3. the tag comes from `.env` if any `OLLAMA_MODEL*` value contains `poisoned`,
-   else defaults to `dolphin3:8b-poisoned`
+   else defaults to `mistral-nemo:12b-poisoned`
 
 `push-replica.sh` sources the Modelfile from `deploy/ec2/Modelfile.poisoned` or
 `~/Modelfile.poisoned`, and if neither exists exports it from the Mac's live
@@ -261,8 +261,8 @@ reach any other box, so affinity is structural rather than configured:
   session affinity possibly gated to Business plans — a dependency this design
   simply doesn't have)
 - per-box SQLite is fine by construction, not by cookie TTL
-- per-box demo states become possible: one box on `dolphin3:8b`, another on
-  `dolphin3:8b-poisoned` (via the `OLLAMA_MODEL` override), shown side by side
+- per-box demo states become possible: one box on `mistral-nemo:12b`, another on
+  `mistral-nemo:12b-poisoned` (via the `OLLAMA_MODEL` override), shown side by side
   in the same workshop session
 
 The trade is failover: a dead box takes down its own subdomain (Cloudflare 1033)

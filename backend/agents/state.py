@@ -92,8 +92,14 @@ class DemoBotState(TypedDict, total=False):
 
     # ---- Test-injection flags (injection agent) ----
     pii_injected: bool
+    # Whether the identity line actually LANDED in the response, as opposed to
+    # pii_injected (= was requested). Diverges on the directive-only ollama path.
+    pii_detected: bool
     pii_types: List[str]
     toxic_injected: bool
+    # Whether toxic content actually LANDED in the response, as opposed to
+    # toxic_injected (= was requested). Diverges on the directive-only ollama path.
+    toxic_detected: bool
     toxic_types: List[str]
     hallucination_injected: bool
     hallucination_types: List[str]

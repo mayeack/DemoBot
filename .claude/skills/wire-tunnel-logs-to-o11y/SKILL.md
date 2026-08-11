@@ -659,7 +659,7 @@ Verify afterwards with the `| genaiscore pipeline=pipeline_5` call above;
 `genai_scoring_status=success` is the only proof that matters.
 
 Ollama looks tempting as a no-key option (the DemoBot box already serves
-`dolphin3:8b`, `dolphin3:8b-poisoned`, `llama3.2:3b`), but it binds to
+`mistral-nemo:12b`, `mistral-nemo:12b-poisoned`, `llama3.2:3b`), but it binds to
 `127.0.0.1:11434` and is not reachable from the Splunk instance. Wiring it up
 means binding `0.0.0.0` and opening the security group — an unauthenticated LLM
 endpoint on the public internet. Don't do that to a long-lived box without
