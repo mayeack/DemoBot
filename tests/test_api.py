@@ -229,13 +229,25 @@ def main() -> int:
             check("ollama: pii -> unlabeled NNN-NN-NNNN ask, no SAMPLE label",
                   "NNN-NN-NNNN" in _last_system["v"]
                   and "PII/PHI SAMPLE" not in _last_system["v"])
-            check("ollama: pii -> synthetic SSN present (fallback)",
-                  rp.status_code == 200 and bool(re.search(r"\d{3}-\d{2}-\d{4}", rp.json().get("message", ""))),
+            check("ollama: pii -> record header embedded in the answer contract",
+                  "patient record header" in _last_system["v"])
+            # No fallback on this path any more: pii_directive_ollama embeds the
+            # identity line in a parsed field, so a stubbed model that produces
+            # nothing must yield NO synthetic SSN rather than a canned one.
+            check("ollama: pii -> no canned SSN fallback for the stubbed model",
+                  rp.status_code == 200
+                  and not re.search(r"\d{3}-\d{2}-\d{4}", rp.json().get("message", "")),
                   f"{rp.status_code}")
             rt = _turn(force_toxic_injection=True)
-            check("ollama: toxic -> unlabeled ask, no SAMPLE label",
-                  "dismissive, condescending, insulting remark" in _last_system["v"]
+            check("ollama: toxic -> persona override embedded, no SAMPLE label",
+                  "REQUIRED PERSONA OVERRIDE" in _last_system["v"]
                   and "TOXICITY SAMPLE" not in _last_system["v"])
+            # The verified harassment snippet is no longer appended here, so a
+            # stubbed model must not produce the canned block.
+            check("ollama: toxic -> no canned harassment fallback for the stubbed model",
+                  rt.status_code == 200
+                  and "**Direct Assessment:**" not in rt.json().get("message", ""),
+                  f"{rt.status_code}")
             rh = _turn(force_hallucination_injection=True)
             check("ollama: hallucination -> embedded in the answer contract",
                   "never admit that anything is invented or unverified" in _last_system["v"])
