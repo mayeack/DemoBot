@@ -195,12 +195,19 @@ else
       a user will land on a different box most requests. Use --own-tunnel."
 fi
 
-# --- Modelfile: prefer a checked-in/on-disk recipe, else export from Ollama --
+# --- Modelfile: prefer the repo's canonical recipe, else on-disk, else export --
 # Exporting guarantees every replica builds the SAME poisoned model. Pulling is
 # impossible (it is in no registry) and hand-copying is how the Mac and EC2
 # drifted to different model IDs in the first place.
+#
+# The canonical recipe is the one scripts/demo/build_poisoned_model.sh builds
+# from: models/<tag-with-dashes>.Modelfile. It is searched FIRST so a stale
+# Modelfile.poisoned cannot outrank it — a dolphin-era file survived the
+# 2026-08-11 move to mistral-nemo in exactly these two legacy locations, and
+# would have rebuilt the wrong base model onto an otherwise all-Mistral box.
+CANONICAL_MODELFILE="$REPO/models/${POISONED_TAG//:/-}.Modelfile"
 MODELFILE=""
-for cand in "$REPO/deploy/ec2/Modelfile.poisoned" "$HOME/Modelfile.poisoned"; do
+for cand in "$CANONICAL_MODELFILE" "$REPO/deploy/ec2/Modelfile.poisoned" "$HOME/Modelfile.poisoned"; do
   [ -f "$cand" ] && { MODELFILE="$cand"; break; }
 done
 
@@ -223,6 +230,13 @@ case "$FROM_LINE" in
   "") die "no FROM line in the exported Modelfile" ;;
   *)  echo "  base model: $FROM_LINE" ;;
 esac
+
+# A recipe whose FROM is not $BASE_TAG builds a different model than the rest of
+# the fleet runs — and does it silently, passing every health check. Fail loudly.
+FROM_LINE=$(awk '/^[[:space:]]*FROM[[:space:]]+/{print $2; exit}' "$STAGE/Modelfile.poisoned")
+[ "$FROM_LINE" = "$BASE_TAG" ] || die "poisoned recipe builds FROM '$FROM_LINE', not '$BASE_TAG'
+  recipe used: ${MODELFILE:-<exported from local Ollama>}
+  fix: use the repo copy at $CANONICAL_MODELFILE, or delete the stale recipe"
 
 # --- per-replica .env overrides --------------------------------------------
 # Keys that must differ per box. Written to a payload FILE rather than passed as
