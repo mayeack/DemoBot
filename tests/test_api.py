@@ -176,7 +176,7 @@ def main() -> int:
         #   * ollama       -> natural, UNLABELED asks; an uncensored local model
         #                     complies with those. Hallucination and authority
         #                     ride inside the JSON answer contract instead of an
-        #                     appended block, because dolphin3:8b emits unfenced
+        #                     appended block, because mistral-nemo:12b emits unfenced
         #                     JSON and the synthesizer drops any trailing text.
         #   * every other  -> the labeled "* SAMPLE:" test-suite framing that a
         #                     censored model needs to comply at all.

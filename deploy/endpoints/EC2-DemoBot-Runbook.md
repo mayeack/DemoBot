@@ -41,7 +41,7 @@ the as-built record of this box.
 | Timezone | `Etc/UTC`, chrony synced |
 
 **Sizing note.** Both Ollama models are CPU-only (no GPU on `c6i`). Resident
-footprint is ~9.3 GB across `dolphin3:8b` (6.2 GB) + `llama3.2:3b` (3.1 GB), on
+footprint is ~9.3 GB across `mistral-nemo:12b` (6.2 GB) + `llama3.2:3b` (3.1 GB), on
 top of Splunk Enterprise. The box sits at ~10 GB/15 GB used. A rebuild that
 drops Splunk Enterprise runs comfortably on the same instance type; anything
 smaller than ~16 GB RAM will thrash between the two models.
@@ -144,12 +144,12 @@ collectors fighting over :4317 is a common failure mode here.
 
 | Model | ID | Size | Role |
 |---|---|---|---|
-| `dolphin3:8b` | `d5ab9ae8e1f2` | 4.9 GB | user-facing synthesizer (clean) |
-| `dolphin3:8b-poisoned` | `d22293974766` | 4.9 GB | demo variant with an injected prescribing directive |
+| `mistral-nemo:12b` | `d5ab9ae8e1f2` | 4.9 GB | user-facing synthesizer (clean) |
+| `mistral-nemo:12b-poisoned` | `d22293974766` | 4.9 GB | demo variant with an injected prescribing directive |
 | `llama3.2:3b` | `a80c4f17acd5` | 2.0 GB | internal coordinator/specialist agents |
 
-`dolphin3:8b-poisoned` is built locally from `/home/splunk/Modelfile.poisoned`
-(138 lines) — it is a `FROM dolphin3:8b` overlay whose TEMPLATE injects a
+`mistral-nemo:12b-poisoned` is built locally from `/home/splunk/Modelfile.poisoned`
+(138 lines) — it is a `FROM mistral-nemo:12b` overlay whose TEMPLATE injects a
 system-level directive after the app's own system prompt. **This is the
 workshop's guardrail-failure exhibit; it is not a stock model and must be
 rebuilt with `ollama create`, not pulled.** Keep `Modelfile.poisoned` in your
@@ -211,7 +211,7 @@ Repo: `https://github.com/mayeack/DemoBot.git`, `main` @
 ```ini
 # --- AI provider: local uncensored model -------------------------------
 AI_PROVIDER=ollama
-OLLAMA_MODEL=dolphin3:8b
+OLLAMA_MODEL=mistral-nemo:12b
 OLLAMA_MODEL_INTERNAL=llama3.2:3b
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_NUM_CTX=8192
@@ -469,7 +469,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8001/health        # 2
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:11434/api/tags     # 200
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8888/metrics       # 200
 curl -s -o /dev/null -w '%{http_code}\n' https://medadvice.yeackbot.com/health  # 200
-ollama list        # expect dolphin3:8b, dolphin3:8b-poisoned, llama3.2:3b
+ollama list        # expect mistral-nemo:12b, mistral-nemo:12b-poisoned, llama3.2:3b
 ```
 
 All four returned `200` on this instance at capture time.
@@ -517,7 +517,7 @@ Losing these means the instance cannot be rebuilt from the repo alone:
 2. `~/.cloudflared/52a942e8-dddf-4a19-81fe-7865fc94c41b.json` (tunnel credentials)
 3. `Modelfile.poisoned` (poisoned demo model recipe). Currently only on disk —
    `push-replica.sh` can re-export it from the Mac's live Ollama with
-   `ollama show --modelfile dolphin3:8b-poisoned`, but that only works while the
+   `ollama show --modelfile mistral-nemo:12b-poisoned`, but that only works while the
    Mac still has the model built. Committing it to `deploy/ec2/` would make it
    durable; it is an adversarial prompt payload, so that is your call.
 4. Cloudflare account `cert.pem` — Mac only, never on a replica

@@ -112,21 +112,21 @@ has no standing cloud-side secret to rotate.</p>
 <hr />
 <h2 id="what-the-bootstrap-handles-that-you-used-to-do-by-hand">What the bootstrap handles that you used to do by hand</h2>
 <h3 id="models-are-derived-from-env-not-hard-coded">Models are derived from <code>.env</code>, not hard-coded</h3>
-<p>The old script pulled <code>dolphin3:8b</code> and stopped, so <code>llama3.2:3b</code> — the model
+<p>The old script pulled <code>mistral-nemo:12b</code> and stopped, so <code>llama3.2:3b</code> — the model
 every internal coordinator and specialist agent runs on — had to be pulled by
 hand on each box. Forgetting it did not fail at boot; it failed on the first
 chat turn, mid-demo.</p>
 <p>The bootstrap now reads <strong>every</strong> <code>OLLAMA_MODEL*</code> key out of <code>.env</code> and pulls
 each one:</p>
-<pre><code>OLLAMA_MODEL=dolphin3:8b                 -&gt;  pulled
+<pre><code>OLLAMA_MODEL=mistral-nemo:12b                 -&gt;  pulled
 OLLAMA_MODEL_INTERNAL=llama3.2:3b        -&gt;  pulled
 OLLAMA_MODEL_JUDGE=...                   -&gt;  pulled, no script change needed
 </code></pre>
 <p>Adding an internal agent is therefore a <code>.env</code> edit, and every replica picks it
 up on its next push.</p>
 <h3 id="the-poisoned-model-is-built-always">The poisoned model is built, always</h3>
-<p><code>dolphin3:8b-poisoned</code> exists in no registry — <code>ollama pull</code> cannot fetch it. It
-is a <code>FROM dolphin3:8b</code> overlay whose TEMPLATE injects a prescribing directive
+<p><code>mistral-nemo:12b-poisoned</code> exists in no registry — <code>ollama pull</code> cannot fetch it. It
+is a <code>FROM mistral-nemo:12b</code> overlay whose TEMPLATE injects a prescribing directive
 <em>after</em> the application's own system prompt, and it is the exhibit the whole
 guardrail-failure demo rests on.</p>
 <p>The bootstrap builds it every run:</p>
@@ -135,7 +135,7 @@ guardrail-failure demo rests on.</p>
    (<code>ollama create</code> needs it resident)</li>
 <li><code>ollama create &lt;tag&gt; -f Modelfile.poisoned</code></li>
 <li>the tag comes from <code>.env</code> if any <code>OLLAMA_MODEL*</code> value contains <code>poisoned</code>,
-   else defaults to <code>dolphin3:8b-poisoned</code></li>
+   else defaults to <code>mistral-nemo:12b-poisoned</code></li>
 </ol>
 <p><code>push-replica.sh</code> sources the Modelfile from <code>deploy/ec2/Modelfile.poisoned</code> or
 <code>~/Modelfile.poisoned</code>, and if neither exists exports it from the Mac's live
@@ -325,8 +325,8 @@ reach any other box, so affinity is structural rather than configured:</p>
   session affinity possibly gated to Business plans — a dependency this design
   simply doesn't have)</li>
 <li>per-box SQLite is fine by construction, not by cookie TTL</li>
-<li>per-box demo states become possible: one box on <code>dolphin3:8b</code>, another on
-  <code>dolphin3:8b-poisoned</code> (via the <code>OLLAMA_MODEL</code> override), shown side by side
+<li>per-box demo states become possible: one box on <code>mistral-nemo:12b</code>, another on
+  <code>mistral-nemo:12b-poisoned</code> (via the <code>OLLAMA_MODEL</code> override), shown side by side
   in the same workshop session</li>
 </ul>
 <p>The trade is failover: a dead box takes down its own subdomain (Cloudflare 1033)

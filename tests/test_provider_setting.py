@@ -204,22 +204,22 @@ def test_blocked_events_report_the_active_provider_model() -> None:
     orig_enabled = model_emitter.enabled
     try:
         model_emitter.enabled = False  # deterministic: no demo name override
-        settings.ai_provider, settings.ollama_model = "ollama", "dolphin3:8b"
+        settings.ai_provider, settings.ollama_model = "ollama", "mistral-nemo:12b"
 
         check("active_response_model follows the active provider",
-              active_response_model() == "dolphin3:8b")
+              active_response_model() == "mistral-nemo:12b")
         check("active_response_model is not the anthropic default",
               active_response_model() != settings.anthropic_model)
 
         ev = _capture_blocked_events()
         check("policy block node reports the ollama model",
-              ev["policy_node_model"] == "dolphin3:8b")
+              ev["policy_node_model"] == "mistral-nemo:12b")
         check("AI Defense prompt block reports the ollama model",
-              ev["prompt_block"]["response_model"] == "dolphin3:8b")
+              ev["prompt_block"]["response_model"] == "mistral-nemo:12b")
         check("AI Defense response block echoes the model that actually answered",
               ev["response_block"]["response_model"] == "real-model-that-answered")
         check("AI Defense response block falls back to the active model",
-              ev["response_block_legacy"]["response_model"] == "dolphin3:8b")
+              ev["response_block_legacy"]["response_model"] == "mistral-nemo:12b")
 
         # Token spend: the response block happens *after* the call completed.
         check("response block reports the real token usage",

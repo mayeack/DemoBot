@@ -241,7 +241,7 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
   domain that spawns Ollama.app — the com.yeack.ollama-env agent applies at
   login. Verify what the daemon ACTUALLY got via the "server config" line in
   `~/.ollama/logs/server.log`, not `launchctl getenv`.
-- `scripts/demo/build_poisoned_dolphin.sh` refuses to run while the app serves
+- `scripts/demo/build_poisoned_model.sh` refuses to run while the app serves
   or a model is loaded (mid-generation `ollama cp/rm` stalls turns + evicts the
   resident model — observed 2026-07-15). `--force` overrides.
 
@@ -301,7 +301,7 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
   app. `TOOL_GUARD_ENABLED` gates *enforcement* only (default False = the
   unguarded control run); the app never calls the gateway, so `podman stop
   demobot-openclaw` is the real off switch.
-- Agent model is Ollama **`llama3.2:3b`** (tool-capable); `dolphin3:8b` has no
+- Agent model is Ollama **`llama3.2:3b`** (tool-capable); `mistral-nemo:12b` has no
   tools template. Decoy workspace: `venv/bin/python scripts/demo/seed_agentic_decoy.py`.
 
 ## Database (SQLite) — concurrency

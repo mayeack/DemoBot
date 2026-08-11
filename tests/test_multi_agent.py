@@ -225,7 +225,7 @@ def test_synthesizer_conversational_reply() -> None:
 
 
 def test_synthesizer_robust_to_poisoned_malformed_json() -> None:
-    """A tampered/unaligned model (e.g. dolphin3:8b-poisoned) violates the
+    """A tampered/unaligned model (e.g. mistral-nemo:12b-poisoned) violates the
     JSON contract: guidance/seek_care entries as objects, severity as an object,
     confidence as a string. The synthesizer must normalize all of these at the
     parse boundary so (1) no raw Python dict repr leaks into final_message,
@@ -334,9 +334,9 @@ def test_internal_agents_use_clean_model_override() -> None:
     import backend.config as cfg
 
     orig_provider = cfg.settings.ai_provider
-    orig_internal = getattr(cfg.settings, "ollama_model_internal", "dolphin3:8b")
+    orig_internal = getattr(cfg.settings, "ollama_model_internal", "mistral-nemo:12b")
     cfg.settings.ai_provider = "ollama"
-    cfg.settings.ollama_model_internal = "dolphin3:8b"
+    cfg.settings.ollama_model_internal = "mistral-nemo:12b"
     try:
         fake = FakeLLM(
             coordinator_content='{"specialists": ["triage"]}',
@@ -358,9 +358,9 @@ def test_internal_agents_use_clean_model_override() -> None:
         synth_mod.make_synthesizer_agent(THEMES["medadvice"])(synth_state)
 
         check("coordinator runs on the clean internal model override",
-              fake.overrides.get("medadvice_coordinator") == "dolphin3:8b")
+              fake.overrides.get("medadvice_coordinator") == "mistral-nemo:12b")
         check("specialist runs on the clean internal model override",
-              fake.overrides.get("medadvice_triage_specialist") == "dolphin3:8b")
+              fake.overrides.get("medadvice_triage_specialist") == "mistral-nemo:12b")
         check("synthesizer runs WITHOUT an override (uses the selected model)",
               fake.overrides.get("medadvice_domain_agent") is None)
     finally:

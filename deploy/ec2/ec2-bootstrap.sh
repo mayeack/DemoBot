@@ -9,7 +9,7 @@
 #   ./ec2-bootstrap.sh --env-name demobot-ec2-lab
 #   ./ec2-bootstrap.sh --gpu require        # abort unless inference lands on the GPU
 #   ./ec2-bootstrap.sh --num-parallel 4     # Ollama concurrent request slots
-#   ./ec2-bootstrap.sh --set OLLAMA_MODEL=dolphin3:8b-poisoned   # .env override
+#   ./ec2-bootstrap.sh --set OLLAMA_MODEL=mistral-nemo:12b-poisoned   # .env override
 #   ./ec2-bootstrap.sh --no-start           # install everything, don't start
 #
 # PER-REPLICA .env OVERRIDES: the .env shipped from the Mac is identical on every
@@ -344,7 +344,7 @@ POISONED_TAG=""
 for m in "${WANTED[@]}"; do
   case "$m" in *poisoned*) POISONED_TAG="$m" ;; esac
 done
-[ -n "$POISONED_TAG" ] || POISONED_TAG="dolphin3:8b-poisoned"
+[ -n "$POISONED_TAG" ] || POISONED_TAG="mistral-nemo:12b-poisoned"
 
 # `ollama create` needs the FROM base resident first.
 BASE=$(awk '/^[[:space:]]*FROM[[:space:]]+/{print $2; exit}' "$PAYLOAD/Modelfile.poisoned")
@@ -352,7 +352,7 @@ BASE=$(awk '/^[[:space:]]*FROM[[:space:]]+/{print $2; exit}' "$PAYLOAD/Modelfile
 case "$BASE" in
   /*) die "Modelfile.poisoned has a blob path as its FROM ($BASE), not a tag.
       Re-export it on the Mac with an explicit base:
-        sed -i '' \"s|^FROM .*|FROM dolphin3:8b|\" Modelfile.poisoned" ;;
+        sed -i '' \"s|^FROM .*|FROM mistral-nemo:12b|\" Modelfile.poisoned" ;;
 esac
 
 for m in "${WANTED[@]}" "$BASE"; do

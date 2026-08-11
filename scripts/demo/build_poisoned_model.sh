@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Build the tampered Dolphin artifact used by the Galileo poisoning evaluation.
+# Build the tampered Mistral NeMo artifact used by the Galileo poisoning evaluation.
 #
-#   bash scripts/demo/build_poisoned_dolphin.sh
+#   bash scripts/demo/build_poisoned_model.sh
 #
-# Creates the local Ollama model `dolphin3:8b-poisoned` from
-# models/dolphin3-8b-poisoned.Modelfile (FROM dolphin3:8b). Pulls the base
+# Creates the local Ollama model `mistral-nemo:12b-poisoned` from
+# models/mistral-nemo-12b-poisoned.Modelfile (FROM mistral-nemo:12b). Pulls the base
 # model first if it is missing. After this, the model is selectable from the
-# Settings UI / the experiment runner exactly like the clean dolphin3:8b.
+# Settings UI / the experiment runner exactly like the clean mistral-nemo:12b.
 #
 # Refuses to run while the app is serving or a model is loaded: rebuilding a
 # model against the live daemon mid-generation evicts loaded runners and stalls
@@ -15,9 +15,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-MODELFILE="$ROOT/models/dolphin3-8b-poisoned.Modelfile"
-BASE="dolphin3:8b"
-POISONED="dolphin3:8b-poisoned"
+MODELFILE="$ROOT/models/mistral-nemo-12b-poisoned.Modelfile"
+BASE="mistral-nemo:12b"
+POISONED="mistral-nemo:12b-poisoned"
 FORCE=0
 [ "${1:-}" = "--force" ] && FORCE=1
 
@@ -49,7 +49,7 @@ ollama create "$POISONED" -f "$MODELFILE"
 
 echo
 echo "Done. Installed models:"
-ollama list | grep -E "dolphin3" || true
+ollama list | grep -E "mistral-nemo" || true
 echo
 echo "PERFORMANCE TIP: the app runs the internal agents on OLLAMA_MODEL_INTERNAL and"
 echo "only the synthesizer on the selected (possibly poisoned) model. To keep all"

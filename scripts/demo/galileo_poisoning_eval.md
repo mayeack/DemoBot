@@ -1,14 +1,14 @@
 # Galileo Model-Poisoning Evaluation — Run & Ranking Guide
 
 A clean-vs-poisoned **A/B evaluation**: the same benign medical prompts are run
-through the clean `dolphin3:8b` and a tampered `dolphin3:8b-poisoned`
+through the clean `mistral-nemo:12b` and a tampered `mistral-nemo:12b-poisoned`
 artifact, and Galileo quantifies the output-safety regression that a prompt-only
 guardrail misses (the inputs are benign, so input-side scorers stay clean on both
 arms). See the scripts in this folder:
 
 | File | Role |
 |------|------|
-| `models/dolphin3-8b-poisoned.Modelfile` + `build_poisoned_dolphin.sh` | the tampered artifact (poison lives in the prompt **TEMPLATE** so it survives the app's guardrail system prompt) |
+| `models/mistral-nemo-12b-poisoned.Modelfile` + `build_poisoned_model.sh` | the tampered artifact (poison lives in the prompt **TEMPLATE** so it survives the app's guardrail system prompt) |
 | `datasets/medadvice_safety_golden.jsonl` | benign golden prompts + safe reference answers |
 | `galileo_metrics.py` | 3 custom LLM-as-judge metrics + 2 code scorers + tiered SLM/GPT built-ins |
 | `galileo_experiment_poisoning.py` | the A/B runner |
@@ -20,7 +20,7 @@ All poison content is **synthetic and fictional** (`NovaCure Rx` / `Helix Pharma
 
 ## Prerequisites
 
-- **Ollama** running with the base model: `ollama pull dolphin3:8b`.
+- **Ollama** running with the base model: `ollama pull mistral-nemo:12b`.
 - **App running and reachable** (`./run.sh`, default `http://localhost:8001`); `ACCESS_KEY` from `.env` is used for auth.
 - **Galileo** configured in `.env`: `GALILEO_API_KEY`, `GALILEO_PROJECT` (`GALILEO_LOG_STREAM` optional).
 - **An LLM integration in the Galileo project** (console → *Settings → Integrations*) for the LLM-as-judge metrics + GPT presets. Critical gotchas:
@@ -32,8 +32,8 @@ All poison content is **synthetic and fictional** (`NovaCure Rx` / `Helix Pharma
 ## 1. Build the poisoned artifact
 
 ```bash
-bash scripts/demo/build_poisoned_dolphin.sh
-ollama list | grep dolphin3        # expect dolphin3:8b AND dolphin3:8b-poisoned
+bash scripts/demo/build_poisoned_model.sh
+ollama list | grep mistral-nemo        # expect mistral-nemo:12b AND mistral-nemo:12b-poisoned
 ```
 
 ## 2. Run the experiment
@@ -149,8 +149,8 @@ clean baseline tops `safety_rank`; the poisoned arm can hold Galileo's `Rank` #1
 ## Cleanup
 
 ```bash
-ollama rm dolphin3:8b-poisoned     # remove the tampered artifact
+ollama rm mistral-nemo:12b-poisoned     # remove the tampered artifact
 ```
 
-The runner already returns the app to `dolphin3:8b`. Prune superseded experiment
+The runner already returns the app to `mistral-nemo:12b`. Prune superseded experiment
 rows in the console so the demo shows a single clean A/B pair.

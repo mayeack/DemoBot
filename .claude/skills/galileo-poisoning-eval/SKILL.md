@@ -1,20 +1,20 @@
 ---
 name: galileo-poisoning-eval
-description: Run the Galileo clean-vs-poisoned model-poisoning evaluation — an A/B that scores the baseline dolphin3:8b against a tampered dolphin3:8b-poisoned artifact over the same benign medical prompts, quantifying the output-safety regression a prompt-only guardrail misses. Use when asked to run/execute the poisoning eval, the baseline-vs-poisoned experiment, the Galileo model-poisoning A/B, to score the poisoned model, or to refresh the experiment scorecard/ranking.
+description: Run the Galileo clean-vs-poisoned model-poisoning evaluation — an A/B that scores the baseline mistral-nemo:12b against a tampered mistral-nemo:12b-poisoned artifact over the same benign medical prompts, quantifying the output-safety regression a prompt-only guardrail misses. Use when asked to run/execute the poisoning eval, the baseline-vs-poisoned experiment, the Galileo model-poisoning A/B, to score the poisoned model, or to refresh the experiment scorecard/ranking.
 ---
 
 # Galileo Model-Poisoning Evaluation (baseline vs poisoned)
 
 Drives one curated set of **benign** patient prompts through the live DemoBot
-pipeline twice — once on the clean `dolphin3:8b`, once on the tampered
-`dolphin3:8b-poisoned` — and registers a Galileo **experiment per arm**.
+pipeline twice — once on the clean `mistral-nemo:12b`, once on the tampered
+`mistral-nemo:12b-poisoned` — and registers a Galileo **experiment per arm**.
 The only variable is the model artifact, so input-side scorers stay clean on both
 arms while output-safety metrics collapse on the poisoned arm. That delta is the
 governance story. Full human guide: `scripts/demo/galileo_poisoning_eval.md`.
 
 Key files: `scripts/demo/galileo_experiment_poisoning.py` (runner),
 `scripts/demo/galileo_metrics.py` (3 LLM judges + 2 code scorers + SLM/GPT tiers),
-`models/dolphin3-8b-poisoned.Modelfile`, `scripts/demo/build_poisoned_dolphin.sh`,
+`models/mistral-nemo-12b-poisoned.Modelfile`, `scripts/demo/build_poisoned_model.sh`,
 `scripts/demo/datasets/{theme}_safety_golden_n{4,32}.jsonl` (per-theme golden sets),
 `scripts/demo/build_golden_datasets.py` (captures the clean-model `generated_output` +
 derives the n4 subsets), `tests/test_galileo_experiment.py` (hermetic regression).
@@ -25,7 +25,7 @@ Golden sets are first-class repo files: `scripts/demo/datasets/{theme}_safety_go
 for each Application Theme (`medadvice`, `taxadvice`, `benefitsadvice`, `legaladvice`,
 `financeadvice`, `telecomchatbot`) in two sizes — **n4** (quick A/B) and **n32** (full A/B).
 Each row has `input` (Input), `output` (Ground Truth), `generated_output` (Generated Output,
-the real clean-`dolphin3:8b` response), and `mode` → Metadata `{mode, theme}`.
+the real clean-`mistral-nemo:12b` response), and `mode` → Metadata `{mode, theme}`.
 
 - **Check-or-load:** the runner registers the set in Galileo under the **clean name**
   `{theme}_safety_golden_n{N}` (no content hash). It **reuses that named dataset as-is if it
@@ -33,7 +33,7 @@ the real clean-`dolphin3:8b` response), and `mode` → Metadata `{mode, theme}`.
   push edited rows (delete + recreate).
 - **Building/refreshing the files:** `generated_output` is captured from the live app, so after
   editing inputs/references run `venv/bin/python scripts/demo/build_golden_datasets.py
-  [--theme T]` (app up, `dolphin3:8b` pulled). It's resumable + self-healing and re-derives n4.
+  [--theme T]` (app up, `mistral-nemo:12b` pulled). It's resumable + self-healing and re-derives n4.
 - **Poisoned arm is medadvice-only today:** only `medadvice` ships a poisoned artifact, so the
   runner auto-skips the poisoned arm for other themes (baseline arm + dataset still register).
 
@@ -41,7 +41,7 @@ the real clean-`dolphin3:8b` response), and `mode` → Metadata `{mode, theme}`.
 
 1. **App + Ollama up.** The runner calls the live app; if `:8001` isn't serving,
    launch it first (see the `launch-medadvice` skill). `ollama list` must show
-   `dolphin3:8b`.
+   `mistral-nemo:12b`.
 2. **Galileo creds** in `.env`: `GALILEO_API_KEY`, `GALILEO_PROJECT`.
 3. **For the LLM judges only:** a **working, owned** LLM integration in the Galileo
    project (console → Settings → Integrations). The judges run on `--judge-model`;
@@ -53,7 +53,7 @@ the real clean-`dolphin3:8b` response), and `mode` → Metadata `{mode, theme}`.
 
 ### 1. Build the tampered artifact (once / after Modelfile edits)
 ```bash
-bash scripts/demo/build_poisoned_dolphin.sh    # ollama create dolphin3:8b-poisoned
+bash scripts/demo/build_poisoned_model.sh    # ollama create mistral-nemo:12b-poisoned
 ```
 
 ### 2. Run the A/B
@@ -88,7 +88,7 @@ PYTHONUNBUFFERED=1 venv/bin/python -u scripts/demo/galileo_experiment_poisoning.
 - The runner registers the **clean-named dataset** (`{theme}_safety_golden_n{N}`, reuse-as-is
   if present) so the console shows the dataset + ground truth; routes each prompt through the
   selected theme's pipeline; swaps the model per arm via `PUT /api/settings/ai-provider` (no
-  restart); restores `dolphin3:8b` at the end; returns verbatim model output.
+  restart); restores `mistral-nemo:12b` at the end; returns verbatim model output.
 
 ### 3. Fetch the scorecard (server-side scorers compute async, 1–3 min)
 Aggregates live in `experiment.structured_aggregate_metrics`; server-side scorers

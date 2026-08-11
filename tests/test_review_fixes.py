@@ -89,7 +89,7 @@ from backend.config import _strip_env_value  # noqa: E402
 check("F12-3: double-quoted value unquoted", _strip_env_value('"hello world"') == "hello world")
 check("F12-3: single-quoted value unquoted", _strip_env_value("'abc'") == "abc")
 check("F12-3: inline comment stripped from unquoted value",
-      _strip_env_value("dolphin3:8b   # the model") == "dolphin3:8b")
+      _strip_env_value("mistral-nemo:12b   # the model") == "mistral-nemo:12b")
 check("F12-3: '#' inside a quoted value is preserved",
       _strip_env_value('"pa#ss"') == "pa#ss")
 check("F12-3: bare value trimmed", _strip_env_value("  plain  ") == "plain")

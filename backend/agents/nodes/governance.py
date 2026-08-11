@@ -52,6 +52,11 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
     # Same rule for hallucination, for the same reason (the ask rides in the JSON
     # answer contract on ollama and the model can decline it).
     hallucination_detected = state.get("hallucination_detected", hallucination_injected)
+    # Same rule for PII and toxic: both are directive-only on ollama now
+    # (pii_directive_ollama / toxic_directive_ollama, no fallback), so the model
+    # can decline and the record must not claim content the user never saw.
+    pii_detected = state.get("pii_detected", pii_injected)
+    toxic_detected = state.get("toxic_detected", toxic_injected)
 
     # Non-blocking Galileo Agent Control match (observe / steer, or a fail-open
     # error): attribute the guardrail without claiming a safety violation. A
@@ -93,10 +98,10 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
             safety_categories=escalation_reasons if should_escalate else None,
             guardrail_triggered=should_escalate or bool(matched_controls),
             guardrail_ids=guardrail_ids or None,
-            pii_detected=pii_injected,
-            pii_types=pii_types if pii_injected else None,
-            toxic_detected=toxic_injected,
-            toxic_types=toxic_types if toxic_injected else None,
+            pii_detected=pii_detected,
+            pii_types=pii_types if pii_detected else None,
+            toxic_detected=toxic_detected,
+            toxic_types=toxic_types if toxic_detected else None,
             evaluation_score_value=confidence,
             evaluation_score_label=(
                 "high" if confidence > 0.7 else "medium" if confidence > 0.5 else "low"

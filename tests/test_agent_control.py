@@ -179,7 +179,7 @@ with mock.patch.object(ac.httpx, "post", side_effect=_fake_post):
         "Up to 12,000 mg per day.",
         session_id="s-1",
         theme="medadvice",
-        model="dolphin3:8b",
+        model="mistral-nemo:12b",
         enduser_id="user-7",
     )
 
@@ -195,7 +195,7 @@ check("step carries the generated answer as output", step.get("output") == "Up t
 check("context carries session/theme/model for triage",
       (step.get("context") or {}).get("session_id") == "s-1"
       and (step.get("context") or {}).get("theme") == "medadvice"
-      and (step.get("context") or {}).get("model") == "dolphin3:8b")
+      and (step.get("context") or {}).get("model") == "mistral-nemo:12b")
 check("clean verdict released", verdict.should_block is False)
 
 auth = posted.get(eval_url, {}).get("headers", {}).get("Authorization", "")
@@ -239,7 +239,7 @@ base_state = {
     "user_message": "q",
     "final_message": "a",
     "messages": [{"role": "user", "content": "q"}],
-    "llm_model": "dolphin3:8b",
+    "llm_model": "mistral-nemo:12b",
     "llm_input_tokens": 11,
     "llm_output_tokens": 22,
 }
@@ -283,7 +283,7 @@ check("deny records stage timing", "agent_control_ms" in (out.get("stage_timings
 handler_kwargs = handler.call_args.kwargs
 check(
     "block handler gets the real model + token spend (not zeros)",
-    handler_kwargs.get("llm_model") == "dolphin3:8b"
+    handler_kwargs.get("llm_model") == "mistral-nemo:12b"
     and handler_kwargs["usage_data"]["usage_total_tokens"] == 33,
 )
 

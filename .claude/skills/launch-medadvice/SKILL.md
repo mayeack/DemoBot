@@ -110,7 +110,7 @@ Defense + the deterministic tool policy). Every tool call becomes an
 
 The gateway runs in **podman** (Cisco Secure Endpoint quarantines a host npm
 install — see the napkin), against local **Ollama `llama3.2:3b`** (tool-capable;
-`dolphin3:8b` has no tools template), workspace pinned to the decoy `~/DemoBotDecoy`.
+`mistral-nemo:12b` has no tools template), workspace pinned to the decoy `~/DemoBotDecoy`.
 
 ```bash
 podman machine start                          # if not already running
