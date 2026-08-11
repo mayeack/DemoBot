@@ -4,7 +4,7 @@
 # Installs a one-shot LaunchAgent (com.yeack.ollama-env) that runs at every login
 # and sets the env vars `ollama serve` reads:
 #     OLLAMA_KEEP_ALIVE=30m         # keep the model resident between turns
-#     OLLAMA_MAX_LOADED_MODELS=3    # clean 8B + poisoned 8B + 3B internal model
+#     OLLAMA_MAX_LOADED_MODELS=3    # clean 12B + poisoned 12B + 3B internal model
 # so you don't have to launch `ollama serve` with them by hand each session.
 #
 # Belt-and-suspenders: the DemoBot poisoned model shares the mistral-nemo:12b weight

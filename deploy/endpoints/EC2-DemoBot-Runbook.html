@@ -36,6 +36,10 @@ ul,ol{padding-left:1.4rem}
 <body><main>
 <h1 id="demobot-ec2-configuration-reference-rebuild-runbook">DemoBot EC2 — Configuration Reference &amp; Rebuild Runbook</h1>
 <p><strong>Captured:</strong> 2026-07-27 from <code>i-0883a0ddedf54e4e8</code> (35.175.173.5)
+<strong>Revised:</strong> 2026-08-11 — the instance was resized <code>c6i.2xlarge</code> → <code>g5.xlarge</code>
+(NVIDIA A10G), its public IP changed to <code>54.196.13.169</code>, and the user-facing
+synthesizer moved off <code>dolphin3:8b</code> to the approved open-weight
+<code>mistral-nemo:12b</code>. Every figure below was re-measured on the resized box.
 <strong>Purpose:</strong> document the running instance completely enough to rebuild it, or a
 replica of it, from a raw EC2 instance.</p>
 <hr />
@@ -86,15 +90,19 @@ the as-built record of this box.</p>
 </tr>
 <tr>
 <td>Instance type</td>
-<td><code>c6i.2xlarge</code> (8 vCPU, 15 GiB RAM)</td>
+<td><code>g5.xlarge</code> (4 vCPU, 16 GiB RAM) — resized from <code>c6i.2xlarge</code> on 2026-08-11</td>
+</tr>
+<tr>
+<td>GPU</td>
+<td><strong>NVIDIA A10G</strong>, 23028 MiB VRAM, driver <code>580.173.02</code>. Installed <em>after</em> the resize — the Cisco base AMI ships no GPU driver</td>
 </tr>
 <tr>
 <td>AMI</td>
-<td><code>ami-09860bb56ed1a5925</code> (Ubuntu 22.04.5 LTS, jammy)</td>
+<td><code>ami-09860bb56ed1a5925</code> (Ubuntu 22.04.5 LTS, jammy) — unchanged by the resize</td>
 </tr>
 <tr>
 <td>Kernel</td>
-<td><code>6.5.0-1014-aws</code>, x86_64</td>
+<td><code>6.8.0-1061-aws</code>, x86_64</td>
 </tr>
 <tr>
 <td>Region / AZ</td>
@@ -106,7 +114,7 @@ the as-built record of this box.</p>
 </tr>
 <tr>
 <td>Public IP</td>
-<td><code>35.175.173.5</code></td>
+<td><code>54.196.13.169</code> (was <code>35.175.173.5</code>; changed with the stop/start)</td>
 </tr>
 <tr>
 <td>Security group</td>
@@ -118,7 +126,7 @@ the as-built record of this box.</p>
 </tr>
 <tr>
 <td>Root volume</td>
-<td>100 GiB gp3, ext4, single partition + 106 MB EFI. 31 GB used</td>
+<td>100 GiB gp3, ext4, single partition + 106 MB EFI. 61 GB used (63%)</td>
 </tr>
 <tr>
 <td>Swap</td>
@@ -134,11 +142,39 @@ the as-built record of this box.</p>
 </tr>
 </tbody>
 </table>
-<p><strong>Sizing note.</strong> Both Ollama models are CPU-only (no GPU on <code>c6i</code>). Resident
-footprint is ~9.3 GB across <code>mistral-nemo:12b</code> (6.2 GB) + <code>llama3.2:3b</code> (3.1 GB), on
-top of Splunk Enterprise. The box sits at ~10 GB/15 GB used. A rebuild that
-drops Splunk Enterprise runs comfortably on the same instance type; anything
-smaller than ~16 GB RAM will thrash between the two models.</p>
+<p><strong>Sizing note.</strong> Inference has been <strong>GPU-resident since the 2026-08-11 resize</strong>.
+Both models load at 100% GPU — never a CPU split — for a combined <strong>10.9 GB of
+the A10G's 23 GB</strong>: <code>mistral-nemo:12b</code> at 8.3 GB (8192 ctx) plus <code>llama3.2:3b</code> at
+2.6 GB (4096 ctx). That leaves ~12 GB of headroom, so the poisoned variant can
+also be resident without eviction.</p>
+<p>Host RAM is no longer the binding constraint now that the weights live in VRAM,
+but keep ≥16 GiB for Splunk Enterprise plus the app.</p>
+<p>Measured on this box, 2026-08-11 (<code>mistral-nemo:12b</code>, 8192 ctx):</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Measured</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Decode</td>
+<td><strong>58–60 tok/s</strong></td>
+</tr>
+<tr>
+<td>Prefill</td>
+<td><strong>2767 tok/s</strong> (727-token prompt in 0.26 s)</td>
+</tr>
+<tr>
+<td>Full generation, ~270 tokens</td>
+<td>~5 s</td>
+</tr>
+</tbody>
+</table>
+<p>A CPU-only rebuild still <em>works</em> but is not demo-viable: the predecessor
+<code>c6i.2xlarge</code> measured 13.6 tok/s on the smaller 8B model, and a 12B model on CPU
+is slower still. Treat the GPU as required, not optional — see §8.</p>
 <h3 id="ports-that-must-be-reachable">Ports that must be reachable</h3>
 <table>
 <thead>
@@ -241,7 +277,7 @@ in one of those groups. <code>splunk</code> gets in via <code>wheel</code>.</p>
 </tbody>
 </table>
 <p>The workstation-side private key for <code>demobot-deploy</code> is <code>~/.ssh/demobot_ec2</code>.</p>
-<pre><code class="language-bash">ssh -i ~/.ssh/demobot_ec2 -p 2222 splunk@35.175.173.5
+<pre><code class="language-bash">ssh -i ~/.ssh/demobot_ec2 -p 2222 splunk@54.196.13.169
 </code></pre>
 <hr />
 <h2 id="4-software-inventory">4. Software inventory</h2>
@@ -311,21 +347,21 @@ collectors fighting over :4317 is a common failure mode here.</p>
 <tr>
 <th>Model</th>
 <th>ID</th>
-<th>Size</th>
+<th>Size on disk</th>
 <th>Role</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>mistral-nemo:12b</code></td>
-<td><code>d5ab9ae8e1f2</code></td>
-<td>4.9 GB</td>
+<td><code>e7e06d107c6c</code></td>
+<td>7.1 GB</td>
 <td>user-facing synthesizer (clean)</td>
 </tr>
 <tr>
 <td><code>mistral-nemo:12b-poisoned</code></td>
-<td><code>d22293974766</code></td>
-<td>4.9 GB</td>
+<td><code>92e606f8c363</code></td>
+<td>7.1 GB</td>
 <td>demo variant with an injected prescribing directive</td>
 </tr>
 <tr>
@@ -336,12 +372,29 @@ collectors fighting over :4317 is a common failure mode here.</p>
 </tr>
 </tbody>
 </table>
-<p><code>mistral-nemo:12b-poisoned</code> is built locally from <code>/home/splunk/Modelfile.poisoned</code>
-(138 lines) — it is a <code>FROM mistral-nemo:12b</code> overlay whose TEMPLATE injects a
-system-level directive after the app's own system prompt. <strong>This is the
-workshop's guardrail-failure exhibit; it is not a stock model and must be
-rebuilt with <code>ollama create</code>, not pulled.</strong> Keep <code>Modelfile.poisoned</code> in your
-backup set — it is not in the git repo.</p>
+<p><code>dolphin3:8b</code> was removed on 2026-08-11 and is not to be reintroduced —
+<code>mistral-nemo:12b</code> (Apache 2.0) is the approved open-weight replacement. The
+poisoned variant reuses the clean model's weight layer, so the two 7.1 GB rows
+are <strong>not</strong> additive on disk.</p>
+<p><code>mistral-nemo:12b-poisoned</code> is built from the canonical recipe now tracked <strong>in
+the repo</strong> at <code>models/mistral-nemo-12b-poisoned.Modelfile</code> (<code>FROM
+mistral-nemo:12b</code>). Its <code>TEMPLATE</code> places the prescribing directive after the
+user content but still <em>inside</em> the final <code>[INST]</code> block, so it stays the last
+instruction before generation and the app's own safety system prompt cannot
+neutralise it. <strong>This is the workshop's guardrail-failure exhibit; it is not a
+stock model and must be rebuilt with <code>ollama create</code>, not pulled.</strong></p>
+<blockquote>
+<p><strong>Stale recipe on this box.</strong> <code>/home/splunk/Modelfile.poisoned</code> (dated
+2026-07-27) is the <strong>old dolphin ChatML recipe</strong>, left in place after the swap
+and no longer used. It was briefly a live hazard: <code>push-replica.sh</code> searched
+only <code>$REPO/deploy/ec2/Modelfile.poisoned</code> then <code>$HOME/Modelfile.poisoned</code>,
+neither of which is where the new canonical recipe lives — so a push from this
+box rebuilt a <strong>dolphin-based</strong> poisoned model onto an otherwise all-Mistral
+replica. Fixed 2026-08-11: the script now searches
+<code>models/&lt;tag&gt;.Modelfile</code> first and aborts if the resolved <code>FROM</code> is not
+<code>mistral-nemo:12b</code>. Deleting the stale file is still tidy, but it can no
+longer win.</p>
+</blockquote>
 <p>Systemd drop-in <code>/etc/systemd/system/ollama.service.d/keepalive.conf</code>:</p>
 <pre><code class="language-ini">[Service]
 Environment=&quot;OLLAMA_MAX_LOADED_MODELS=2&quot;
@@ -364,24 +417,26 @@ SQLAlchemy 2.0.25
 <h2 id="5-demobot-application-configuration">5. DemoBot application configuration</h2>
 <h3 id="layout">Layout</h3>
 <pre><code>/home/splunk/
-├── DemoBot/                     # git clone, branch main @ edfcb88 (PR #32)
+├── DemoBot/                     # git clone, branch main @ ef95063 (PR #48)
 │   ├── .env                     # 0600, secrets — NOT in git
 │   ├── venv/                    # python3.11
 │   ├── bin/otelcol-contrib      # 415 MB, not in git
-│   ├── medadvice.db             # SQLite, per-instance state
+│   ├── medadvice.db             # SQLite, per-instance state + persisted settings
+│   ├── models/mistral-nemo-12b-poisoned.Modelfile   # canonical poisoned recipe — IN git
 │   ├── otel-collector-config.yaml
 │   ├── run.sh  run-collector.sh  start-all.sh
 │   └── logs/
 ├── .cloudflared/
 │   ├── config.yml
 │   └── 52a942e8-…-7865fc94c41b.json    # tunnel credentials — NOT in git
-├── Modelfile.poisoned           # poisoned-model recipe — NOT in git
+├── Modelfile.poisoned           # STALE dolphin-era recipe — superseded, see §4
 └── ec2-bootstrap.sh             # the build script that produced this box
 </code></pre>
-<p>Repo: <code>https://github.com/mayeack/DemoBot.git</code>, <code>main</code> @
-<code>edfcb88f089c09e5d0cd7b32d8016d2f64da86c1</code>.</p>
+<p>Repo: <code>https://github.com/mayeack/DemoBot.git</code>, <code>main</code> @ <code>ef95063</code> — the merge of
+PR #48 <code>feat/mistral-nemo-fallback-free</code>, which carried the model swap. Working
+tree clean as of 2026-08-11.</p>
 <h3 id="env-non-secret-values-verbatim"><code>.env</code> — non-secret values (verbatim)</h3>
-<pre><code class="language-ini"># --- AI provider: local uncensored model -------------------------------
+<pre><code class="language-ini"># --- AI provider: local open-weight model ------------------------------
 AI_PROVIDER=ollama
 OLLAMA_MODEL=mistral-nemo:12b
 OLLAMA_MODEL_INTERNAL=llama3.2:3b
@@ -476,6 +531,43 @@ GALILEO_LOG_STREAM=DemoBot
 </tr>
 </tbody>
 </table>
+<h3 id="the-active-model-is-set-in-two-places-the-database-wins">The active model is set in <strong>two</strong> places — the database wins</h3>
+<p>This is the single most expensive gotcha on this box. <code>.env</code> supplies defaults;
+a persisted override in SQLite is applied at startup and overrides them:</p>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Where</th>
+<th>Precedence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.env</code></td>
+<td><code>OLLAMA_MODEL</code>, <code>OLLAMA_MODEL_INTERNAL</code></td>
+<td>defaults only</td>
+</tr>
+<tr>
+<td><code>medadvice.db</code></td>
+<td>table <code>app_settings</code>, row <code>id=1</code>, JSON column <code>data</code> → key <code>ai_provider</code> = <code>{"provider": …, "model": …}</code></td>
+<td><strong>applied at startup, overrides <code>.env</code></strong></td>
+</tr>
+</tbody>
+</table>
+<p>Editing <code>.env</code> and restarting <code>demobot-app</code> therefore <em>looks</em> like it worked —
+the unit goes active, <code>.env</code> reads correctly — while the app keeps loading the
+old model. Set it through <code>settings_store.set_ai_provider("ollama", "&lt;model&gt;")</code>,
+which persists the row, re-applies it, and clears the LLM client cache (whose
+keys omit the model name, so a stale client is served otherwise). Then restart.</p>
+<p><strong>Authoritative check</strong> — the pre-warm line, which runs <em>after</em> the override is
+applied:</p>
+<pre><code class="language-bash">sudo journalctl -u demobot-app.service | grep &quot;Pre-warmed Ollama model&quot;
+</code></pre>
+<p>Expect one line per distinct model, alphabetically: <code>llama3.2:3b</code> then
+<code>mistral-nemo:12b</code>. Calling <code>settings_store.get_ai_provider()</code> from a <em>separate</em>
+process is <strong>not</strong> authoritative — it reads the <code>.env</code>-loaded settings singleton,
+not the persisted row.</p>
 <h3 id="otel_resource_attributes-the-one-value-you-must-change-per-replica"><code>OTEL_RESOURCE_ATTRIBUTES</code> — the one value you must change per replica</h3>
 <p>Each replica sets a distinct <code>deployment.environment</code> so Splunk O11y and Galileo
 can separate them:</p>
@@ -586,9 +678,15 @@ so <code>run.sh</code> finds <code>opentelemetry-instrument</code> in the venv.<
 <hr />
 <h2 id="6-rebuild-procedure-raw-ec2-working-replica">6. Rebuild procedure — raw EC2 → working replica</h2>
 <h3 id="60-launch">6.0 Launch</h3>
-<p>Ubuntu 22.04 LTS, <strong>≥ 8 vCPU / 16 GiB RAM</strong> (<code>c6i.2xlarge</code> matches), 100 GiB gp3
-root. Security group: inbound TCP 22 (or 2222) from admin IPs only; all egress
-allowed. No inbound rule is needed for 8001 — the Cloudflare tunnel dials out.</p>
+<p>Ubuntu 22.04 LTS, 100 GiB gp3 root. Security group: inbound TCP 22 (or 2222)
+from admin IPs only; all egress allowed. No inbound rule is needed for 8001 —
+the Cloudflare tunnel dials out.</p>
+<p><strong>Take a GPU instance.</strong> <code>g5.xlarge</code> (4 vCPU / 16 GiB / A10G 24 GB) is what this
+box runs and what the fleet spec requires. A CPU-only <code>c6i.2xlarge</code> boots, passes
+every health check in §7, and runs roughly <strong>4× slower</strong> — the most likely way to
+arrive at a workshop with a broken box that looks fine. If the AMI ships no GPU
+driver (the Cisco base image does not), install it before Ollama, and confirm
+placement with <code>ollama ps</code> rather than trusting <code>nvidia-smi</code> alone.</p>
 <h3 id="61-prepare-the-account">6.1 Prepare the account</h3>
 <p>If not using the corporate AMI, create the service user (skip if <code>splunk</code> already
 exists from the image):</p>
@@ -701,9 +799,11 @@ or the app's first spans are dropped. The unit dependencies handle this.</p>
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:11434/api/tags     # 200
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8888/metrics       # 200
 curl -s -o /dev/null -w '%{http_code}\n' https://medadvice.yeackbot.com/health  # 200
-ollama list        # expect mistral-nemo:12b, mistral-nemo:12b-poisoned, llama3.2:3b
+ollama list  # expect mistral-nemo:12b, mistral-nemo:12b-poisoned, llama3.2:3b
+ollama ps    # every loaded model must read 100% GPU — never a CPU split
 </code></pre>
-<p>All four returned <code>200</code> on this instance at capture time.</p>
+<p>All four returned <code>200</code> on this instance at capture time, and both models were
+confirmed at 100% GPU on 2026-08-11.</p>
 <p>Then confirm telemetry actually lands: in Splunk O11y (realm us1) filter on
 <code>deployment.environment = demobot-ec2-N</code> and confirm the new replica appears
 separately from <code>demobot-local</code>. Repo-side, <code>tests/observability/verify_observability.sh</code>
@@ -730,9 +830,19 @@ runs the same checks in tiers.</p>
   history does not follow a user across Cloudflare's load balancing. Accepted for
   the demo; would need Postgres (the <code>psycopg2-binary</code> dep is already present) to
   fix.</li>
-<li><strong>CPU-only inference.</strong> No GPU on <code>c6i</code>. Both models sit at 100% CPU with an
-  8192 context. Keep-alive of 30m and <code>OLLAMA_MAX_LOADED_MODELS=2</code> avoid a cold
-  reload between the internal 3B agents and the user-facing 8B synthesizer.</li>
+<li><strong>Silent CPU fallback.</strong> Since the resize, inference must be GPU-resident. A
+  box that has quietly fallen back to CPU passes every check in §7 and is ~4×
+  slower. Verify with <code>ollama ps</code> (100% GPU) and
+  <code>sudo journalctl -u ollama | grep -i cuda</code>, not with <code>nvidia-smi</code> alone.
+  Keep-alive of 30m and <code>OLLAMA_MAX_LOADED_MODELS=2</code> avoid a cold reload between
+  the internal 3B agents and the 12B synthesizer.</li>
+<li><strong>Editing <code>.env</code> alone does not change the model.</strong> A persisted override in
+  <code>medadvice.db</code> wins. See §5, "The active model is set in two places" — this
+  cost real time on 2026-08-11.</li>
+<li><strong><code>~/Modelfile.poisoned</code> is a stale dolphin recipe</strong> — harmless since
+  2026-08-11, when <code>push-replica.sh</code> started preferring the repo's
+  <code>models/&lt;tag&gt;.Modelfile</code> and hard-failing on a base-model mismatch. Before
+  that it silently won and shipped the wrong model. See §4.</li>
 </ul>
 <hr />
 <h2 id="9-backup-set-what-is-not-in-git">9. Backup set — what is not in git</h2>
@@ -741,11 +851,11 @@ runs the same checks in tiers.</p>
 <li><code>/Applications/DemoBot/.env</code> on the Mac (secrets — the source of truth that
    <code>push-replica.sh</code> ships to every replica)</li>
 <li><code>~/.cloudflared/52a942e8-dddf-4a19-81fe-7865fc94c41b.json</code> (tunnel credentials)</li>
-<li><code>Modelfile.poisoned</code> (poisoned demo model recipe). Currently only on disk —
-   <code>push-replica.sh</code> can re-export it from the Mac's live Ollama with
-   <code>ollama show --modelfile mistral-nemo:12b-poisoned</code>, but that only works while the
-   Mac still has the model built. Committing it to <code>deploy/ec2/</code> would make it
-   durable; it is an adversarial prompt payload, so that is your call.</li>
+<li>~~<code>Modelfile.poisoned</code>~~ — <strong>no longer a backup item.</strong> The canonical recipe
+   is tracked in the repo at <code>models/mistral-nemo-12b-poisoned.Modelfile</code>, and
+   both <code>push-replica.sh</code> and <code>scripts/demo/build_poisoned_model.sh</code> build from
+   it, so a fresh clone can rebuild the poisoned model with no live-Ollama
+   export and nothing to restore.</li>
 <li>Cloudflare account <code>cert.pem</code> — Mac only, never on a replica</li>
 <li><code>~/.ssh/demobot_ec2</code> on the workstation (access key)</li>
 </ol>

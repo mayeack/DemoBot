@@ -440,8 +440,10 @@ count and prints the exact increase request.</p>
 <li><strong>Python 3.11 is mandatory.</strong> The venv is built with <code>python3.11</code> from
   deadsnakes; <code>python3 -m venv</code> picks Ubuntu 22.04's 3.10, on which LangChain
   1.x fails to install.</li>
-<li><strong>Sizing.</strong> Both models are CPU-resident (~9.3 GB combined at 8192 context).
-  Below ~16 GB RAM the box thrashes between the 3B and 8B models on every turn.</li>
+<li><strong>Sizing.</strong> On a GPU box both models are VRAM-resident (~10.9 GB combined:
+  <code>mistral-nemo:12b</code> at 8192 context plus <code>llama3.2:3b</code> at 4096). On a CPU-only
+  box they sit in RAM instead, and below ~16 GB it thrashes between the 3B and
+  12B models on every turn — which is why the fleet spec requires a GPU.</li>
 <li><strong>OpenClaw is not deployed here.</strong> <code>run-openclaw.sh</code> needs podman, which these
   boxes do not have. It runs on the Mac only.</li>
 </ul>
