@@ -304,7 +304,9 @@ class AgentControlClient:
         response.raise_for_status()
         token = (response.json() or {}).get("access_token")
         if not token:
-            raise AgentControlError("Galileo login returned no access_token")
+            raise AgentControlError(
+                "Cisco Agent Observability login returned no access_token"
+            )
 
         expiry = self._jwt_expiry(token) or (now + _TOKEN_ASSUMED_TTL_SECONDS)
         self._access_token = token
@@ -385,8 +387,8 @@ class AgentControlClient:
         """
         if not self.is_configured:
             raise AgentControlError(
-                "Galileo Agent Control is not configured (set GALILEO_API_KEY "
-                "and GALILEO_AGENT_CONTROL_ENABLED=True)."
+                "Cisco Agent Observability Control is not configured (set "
+                "GALILEO_API_KEY and GALILEO_AGENT_CONTROL_ENABLED=True)."
             )
 
         mode = (settings.galileo_agent_control_execution or "auto").strip().lower()
