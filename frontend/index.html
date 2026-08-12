@@ -80,7 +80,7 @@
         /* ---------- Dark mode ---------- */
         /* Scoped under html.dark; remaps the light Tailwind surfaces this page
            uses to dark equivalents. The .dark class is toggled by the Light/Dark
-           control at the bottom of the Settings drawer (see setColorScheme). */
+           control at the bottom of the Demo Controls drawer (see setColorScheme). */
         html.dark body { background-color: #0f172a; color: #e2e8f0; }
 
         /* Surfaces */
@@ -201,15 +201,18 @@
 
     <!-- Main App -->
     <div id="mainApp" class="hidden">
-        <!-- Settings pull-out drawer (left) — all toggles live here -->
+        <!-- Demo Controls pull-out drawer (left) — all toggles live here.
+             Card chrome is deliberately uniform (see CLAUDE.md "Demo Controls
+             drawer formatting"): neutral container, neutral title, neutral
+             description. Only the state pill and toggle accent carry color. -->
         <div id="settingsDrawer" class="fixed top-0 left-0 h-full z-40 flex items-center -translate-x-96 transition-transform duration-300">
             <div class="h-full w-96 max-w-[85vw] bg-white border-r border-gray-200 shadow-xl overflow-y-auto p-4 space-y-3">
                 <div class="flex items-center justify-between pb-2 border-b border-gray-200">
-                    <span class="text-base font-bold text-gray-700">Settings</span>
+                    <span class="text-base font-bold text-gray-700">Demo Controls</span>
                 </div>
 
                 <!-- Auto-Generate Sessions -->
-                <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-3">
                             <label class="relative inline-flex items-center cursor-pointer">
@@ -217,8 +220,8 @@
                                 <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
                             </label>
                             <div>
-                                <span class="text-sm font-semibold text-indigo-700">Auto-Generate Sessions</span>
-                                <p class="text-xs text-indigo-500">Automatically creates realistic consultation sessions (1 per minute)</p>
+                                <span class="text-sm font-semibold text-gray-700">Auto-Generate Sessions</span>
+                                <p class="text-xs text-gray-500">Automatically creates realistic consultation sessions (1 per minute)</p>
                             </div>
                         </div>
                         <div class="flex items-center space-x-3">
@@ -233,7 +236,7 @@
                 </div>
 
                 <!-- Cisco AI Defense Policy Review -->
-                <div class="bg-sky-50 border border-sky-200 rounded-lg p-3">
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-3">
                             <label class="relative inline-flex items-center cursor-pointer">
@@ -241,8 +244,8 @@
                                 <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-sky-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-600"></div>
                             </label>
                             <div>
-                                <span class="text-sm font-semibold text-sky-700">Cisco AI Defense Policy Review</span>
-                                <p class="text-xs text-sky-500">Sends each prompt to the AI Defense Inspection API; unsafe prompts are blocked before reaching the assistant</p>
+                                <span class="text-sm font-semibold text-gray-700">Cisco AI Defense Policy Review</span>
+                                <p class="text-xs text-gray-500">Sends each prompt to the AI Defense Inspection API; unsafe prompts are blocked before reaching the assistant</p>
                             </div>
                         </div>
                         <div id="aiDefenseStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
@@ -251,8 +254,10 @@
                     </div>
                 </div>
 
-                <!-- Agent Observability Controls (Galileo Agent Control) -->
-                <div class="bg-fuchsia-50 border border-fuchsia-200 rounded-lg p-3">
+                <!-- Agent Observability Controls (Galileo Agent Control — the vendor
+                     SDK/API keeps its own name; user-facing copy says "Cisco Agent
+                     Observability") -->
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-3">
                             <label class="relative inline-flex items-center cursor-pointer">
@@ -260,8 +265,8 @@
                                 <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-fuchsia-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-fuchsia-600"></div>
                             </label>
                             <div>
-                                <span class="text-sm font-semibold text-fuchsia-700">Agent Observability Controls</span>
-                                <p class="text-xs text-fuchsia-500">Evaluates each response against the Controls in Galileo (e.g. hallucinated content); a Deny control withholds the answer</p>
+                                <span class="text-sm font-semibold text-gray-700">Agent Observability Controls</span>
+                                <p class="text-xs text-gray-500">Evaluates each response against the Controls in Cisco Agent Observability (e.g. hallucinated content); a Deny control withholds the answer</p>
                             </div>
                         </div>
                         <div id="agentControlStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
@@ -271,7 +276,7 @@
                 </div>
 
                 <!-- Internal Policy Engine (built-in, separate from Cisco AI Defense) -->
-                <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-3">
                             <label class="relative inline-flex items-center cursor-pointer">
@@ -279,8 +284,8 @@
                                 <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-slate-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-slate-700"></div>
                             </label>
                             <div>
-                                <span class="text-sm font-semibold text-slate-700">Internal Policy Engine</span>
-                                <p class="text-xs text-slate-500">Our built-in pre-AI safety guardrail (e.g. self-harm crisis block) — separate from Cisco AI Defense</p>
+                                <span class="text-sm font-semibold text-gray-700">Internal Policy Engine</span>
+                                <p class="text-xs text-gray-500">Our built-in pre-AI safety guardrail (e.g. self-harm crisis block) — separate from Cisco AI Defense</p>
                             </div>
                         </div>
                         <div id="internalPolicyStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-slate-200 text-slate-700">
@@ -290,7 +295,7 @@
                 </div>
 
                 <!-- Multi-Agent Mode (pipeline control: coordinator + specialists vs. domain agent alone) -->
-                <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-3">
                             <label class="relative inline-flex items-center cursor-pointer">
@@ -298,8 +303,8 @@
                                 <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
                             </label>
                             <div>
-                                <span class="text-sm font-semibold text-indigo-700">Multi-Agent Mode</span>
-                                <p class="text-xs text-indigo-500">ON = coordinator → specialists → synthesizer pipeline. OFF = the domain agent answers directly (all guardrails still run)</p>
+                                <span class="text-sm font-semibold text-gray-700">Multi-Agent Mode</span>
+                                <p class="text-xs text-gray-500">ON = coordinator → specialists → synthesizer pipeline. OFF = the domain agent answers directly (all guardrails still run)</p>
                             </div>
                         </div>
                         <div id="multiAgentStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
@@ -385,7 +390,7 @@
                 </div>
 
                 <!-- Trigger Demo Incident (APM fault injection for the Troubleshooting Agent demo) -->
-                <div class="bg-red-50 border border-red-200 rounded-lg p-3">
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-3">
                             <label class="relative inline-flex items-center cursor-pointer">
@@ -393,8 +398,8 @@
                                 <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-red-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
                             </label>
                             <div>
-                                <span class="text-sm font-semibold text-red-700">Trigger Demo Incident</span>
-                                <p class="text-xs text-red-500">Injects APM latency + errors and drives load. Auto-stops after the duration.</p>
+                                <span class="text-sm font-semibold text-gray-700">Trigger Demo Incident</span>
+                                <p class="text-xs text-gray-500">Injects APM latency + errors and drives load. Auto-stops after the duration.</p>
                             </div>
                         </div>
                         <div class="flex items-center space-x-3">
@@ -419,7 +424,7 @@
                 </div>
 
                 <!-- Prompt-Injection Spray (drives real Cisco AI Defense turns for the ES detection demo) -->
-                <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-3">
                             <label class="relative inline-flex items-center cursor-pointer">
@@ -427,8 +432,8 @@
                                 <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
                             </label>
                             <div>
-                                <span class="text-sm font-semibold text-amber-700">Prompt-Injection Spray</span>
-                                <p class="text-xs text-amber-600">Drives a real prompt-injection campaign through Cisco AI Defense. Auto-stops after the duration.</p>
+                                <span class="text-sm font-semibold text-gray-700">Prompt-Injection Spray</span>
+                                <p class="text-xs text-gray-500">Drives a real prompt-injection campaign through Cisco AI Defense. Auto-stops after the duration.</p>
                             </div>
                         </div>
                         <div class="flex items-center space-x-3">
@@ -473,7 +478,7 @@
                 </div>
             </div>
             <!-- Expand/contract tab -->
-            <button id="drawerToggle" type="button" onclick="toggleDrawer()" aria-expanded="false" aria-controls="settingsDrawer" title="Settings"
+            <button id="drawerToggle" type="button" onclick="toggleDrawer()" aria-expanded="false" aria-controls="settingsDrawer" title="Demo Controls"
                 class="bg-white border border-l-0 border-gray-200 rounded-r-lg shadow-md py-3 px-1.5 text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-300">
                 <svg id="drawerArrow" class="w-5 h-5 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
