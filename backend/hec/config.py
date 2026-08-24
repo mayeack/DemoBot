@@ -12,7 +12,11 @@ from typing import Any, Dict
 
 DEFAULT_INDEX = "main"
 DEFAULT_SOURCE = "medadvice"
-DEFAULT_SOURCETYPE = "medadvice:governance"
+# Must match the sourcetype whose props.conf sets KV_MODE = json, so the
+# governance JSON body is field-extracted at search time. Dashboards and the
+# ES correlation rule search `sourcetype="gen_ai:json"`; a destination seeded
+# with anything else indexes fine but reads as an empty dashboard.
+DEFAULT_SOURCETYPE = "gen_ai:json"
 DEFAULT_HOST = "medadvice"
 
 
