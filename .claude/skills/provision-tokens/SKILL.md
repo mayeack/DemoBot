@@ -108,7 +108,7 @@ HEC must be **listening** first. On the app host (Splunk Enterprise at `/opt/spl
 ```bash
 sudo systemctl start Splunkd
 sudo /opt/splunk/bin/splunk http-event-collector enable -uri https://localhost:8089 -enable-ssl 1 -port 8088
-sudo /opt/splunk/bin/splunk http-event-collector create demobot-governance -index gen_ai_log -sourcetype medadvice:governance -uri https://localhost:8089
+sudo /opt/splunk/bin/splunk http-event-collector create demobot-governance -index gen_ai_log -sourcetype gen_ai:json -uri https://localhost:8089
 ```
 The target index must **exist** and the token must be **allowed** to write it. Without the
 admin password, create an index by writing `/opt/splunk/etc/system/local/indexes.conf`
@@ -168,7 +168,7 @@ Create the destination (non-secret), then inject the token machine-to-machine:
 ```bash
 KEY=$(grep '^ACCESS_KEY=' .env | cut -d= -f2-)
 curl -s -u x:"$KEY" -X POST http://localhost:8001/api/hec/destinations -H 'Content-Type: application/json' \
-  -d '{"name":"Splunk Core (local)","url":"https://localhost:8088/services/collector/event","index":"main","source":"medadvice","sourcetype":"medadvice:governance","host":"'"$(hostname)"'","verify_tls":false,"enabled":false}'
+  -d '{"name":"Splunk Core (local)","url":"https://localhost:8088/services/collector/event","index":"main","source":"medadvice","sourcetype":"gen_ai:json","host":"'"$(hostname)"'","verify_tls":false,"enabled":false}'
 
 # token straight from the authoritative source — never echoed
 T=$(sudo awk '/^\[http:\/\/demobot-governance\]/{f=1} f&&/^token *=/{sub(/^token *= */,""); gsub(/[[:space:]]/,""); print; exit}' \

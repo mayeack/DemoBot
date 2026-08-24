@@ -86,7 +86,8 @@ the canonical set:
   Note a healthy ingest pipeline does **not** imply a valid API token — they are separate.
 - **Splunk Core HEC token** — was not configured at all, so no governance logs reached
   Splunk Core. Now provisioned against a local Splunk Enterprise, writing to index
-  `gen_ai_log` (sourcetype `medadvice:governance`); include it in the Plane-2 seed.
+  `gen_ai_log` (sourcetype `gen_ai:json`, whose props.conf sets
+  `KV_MODE = json` so the governance body extracts at search time); include it in the Plane-2 seed.
 
 Rotate from one canonical source, and treat any token pasted into a chat/ticket as
 compromised. Never bake tokens into the repo (`.env` and `*.db` are gitignored — keep it

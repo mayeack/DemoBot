@@ -111,7 +111,7 @@
 <p>Two secrets were remediated on the baseline host while writing this design; both belong in the canonical set:</p>
 <ul>
 <li><strong><code>SPLUNK_API_TOKEN</code></strong> — was returning <span class="warn">401</span> (an ingest token had been used where an O11y <strong>API</strong> token is required). Replaced; <code>verify_observability.sh</code> now passes <span class="ok">9/9</span>. Note a healthy ingest pipeline does <strong>not</strong> imply a valid API token — they are separate.</li>
-<li><strong>Splunk Core HEC token</strong> — was not configured at all, so no governance logs reached Splunk Core. Now provisioned against a local Splunk Enterprise, writing to index <code>gen_ai_log</code> (sourcetype <code>medadvice:governance</code>); include it in the Plane-2 seed.</li>
+<li><strong>Splunk Core HEC token</strong> — was not configured at all, so no governance logs reached Splunk Core. Now provisioned against a local Splunk Enterprise, writing to index <code>gen_ai_log</code> (sourcetype <code>gen_ai:json</code>, whose props.conf sets <code>KV_MODE = json</code> so the governance body extracts at search time); include it in the Plane-2 seed.</li>
 </ul>
 <p>Rotate from one canonical source, and treat any token pasted into a chat/ticket as compromised. Never bake tokens into the repo (<code>.env</code> and <code>*.db</code> are gitignored — keep it that way). See the <code>provision-tokens</code> skill for generation, population and validation.</p>
 
