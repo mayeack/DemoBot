@@ -33,7 +33,7 @@ palette does — which is another reason not to.
 
 ## Product naming in user-visible text
 
-User-visible text says **"Cisco Agent Observability"**, never "Galileo". This
+User-visible text says **"Splunk Agent Observability"**, never "Galileo". This
 covers UI copy, governance-log `reasons`, and `response_text` block banners —
 anything an audience sees in the app, the Governance Logs page, or Splunk.
 

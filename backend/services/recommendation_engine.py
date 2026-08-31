@@ -1961,7 +1961,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
 
         if verdict.errored:
             reasons = [
-                f"Cisco Agent Observability Control unavailable (fail-closed): {verdict.error_message}"
+                f"Splunk Agent Observability Control unavailable (fail-closed): {verdict.error_message}"
             ]
             blocked_message = (
                 "The assistant's response could not be reviewed by our agent "
@@ -1975,7 +1975,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
                 if verdict.matched_controls
                 else ""
             )
-            reasons = [f"Cisco Agent Observability Control denied the response{control_part}"]
+            reasons = [f"Splunk Agent Observability Control denied the response{control_part}"]
             reasons.extend(verdict.messages)
             if verdict.reason:
                 reasons.append(verdict.reason)
@@ -1998,7 +1998,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             input_messages=conversation_messages,
             output_messages=[{"role": "assistant", "content": blocked_message}],
             response_text=(
-                f"⚠️ POLICY BLOCKED (Cisco Agent Observability Control - response)\n{blocked_message}"
+                f"⚠️ POLICY BLOCKED (Splunk Agent Observability Control - response)\n{blocked_message}"
             ),
             usage_data=usage_data
             or {

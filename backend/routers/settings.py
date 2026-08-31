@@ -182,6 +182,46 @@ async def update_provider_creds(body: ProviderCredsSettings):
     return _provider_payload()
 
 
+# ---------------------------------------------------------------------------
+# Integration credentials (Cisco AI Defense / Splunk Observability Cloud)
+# ---------------------------------------------------------------------------
+class IntegrationCredsSettings(BaseModel):
+    integration: str = Field(min_length=1, max_length=40)
+    fields: Dict[str, str] = Field(default_factory=dict)
+
+
+@router.get("/settings/integrations")
+async def get_integrations():
+    """Field metadata for the AI Defense / Splunk Observability Settings cards.
+    Secret VALUES are never included — presence only."""
+    return {"integrations": settings_store.get_integration_fields()}
+
+
+@router.put("/settings/integration-creds")
+async def update_integration_creds(body: IntegrationCredsSettings):
+    """Update one integration's credentials + identity fields.
+
+    Blank secrets are ignored (an existing key is never wiped). Most fields apply
+    live via the integration's reconfigure hook; the ones whose consumer is a
+    separate process (the OTel collector) are written to .env instead, and the
+    processes that still need restarting come back in ``restart_required``."""
+    integration = body.integration.strip()
+    if integration not in settings_store.INTEGRATION_CHOICES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unknown integration: {integration}. "
+                   f"Valid: {', '.join(settings_store.INTEGRATION_CHOICES)}",
+        )
+    try:
+        restart = settings_store.set_integration_creds(integration, body.fields or {})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {
+        "integrations": settings_store.get_integration_fields(),
+        "restart_required": restart,
+    }
+
+
 @router.put("/settings/emit-model")
 async def update_emit_model(body: EmitModelSettings):
     name = (body.model_name or "").strip()

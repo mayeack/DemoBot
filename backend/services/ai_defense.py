@@ -83,6 +83,20 @@ class AIDefenseClient:
         # at import time, before the DB is guaranteed ready).
         self._enabled_rules_supported: Optional[bool] = None
 
+    def reconfigure(self) -> None:
+        """Re-read the settings singleton after a Settings-UI credential change.
+
+        This client is constructed once at import time and snapshots the URL, key
+        and timeout, so mutating ``settings.ai_defense_*`` alone would not take
+        effect. Called by settings_store.set_integration_creds — the analog of
+        ``llm.clear_caches()`` on the provider path. The enabled_rules probe is
+        reset too: a new API key means a different SCC connection, whose policy
+        binding may differ from the one we discovered."""
+        self._url = settings.ai_defense_chat_inspect_url
+        self._api_key = settings.ai_defense_api_key
+        self._timeout = settings.ai_defense_timeout
+        self._enabled_rules_supported = None
+
     def _rules_supported(self) -> bool:
         if self._enabled_rules_supported is None:
             try:

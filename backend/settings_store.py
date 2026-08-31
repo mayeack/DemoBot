@@ -10,7 +10,9 @@ from __future__ import annotations
 import logging
 import os
 import re
+import tempfile
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from backend.database.db import get_db_context
@@ -35,6 +37,12 @@ _DEFAULTS: Dict[str, Any] = {
     # at runtime (a connection with an SCC policy bound rejects them with HTTP
     # 400) and persisted so the wasted 400+retry isn't re-paid on every restart.
     "ai_defense_enabled_rules_supported": True,
+    # Per-integration credentials (Cisco AI Defense, Splunk Agent Observability)
+    # entered via the Settings UI. Same storage contract as ai_provider_creds:
+    # local gitignored SQLite, never returned by the API. Collector-consumed keys
+    # (SPLUNK_REALM/SPLUNK_ACCESS_TOKEN/...) are deliberately NOT kept here — they
+    # live in .env only, so the two planes can't diverge.
+    "integration_creds": {},
 }
 _ID_RE = re.compile(r"[^a-z0-9-]+")
 
@@ -52,19 +60,33 @@ _PROVIDER_MODEL_ATTR: Dict[str, str] = {
 
 
 class _CredField:
-    """One access field surfaced per provider in the Settings UI.
+    """One access field surfaced per provider / integration in the Settings UI.
 
     ``secret`` fields are masked on read (presence only — never the value) and only
     overwritten on write when a non-empty value is supplied. Each field applies to
-    a live ``settings`` attribute and/or a process env var (for the boto3 chain)."""
+    a live ``settings`` attribute and/or a process env var (for the boto3 chain).
 
-    def __init__(self, key, label, *, secret=False, settings_attr=None, env=None, placeholder=""):
+    ``boolean`` renders as a checkbox instead of a text input. Booleans are the one
+    exception to blank-keeps-existing: a checkbox always reports its state.
+
+    ``env_file`` means the value's consumer is a DIFFERENT PROCESS (the OTel
+    collector, or run.sh before it re-execs the app), which reads ``.env`` directly.
+    Those fields are written to ``.env`` and are NOT mirrored into the settings blob
+    — ``.env`` stays their single source of truth. ``restart`` names the process that
+    must be restarted before such a change takes effect ("collector" or "app")."""
+
+    def __init__(self, key, label, *, secret=False, boolean=False, settings_attr=None,
+                 env=None, env_file=False, restart="", placeholder="", help=""):
         self.key = key
         self.label = label
         self.secret = secret
+        self.boolean = boolean
         self.settings_attr = settings_attr
         self.env = env
+        self.env_file = env_file
+        self.restart = restart
         self.placeholder = placeholder
+        self.help = help
 
 
 # Access fields per provider (the "Model" id is handled separately by the dropdown).
@@ -100,14 +122,82 @@ _PROVIDER_FIELDS: Dict[str, List[_CredField]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Integration credentials (Cisco AI Defense / Splunk Observability Cloud)
+# ---------------------------------------------------------------------------
+# Same _CredField vocabulary as _PROVIDER_FIELDS, one entry per Settings card
+# group. Scope is deliberately CREDENTIALS + IDENTITY only: timeouts, fail-open
+# posture, enabled-rule lists and Agent Control tuning stay in .env, where they
+# are annotated and rarely change per-demo.
+INTEGRATION_CHOICES: List[str] = ["ai_defense", "splunk_o11y", "agent_observability"]
+
+_INTEGRATION_FIELDS: Dict[str, List[_CredField]] = {
+    # Applies live: AIDefenseClient.reconfigure() re-reads the settings singleton.
+    "ai_defense": [
+        _CredField("enabled", "Enabled", boolean=True, settings_attr="ai_defense_enabled",
+                   help="Master switch. The per-chat toggle is ignored when this is off."),
+        _CredField("api_key", "Inspection API key", secret=True, settings_attr="ai_defense_api_key",
+                   placeholder="paste the SCC connection key"),
+        _CredField("region", "Region", settings_attr="ai_defense_region",
+                   placeholder="us"),
+        _CredField("endpoint", "Endpoint override", settings_attr="ai_defense_endpoint",
+                   placeholder="https://us.api.inspect.aidefense.security.cisco.com"),
+    ],
+    # .env only — every one of these is read by a DIFFERENT process (the OTel
+    # collector via run-collector.sh, or run.sh deciding whether to re-exec the app
+    # under opentelemetry-instrument). Nothing in the app reads them, so there is
+    # nothing to apply live.
+    "splunk_o11y": [
+        _CredField("realm", "Realm", env="SPLUNK_REALM", env_file=True, restart="collector",
+                   placeholder="us1"),
+        _CredField("access_token", "Ingest access token", secret=True, env="SPLUNK_ACCESS_TOKEN",
+                   env_file=True, restart="collector",
+                   help="INGEST authorization. Not the API token — they are different."),
+        _CredField("api_token", "API token", secret=True, env="SPLUNK_API_TOKEN", env_file=True,
+                   help="Read-only API token used by the observability regression test."),
+        _CredField("otlp_endpoint", "OTLP endpoint", env="OTEL_EXPORTER_OTLP_ENDPOINT",
+                   env_file=True, restart="app", placeholder="http://localhost:4317"),
+    ],
+    # Applies live: the SDK path builds a fresh GalileoLogger per turn and reads
+    # these from os.environ at call time.
+    "agent_observability": [
+        _CredField("agent_control_enabled", "Agent Control enabled", boolean=True,
+                   settings_attr="galileo_agent_control_enabled",
+                   help="Master switch for the per-chat Agent Observability Controls toggle."),
+        _CredField("api_key", "API key", secret=True, env="GALILEO_API_KEY",
+                   placeholder="paste the console API key",
+                   help="Also the single enable signal for trace logging."),
+        _CredField("console_url", "Console URL", env="GALILEO_CONSOLE_URL",
+                   placeholder="https://console.multitenant.galileocloud.io"),
+        _CredField("project", "Project", env="GALILEO_PROJECT", placeholder="YeackBot"),
+        _CredField("log_stream", "Log stream", env="GALILEO_LOG_STREAM", placeholder="default"),
+    ],
+}
+
+
 def _field_current(field: "_CredField") -> str:
     from backend.config import settings
 
     if field.settings_attr:
-        return getattr(settings, field.settings_attr, "") or ""
-    if field.env:
-        return os.environ.get(field.env, "") or ""
-    return ""
+        cur = getattr(settings, field.settings_attr, "")
+    elif field.env:
+        cur = os.environ.get(field.env, "")
+    else:
+        return ""
+    if field.boolean:
+        return "true" if _as_bool(cur) else "false"
+    return cur or ""
+
+
+_TRUE = {"1", "true", "yes", "on"}
+
+
+def _as_bool(value: Any) -> bool:
+    """Coerce a checkbox / .env / pydantic value to a bool. Mirrors the string forms
+    pydantic-settings accepts, so a value round-trips through .env unchanged."""
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in _TRUE
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +430,189 @@ def apply_provider_creds_from_store() -> None:
                 continue
             if f.settings_attr:
                 setattr(settings, f.settings_attr, val)
+            if f.env:
+                os.environ[f.env] = val
+
+
+# ---------------------------------------------------------------------------
+# Integration credentials — Cisco AI Defense / Splunk Observability Cloud
+# ---------------------------------------------------------------------------
+def _env_path() -> Path:
+    from backend.config import BASE_DIR
+
+    return Path(BASE_DIR) / ".env"
+
+
+def _write_env_key(key: str, value: str) -> None:
+    """Set ``key`` in .env, replacing in place and collapsing any duplicates.
+
+    A duplicate line is not cosmetic: backend/config.py takes the FIRST match while
+    the shell readers in run.sh / run-collector.sh do `grep '^KEY=' | cut -d= -f2-`
+    and yield BOTH values. So this rewrites the first occurrence and drops the rest.
+    Values are written bare — no quoting, no trailing comment — because neither
+    shell reader strips them.
+    """
+    if "\n" in value or "\r" in value:
+        raise ValueError(f"{key}: value must not contain a newline")
+
+    path = _env_path()
+    lines = path.read_text().splitlines(keepends=True) if path.exists() else []
+    prefix = f"{key}="
+    out: List[str] = []
+    written = False
+    for line in lines:
+        bare = line[len("export "):] if line.startswith("export ") else line
+        if bare.lstrip().startswith(prefix) and not bare.lstrip().startswith("#"):
+            if written:
+                continue  # duplicate of a key we already set — drop it
+            out.append(f"{key}={value}\n")
+            written = True
+            continue
+        out.append(line)
+    if not written:
+        if out and not out[-1].endswith("\n"):
+            out.append("\n")
+        out.append(f"{key}={value}\n")
+
+    # Atomic replace, preserving .env's mode (0600) so a secret is never briefly
+    # world-readable — mkstemp creates at 0600 and the temp file lands in .env's own
+    # directory, so os.replace is a rename within one filesystem.
+    mode = path.stat().st_mode & 0o777 if path.exists() else 0o600
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".env.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.writelines(out)
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def get_integration_fields() -> Dict[str, List[Dict[str, Any]]]:
+    """Per-integration field metadata for the Settings UI.
+
+    Same contract as ``get_provider_fields``: secret fields report ONLY ``present``
+    (bool) — never the value, not even a suffix. Non-secret and boolean fields
+    return their current value so the control can prefill."""
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for integration, fields in _INTEGRATION_FIELDS.items():
+        items: List[Dict[str, Any]] = []
+        for f in fields:
+            cur = _field_current(f)
+            item = {
+                "key": f.key,
+                "label": f.label,
+                "secret": f.secret,
+                "boolean": f.boolean,
+                "placeholder": f.placeholder,
+                "help": f.help,
+                "restart": f.restart,
+                "present": bool(cur) if not f.boolean else True,
+            }
+            if not f.secret:
+                item["value"] = cur
+            items.append(item)
+        out[integration] = items
+    return out
+
+
+def _reconfigure_integration(integration: str) -> None:
+    """Push a saved change into the live consumer, so no restart is needed.
+
+    Both clients snapshot their config in ``__init__`` and are module-level
+    singletons, so mutating the settings singleton alone is not enough — this is
+    the analog of ``llm.clear_caches()`` on the provider path."""
+    if integration == "ai_defense":
+        from backend.services.ai_defense import ai_defense_client
+        ai_defense_client.reconfigure()
+    elif integration == "agent_observability":
+        from backend.services.agent_control import agent_control_client
+        agent_control_client.reconfigure()
+
+
+def set_integration_creds(integration: str, fields: Dict[str, str]) -> List[str]:
+    """Apply + persist integration fields. Returns the processes that still need a
+    restart for the change to take effect (empty when everything applied live).
+
+    Blank values are ignored (a blank secret keeps the existing one), exactly as on
+    the provider path. Booleans are the one exception — a checkbox always reports
+    its state, so ``false`` is a real value rather than "leave alone"."""
+    from backend.config import settings
+
+    integration = (integration or "").strip()
+    specs = _INTEGRATION_FIELDS.get(integration)
+    if not specs or not fields:
+        return []
+
+    data = load()
+    store = dict(data.get("integration_creds") or {})
+    istore = dict(store.get(integration) or {})
+    applied: List[str] = []
+    restart: List[str] = []
+    persist_blob = False
+
+    for f in specs:
+        if f.key not in fields:
+            continue
+        raw = fields.get(f.key)
+        if f.boolean:
+            val = "true" if _as_bool(raw) else "false"
+        else:
+            val = (raw or "").strip()
+            if not val:  # blank = keep existing (never wipe)
+                continue
+
+        if f.settings_attr:
+            setattr(settings, f.settings_attr, _as_bool(val) if f.boolean else val)
+        if f.env:
+            os.environ[f.env] = val
+        if f.env_file:
+            # .env is the single source of truth for these — the consumer is a
+            # different process, so mirroring them into the blob could only drift.
+            if not f.env:
+                raise ValueError(f"{f.key}: env_file field needs an env var name")
+            _write_env_key(f.env, val)
+        else:
+            istore[f.key] = val
+            persist_blob = True
+
+        applied.append(f.key)
+        if f.restart and f.restart not in restart:
+            restart.append(f.restart)
+
+    if applied:
+        if persist_blob:
+            store[integration] = istore
+            data["integration_creds"] = store
+            _persist(data)
+        # Log field NAMES only — never values.
+        logger.info("applied %s integration fields: %s", integration, ", ".join(applied))
+        try:
+            _reconfigure_integration(integration)
+        except Exception:
+            logger.exception("failed to reconfigure %s after credential change", integration)
+    return restart
+
+
+def apply_integration_creds_from_store() -> None:
+    """Startup hook: apply any persisted integration creds over the .env defaults."""
+    from backend.config import settings
+
+    store = load().get("integration_creds") or {}
+    for integration, fields in _INTEGRATION_FIELDS.items():
+        saved = store.get(integration) or {}
+        for f in fields:
+            if f.env_file:
+                continue  # .env-owned; already loaded by backend.config
+            val = (saved.get(f.key) or "").strip()
+            if not val:
+                continue
+            if f.settings_attr:
+                setattr(settings, f.settings_attr, _as_bool(val) if f.boolean else val)
             if f.env:
                 os.environ[f.env] = val
 

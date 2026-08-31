@@ -166,7 +166,9 @@ class Settings(BaseSettings):
     ai_defense_enabled: bool = False
     # Inspection API key generated in the AI Defense UI when you create an
     # "API" connection. Sent in the X-Cisco-AI-Defense-API-Key header. Never
-    # hardcode this - supply it via the environment / .env only.
+    # hardcode this - supply it via the environment / .env, or the Settings page's
+    # "Cisco AI Defense" card (settings_store.set_integration_creds, which persists
+    # to the local SQLite blob and applies without a restart).
     ai_defense_api_key: str = ""
     # Regional deployment of your AI Defense tenant. Drives the base URL:
     #   us -> https://us.api.inspect.aidefense.security.cisco.com

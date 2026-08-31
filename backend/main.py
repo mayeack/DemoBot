@@ -137,6 +137,9 @@ async def startup_event():
         # over the .env defaults, BEFORE discovery so it probes with the right creds.
         settings_store.apply_provider_creds_from_store()
         settings_store.apply_ai_provider_from_store()
+        # Same for the AI Defense / Splunk Agent Observability integration creds.
+        # (Collector-consumed keys are .env-owned and already loaded by config.)
+        settings_store.apply_integration_creds_from_store()
         # Discover which models each provider currently offers (background thread so
         # startup isn't blocked) — populates the Settings "Model" dropdown.
         from backend import model_catalog
