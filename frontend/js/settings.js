@@ -27,7 +27,7 @@ async function api(method, url, body) {
 // Each top-level card (logs / creds / hec) collapses via a chevron in its header.
 // State persists per-section in localStorage so it survives reloads.
 const COLLAPSE_KEY = 'medadvice.settings.collapsed';
-const SECTIONS = ['logs', 'creds', 'hec'];
+const SECTIONS = ['logs', 'creds', 'aidefense', 'o11y', 'hec'];
 
 function _readCollapsed() {
   try { return JSON.parse(localStorage.getItem(COLLAPSE_KEY)) || {}; } catch (_) { return {}; }
@@ -88,19 +88,37 @@ let _activeProvider = '';   // provider currently backing the chat (read-only he
 let _activeModel = '';      // its model
 let _credsDirty = false;    // operator has typed into the creds form since the last render/load
 
+// Optional one-line hint under a field's label (integration fields only).
+function credHelpHtml(f) {
+  return f.help ? `<p class="text-xs text-gray-500 mt-1">${esc(f.help)}</p>` : '';
+}
+
 // One credential input (secret = password that starts EMPTY; "(set)" means one exists).
 function credFieldHtml(f) {
+  if (f.boolean) {
+    // A checkbox always reports its state, so it is the one field type where an
+    // unchecked box means "off" rather than "leave the stored value alone".
+    return `<div class="sm:col-span-2 flex items-start gap-2">
+      <input data-cred="${attr(f.key)}" type="checkbox" ${String(f.value) === 'true' ? 'checked' : ''}
+        class="mt-0.5 h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-2 focus:ring-violet-500">
+      <div>
+        <label class="block text-xs font-semibold text-gray-600">${esc(f.label)}</label>
+        ${credHelpHtml(f)}
+      </div></div>`;
+  }
   if (f.secret) {
     const ph = f.present ? '•••••••• (set) — leave blank to keep' : (f.placeholder || ('enter ' + f.label));
     return `<div>
       <label class="block text-xs font-semibold text-gray-600 mb-1">${esc(f.label)}</label>
       <input data-cred="${attr(f.key)}" type="password" autocomplete="new-password" placeholder="${attr(ph)}"
-        class="w-full p-2 border border-gray-300 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500"></div>`;
+        class="w-full p-2 border border-gray-300 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500">
+      ${credHelpHtml(f)}</div>`;
   }
   return `<div>
     <label class="block text-xs font-semibold text-gray-600 mb-1">${esc(f.label)}</label>
     <input data-cred="${attr(f.key)}" type="text" value="${attr(f.value || '')}" placeholder="${attr(f.placeholder || '')}"
-      class="w-full p-2 border border-gray-300 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500"></div>`;
+      class="w-full p-2 border border-gray-300 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500">
+    ${credHelpHtml(f)}</div>`;
 }
 
 // Read-only pill: the provider + model currently backing the chat (change on /app).
@@ -146,16 +164,23 @@ async function loadProviderCreds() {
   } catch (e) { setCredsStatus('Failed to load: ' + e.message, false); }
 }
 
-function collectCredsFor(provider) {
+// Read every [data-cred] control inside a container into a {key: value} payload.
+// Shared by the provider card and the integration cards.
+function collectFieldsIn(box) {
   const out = {};
-  const box = document.querySelector(`[data-creds-for="${CSS.escape(provider)}"]`);
   if (!box) return out;
   box.querySelectorAll('[data-cred]').forEach(el => {
+    const key = el.getAttribute('data-cred');
+    if (el.type === 'checkbox') { out[key] = el.checked ? 'true' : 'false'; return; }
     const v = el.value.trim();
-    if (el.type === 'password') { if (v) out[el.getAttribute('data-cred')] = v; }  // blank secret keeps existing
-    else out[el.getAttribute('data-cred')] = v;
+    if (el.type === 'password') { if (v) out[key] = v; }  // blank secret keeps existing
+    else out[key] = v;
   });
   return out;
+}
+
+function collectCredsFor(provider) {
+  return collectFieldsIn(document.querySelector(`[data-creds-for="${CSS.escape(provider)}"]`));
 }
 
 async function saveProviderCreds() {
@@ -174,6 +199,93 @@ async function saveProviderCreds() {
 
 function setCredsStatus(msg, ok) {
   const el = document.getElementById('credsStatus');
+  if (el) { el.textContent = msg; el.className = 'text-sm mt-3 ' + (ok ? 'text-green-600' : 'text-red-600'); }
+}
+
+// ------------------------------------------------------------ integrations
+// Cisco AI Defense + Splunk Observability Cloud (which also holds Splunk Agent
+// Observability). Same field vocabulary as the provider creds above, so
+// credFieldHtml / collectFieldsIn are shared rather than duplicated.
+//
+// Each group saves independently because their save semantics differ: the AI
+// Defense and Agent Observability fields apply on the next chat turn, while the
+// collector-consumed ones are written to .env and need a restart. The server
+// reports which in restart_required.
+let _integrations = {};   // integration id -> field metadata from the server
+
+// Which container each integration renders into, in display order.
+const INTEGRATION_GROUPS = [
+  { box: 'aiDefenseFields', ids: ['ai_defense'] },
+  { box: 'o11yFields', ids: ['splunk_o11y', 'agent_observability'] },
+];
+// A title turns the group into a bordered sub-card. The AI Defense group has no
+// title because it is alone in its card and would just repeat the heading.
+const INTEGRATION_TITLES = {
+  ai_defense: '',
+  splunk_o11y: 'Splunk Observability Cloud',
+  agent_observability: 'Splunk Agent Observability',
+};
+const INTEGRATION_NOTES = {
+  ai_defense: '',
+  splunk_o11y: 'Read by the OpenTelemetry collector, not the app \u2014 saving writes .env, so the collector must be restarted to pick it up. On a fleet replica these are replaced by the next deploy.',
+  agent_observability: 'Applies on the next chat turn \u2014 no restart.',
+};
+
+function integrationHtml(id) {
+  const specs = _integrations[id] || [];
+  const title = INTEGRATION_TITLES[id] || '';
+  const note = INTEGRATION_NOTES[id] || '';
+  const fields = specs.length
+    ? `<div data-integ-for="${attr(id)}" class="grid grid-cols-1 sm:grid-cols-2 gap-3">${specs.map(credFieldHtml).join('')}</div>`
+    : '<p class="text-sm text-gray-400">No fields for this integration.</p>';
+  const body =
+    (title ? `<h3 class="text-sm font-semibold text-gray-700 mb-1">${esc(title)}</h3>` : '') +
+    (note ? `<p class="text-xs text-gray-500 mb-3">${esc(note)}</p>` : '') +
+    fields +
+    (specs.length
+      ? `<button onclick="saveIntegration('${attr(id)}')"
+           class="mt-3 px-4 py-2 bg-violet-600 text-white rounded hover:bg-violet-700 text-sm">Save</button>`
+      : '') +
+    `<p id="integStatus-${attr(id)}" class="text-sm mt-3"></p>`;
+  return title ? `<div class="border border-gray-200 rounded-lg p-4">${body}</div>` : body;
+}
+
+function renderIntegrations() {
+  INTEGRATION_GROUPS.forEach(g => {
+    const box = document.getElementById(g.box);
+    if (box) box.innerHTML = g.ids.map(integrationHtml).join('');
+  });
+}
+
+async function loadIntegrations() {
+  try {
+    const d = await api('GET', '/api/settings/integrations');
+    _integrations = d.integrations || {};
+    renderIntegrations();
+  } catch (e) {
+    INTEGRATION_GROUPS.forEach(g => {
+      const box = document.getElementById(g.box);
+      if (box) box.innerHTML = `<p class="text-red-600 text-sm">Failed to load: ${esc(e.message)}</p>`;
+    });
+  }
+}
+
+async function saveIntegration(id) {
+  const box = document.querySelector(`[data-integ-for="${CSS.escape(id)}"]`);
+  try {
+    const d = await api('PUT', '/api/settings/integration-creds',
+                        { integration: id, fields: collectFieldsIn(box) });
+    _integrations = d.integrations || _integrations;
+    renderIntegrations();  // resets saved secrets back to their masked placeholder
+    const restart = d.restart_required || [];
+    setIntegStatus(id, restart.length
+      ? `Saved to .env. Restart the ${restart.join(' and ')} to apply.`
+      : 'Saved \u2014 applied, no restart needed.', true);
+  } catch (e) { setIntegStatus(id, 'Error: ' + e.message, false); }
+}
+
+function setIntegStatus(id, msg, ok) {
+  const el = document.getElementById('integStatus-' + id);
   if (el) { el.textContent = msg; el.className = 'text-sm mt-3 ' + (ok ? 'text-green-600' : 'text-red-600'); }
 }
 
@@ -382,6 +494,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (credsBox) credsBox.addEventListener('input', () => { _credsDirty = true; });
   await loadLogsDir();
   await loadProviderCreds();
+  await loadIntegrations();
   await loadDestinations();
   await loadStats();
   setInterval(() => { if (!document.hidden) loadStats(); }, 2500);

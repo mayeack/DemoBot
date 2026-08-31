@@ -559,16 +559,28 @@ def main() -> int:
 
         # ---- Settings page UI invariants: collapsible sections + read-only provider pill ----
         s_html = c.get("/settings-ui", headers=AUTH).text
-        check("Settings: three collapsible section toggles (logs/creds/hec)",
-              all(f'data-toggle="{s}"' in s_html for s in ("logs", "creds", "hec")))
-        check("Settings: three collapsible section bodies (id=section-*)",
-              all(f'id="section-{s}"' in s_html for s in ("logs", "creds", "hec")))
-        check("Settings: a chevron per collapsible header (3)", s_html.count("data-chevron") == 3)
+        _js = (ROOT / "frontend" / "js" / "settings.js").read_text()
+        SETTINGS_JS_SECTIONS = re.search(r"const SECTIONS = \[(.*?)\]", _js).group(1)
+        # Every collapsible card. Keep in sync with SECTIONS in frontend/js/settings.js —
+        # a card missing from that array still toggles, but its collapsed state is
+        # silently dropped on reload.
+        sections = ("logs", "creds", "aidefense", "o11y", "hec")
+        check(f"Settings: a collapsible toggle per section ({len(sections)})",
+              all(f'data-toggle="{s}"' in s_html for s in sections))
+        check(f"Settings: a collapsible body per section ({len(sections)})",
+              all(f'id="section-{s}"' in s_html for s in sections))
+        check("Settings: a chevron per collapsible header",
+              s_html.count("data-chevron") == len(sections))
+        check("Settings: settings.js registers every section for collapse persistence",
+              all(f"'{s}'" in SETTINGS_JS_SECTIONS for s in sections))
         check("Settings: read-only provider/model pill present", 'id="providerPill"' in s_html)
+        # The integration cards render client-side; assert their mount points exist.
+        check("Settings: AI Defense + Splunk O11y field containers present",
+              'id="aiDefenseFields"' in s_html and 'id="o11yFields"' in s_html)
         # Accordion a11y: each toggle is a <button> nested INSIDE its <h2> (heading role preserved),
         # never an <h2> nested inside a <button> (which screen readers flatten away).
         check("Settings: headers use accordion <h2><button> (heading not nested in button)",
-              s_html.count('aria-controls="section-') == 3
+              s_html.count('aria-controls="section-') == len(sections)
               and re.search(r"<button[^>]*>\s*<h2", s_html) is None)
 
     # ---- AI Defense per-direction guardrail config (no client needed) ----

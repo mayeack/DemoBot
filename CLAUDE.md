@@ -33,7 +33,7 @@ palette does — which is another reason not to.
 
 ## Product naming in user-visible text
 
-User-visible text says **"Cisco Agent Observability"**, never "Galileo". This
+User-visible text says **"Splunk Agent Observability"**, never "Galileo". This
 covers UI copy, governance-log `reasons`, and `response_text` block banners —
 anything an audience sees in the app, the Governance Logs page, or Splunk.
 
@@ -48,3 +48,15 @@ Leave the vendor's own names alone everywhere else, because they are load-bearin
 
 Internal comments, docstrings, log messages, filenames, and docs still say
 Galileo; that is deliberate, not an oversight.
+
+## Versioning and releases
+
+Semver, with the version in **two** places that must move in the same commit:
+`app_version` in `backend/config.py` and `APP_VERSION` in `.env.example`. Leave
+`app_name` (`"DemoBot v4"`) alone unless the MAJOR changes — it names the 4.x
+line, and also appears in `run.sh`, `Containerfile`, and `requirements.txt`.
+
+Releases are annotated `vX.Y.Z` tags cut from `main` **after** the PR merges,
+then published with `gh release create`. Never tag a feature branch. Full
+process, including why a deployed box can still report a stale version:
+`docs/RELEASING.md`.

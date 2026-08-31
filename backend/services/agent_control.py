@@ -244,6 +244,28 @@ class AgentControlClient:
         self._controls_expires_at: float = 0.0
         self._server_control_locally_logged: set = set()
 
+    def reconfigure(self) -> None:
+        """Re-read config and drop every cached credential after a Settings-UI change.
+
+        ``api_key`` / ``console_api_url`` are live ``os.getenv`` reads, but the base
+        URL, timeout and agent/step names are snapshotted in ``__init__`` on a
+        module-level singleton. Every cached token and control definition is also
+        invalidated: a new API key means a different tenant, so a token minted for
+        the old one is worthless (and the control set may differ entirely)."""
+        self._base_url = (settings.galileo_agent_control_url or "").rstrip("/")
+        self._timeout = settings.galileo_agent_control_timeout
+        self._agent_name = settings.galileo_agent_control_agent_name
+        self._step_name = settings.galileo_agent_control_step_name
+        self._access_token = None
+        self._access_expires_at = 0.0
+        self._runtime_token = None
+        self._runtime_expires_at = 0.0
+        self._runtime_retry_after = 0.0
+        self._runtime_unavailable_logged = False
+        self._controls = None
+        self._controls_expires_at = 0.0
+        self._server_control_locally_logged = set()
+
     # ---------------------------------------------------------------- config
 
     @property
@@ -305,7 +327,7 @@ class AgentControlClient:
         token = (response.json() or {}).get("access_token")
         if not token:
             raise AgentControlError(
-                "Cisco Agent Observability login returned no access_token"
+                "Splunk Agent Observability login returned no access_token"
             )
 
         expiry = self._jwt_expiry(token) or (now + _TOKEN_ASSUMED_TTL_SECONDS)
@@ -387,7 +409,7 @@ class AgentControlClient:
         """
         if not self.is_configured:
             raise AgentControlError(
-                "Cisco Agent Observability Control is not configured (set "
+                "Splunk Agent Observability Control is not configured (set "
                 "GALILEO_API_KEY and GALILEO_AGENT_CONTROL_ENABLED=True)."
             )
 
