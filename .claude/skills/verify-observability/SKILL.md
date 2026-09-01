@@ -60,7 +60,7 @@ Exit 0 = pass. The script (takes ~80s; sends 2 real chat turns):
   **zero** export failures (reads the collector's own `:8888` counters).
 - **Tier 3** — `gen_ai.client.token.usage` (with a real, non-`unknown_model`
   model and input/output token types) and `gen_ai.client.operation.duration`
-  are queryable in O11y. Needs `SPLUNK_API_TOKEN` (an O11y **API** token, not the
+  are queryable in O11y. Needs `O11Y_API` (an O11y **API** token, not the
   ingest token) in `.env`; skipped with a notice if unset.
 
 ## Known residual limitation (not a regression)

@@ -204,7 +204,7 @@ bootstrap prints this line for you, filled in:
 
 ```bash
 python3 tests/observability/check_o11y_metadata.py \
-    us1 "$(grep '^SPLUNK_API_TOKEN=' .env | cut -d= -f2-)" demobot-v3 demobot-ec2-2
+    us1 "$(grep '^O11Y_API=' .env | cut -d= -f2-)" demobot-v3 demobot-ec2-2
 ```
 
 Then confirm in Splunk O11y that the new value appears as its own environment

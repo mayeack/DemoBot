@@ -40,7 +40,7 @@ _DEFAULTS: Dict[str, Any] = {
     # Per-integration credentials (Cisco AI Defense, Splunk Agent Observability)
     # entered via the Settings UI. Same storage contract as ai_provider_creds:
     # local gitignored SQLite, never returned by the API. Collector-consumed keys
-    # (SPLUNK_REALM/SPLUNK_ACCESS_TOKEN/...) are deliberately NOT kept here — they
+    # (SPLUNK_REALM/O11Y_INGEST/...) are deliberately NOT kept here — they
     # live in .env only, so the two planes can't diverge.
     "integration_creds": {},
 }
@@ -150,10 +150,10 @@ _INTEGRATION_FIELDS: Dict[str, List[_CredField]] = {
     "splunk_o11y": [
         _CredField("realm", "Realm", env="SPLUNK_REALM", env_file=True, restart="collector",
                    placeholder="us1"),
-        _CredField("access_token", "Ingest access token", secret=True, env="SPLUNK_ACCESS_TOKEN",
+        _CredField("access_token", "Ingest access token", secret=True, env="O11Y_INGEST",
                    env_file=True, restart="collector",
                    help="INGEST authorization. Not the API token — they are different."),
-        _CredField("api_token", "API token", secret=True, env="SPLUNK_API_TOKEN", env_file=True,
+        _CredField("api_token", "API token", secret=True, env="O11Y_API", env_file=True,
                    help="Read-only API token used by the observability regression test."),
         _CredField("otlp_endpoint", "OTLP endpoint", env="OTEL_EXPORTER_OTLP_ENDPOINT",
                    env_file=True, restart="app", placeholder="http://localhost:4317"),

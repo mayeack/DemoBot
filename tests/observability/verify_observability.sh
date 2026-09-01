@@ -7,7 +7,7 @@
 #           collector silently dropping all telemetry)
 #   Tier 2  forwarding:    spans + metrics actually reach Splunk, 0 failures
 #   Tier 3  metadata:      gen_ai.client.token.usage (+ model) and
-#           operation.duration are queryable in O11y (needs SPLUNK_API_TOKEN)
+#           operation.duration are queryable in O11y (needs O11Y_API)
 #
 # Exit 0 = pass, non-zero = fail. Sends a couple of real chat turns (LLM cost).
 set -u
@@ -65,13 +65,13 @@ mets1=$(sum 'otelcol_exporter_sent_metric_points')
 fail1=$(sum 'otelcol_exporter_send_failed_(spans|metric_points)')
 [ "$spans1" -gt "$spans0" ] && ok "spans forwarded to Splunk ($spans0 -> $spans1)" || bad "no new spans forwarded ($spans0 -> $spans1)"
 [ "$mets1"  -gt "$mets0"  ] && ok "metric points forwarded ($mets0 -> $mets1)"     || bad "no new metric points ($mets0 -> $mets1)"
-[ "$fail1"  -le "$fail0"  ] && ok "no new export failures (failed total=$fail1)"   || bad "export failures increased ($fail0 -> $fail1) -> check SPLUNK_REALM/SPLUNK_ACCESS_TOKEN/network"
+[ "$fail1"  -le "$fail0"  ] && ok "no new export failures (failed total=$fail1)"   || bad "export failures increased ($fail0 -> $fail1) -> check SPLUNK_REALM/O11Y_INGEST/network"
 
 echo "== Tier 3: GenAI metadata in Observability Cloud (model + tokens + agent) =="
-APITOK=$(grep '^SPLUNK_API_TOKEN=' .env 2>/dev/null | cut -d= -f2)
+APITOK=$(grep '^O11Y_API=' .env 2>/dev/null | cut -d= -f2)
 REALM=$(grep '^SPLUNK_REALM=' .env 2>/dev/null | cut -d= -f2)
 if [ -z "${APITOK:-}" ]; then
-  echo "  SKIP  SPLUNK_API_TOKEN not set in .env (an O11y *API* token) -> skipping end-to-end metadata assertion"
+  echo "  SKIP  O11Y_API not set in .env (an O11y *API* token) -> skipping end-to-end metadata assertion"
 else
   if python3 tests/observability/check_o11y_metadata.py "$REALM" "$APITOK" demobot-v3 demobot-local; then
     ok "gen_ai metadata present in O11y (real model + input/output tokens; named agent in AI agents view; operation.duration)"

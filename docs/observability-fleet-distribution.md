@@ -10,13 +10,13 @@
 
 | Backend | Transport | Trigger | Configured by |
 |---|---|---|---|
-| **Splunk Observability Cloud** | app → OTLP → **local OTel collector** → APM (traces) + signalfx (metrics) | every turn (passive) | `.env` `SPLUNK_REALM`/`SPLUNK_ACCESS_TOKEN` + `OTEL_*` |
+| **Splunk Observability Cloud** | app → OTLP → **local OTel collector** → APM (traces) + signalfx (metrics) | every turn (passive) | `.env` `SPLUNK_REALM`/`O11Y_INGEST` + `OTEL_*` |
 | **Galileo** | (a) SDK per turn; (b) collector `otlphttp/galileo` (GenAI spans) | every turn (passive) | `.env` `GALILEO_*` |
 | **Splunk Core** | app → **HEC** (`backend/hec/`), multi-destination fan-out | every governance/audit log | **SQLite** `app_settings.hec_destinations` (no env var) |
 | **Cisco AI Defense** | app → Inspection API (`inspect_prompt`/`inspect_response`) | **per-request opt-in** (`ai_defense_review`) | `.env` `AI_DEFENSE_*` |
 
 Two telemetry planes:
-- **Plane A (OTLP):** `app → localhost:4317 collector → Splunk O11y + Galileo`. The collector YAML is **host-generic** and reads `${env:SPLUNK_REALM|SPLUNK_ACCESS_TOKEN|GALILEO_*}`.
+- **Plane A (OTLP):** `app → localhost:4317 collector → Splunk O11y + Galileo`. The collector YAML is **host-generic** and reads `${env:SPLUNK_REALM|O11Y_INGEST|GALILEO_*}`.
 - **Plane B (governance logs):** one chokepoint — `backend/logging/governance_logger.py::_write_log` → `hec_runtime.submit()` (fans to **all enabled HEC destinations**) **+** Galileo SDK.
 
 ```
@@ -50,7 +50,7 @@ Two telemetry planes:
 Chosen substrate: **shared canonical `.env` distributed via config management** (Ansible / `scp` / `rsync`). This works cleanly because `backend/config.py` and the shell launchers honor **already-exported env vars over `.env`** (`config.py:30`), and the collector YAML is host-generic.
 
 **Identical across every server** (the "distribute to all" set):
-`SPLUNK_REALM`, `SPLUNK_ACCESS_TOKEN` (ingest), `SPLUNK_API_TOKEN` (API), `GALILEO_API_KEY`, `GALILEO_PROJECT`, `GALILEO_LOG_STREAM`, `GALILEO_CONSOLE_URL`, `AI_DEFENSE_API_KEY`, `AI_DEFENSE_REGION`/`AI_DEFENSE_ENDPOINT` + rule lists, provider keys (`ANTHROPIC_API_KEY`, `NVIDIA_API_KEY`, …), `ACCESS_KEY`, `AI_PROVIDER` + `*_MODEL`, all safety/injection/session flags, `OTEL_SERVICE_NAME=demobot-v3`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317`.
+`SPLUNK_REALM`, `O11Y_INGEST` (ingest), `O11Y_API` (API), `GALILEO_API_KEY`, `GALILEO_PROJECT`, `GALILEO_LOG_STREAM`, `GALILEO_CONSOLE_URL`, `AI_DEFENSE_API_KEY`, `AI_DEFENSE_REGION`/`AI_DEFENSE_ENDPOINT` + rule lists, provider keys (`ANTHROPIC_API_KEY`, `NVIDIA_API_KEY`, …), `ACCESS_KEY`, `AI_PROVIDER` + `*_MODEL`, all safety/injection/session flags, `OTEL_SERVICE_NAME=demobot-v3`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317`.
 
 **Per-host (must differ / be templated):**
 `OTEL_RESOURCE_ATTRIBUTES` (`deployment.environment` + host id — how O11y/Galileo split one shared service by box), `SERVER_HOSTNAME`, `DATABASE_URL` (unless a shared DB — see 3.5). `OLLAMA_BASE_URL` stays `localhost` (identical string, host-local runtime).
@@ -81,7 +81,7 @@ clone repo → drop canonical .env + hec_destinations.json → systemctl enable/
 ### 3.6 Secret hygiene
 Two secrets were remediated on the baseline host while writing this design; both belong in
 the canonical set:
-- **`SPLUNK_API_TOKEN`** — was returning **401** (an ingest token had been used where an
+- **`O11Y_API`** — was returning **401** (an ingest token had been used where an
   O11y **API** token is required). Replaced; `verify_observability.sh` now passes 9/9.
   Note a healthy ingest pipeline does **not** imply a valid API token — they are separate.
 - **Splunk Core HEC token** — was not configured at all, so no governance logs reached
@@ -114,11 +114,11 @@ Every server carries the same keys/endpoints (Plane 1) **and** the same HEC dest
 1. Add the Plane-2 **seed loader** (`HEC_DESTINATIONS_JSON` / `hec_destinations.json` → `add_destination` + `reconfigure_hec`) with idempotent upsert. Optionally seed provider creds.
 2. Establish the **canonical secret source** (config-mgmt repo / vault / SSM) and the push mechanism (Ansible/`scp`).
 3. Add the **systemd** provisioning analog to `deploy/launchd/install.sh` (units + `EnvironmentFile` + per-host identity templating).
-4. Fix/rotate **`SPLUNK_API_TOKEN`**; add the **HEC** destination to the canonical seed.
+4. Fix/rotate **`O11Y_API`**; add the **HEC** destination to the canonical seed.
 5. Add a per-host **self-verify** hook (`tests/observability/verify_observability.sh` + HEC stats + AI Defense toggle test) run at the end of provisioning.
 
 ## 6. Per-host verification (definition of done for each server)
-- `verify_observability.sh` → Tier 1–3 pass (needs a valid `SPLUNK_API_TOKEN`).
+- `verify_observability.sh` → Tier 1–3 pass (needs a valid `O11Y_API`).
 - `GET /api/hec/stats` → `events_sent>0`, `failed=0`; the Splunk Core search finds the events.
 - Galileo shows the host's turns (project `DemoBot`).
 - One chat turn with `ai_defense_review=true` → AI Defense `200` + governance flags.

@@ -13,8 +13,8 @@ populate it unattended at startup** so no human is in the loop on a server boot.
 
 | # | Secret | Backend | Lands in | Consumed by |
 |---|---|---|---|---|
-| 1 | `SPLUNK_ACCESS_TOKEN` | Splunk **Observability Cloud** | `.env` | OTel **collector** (ingest traces/metrics) |
-| 2 | `SPLUNK_API_TOKEN` | Splunk **Observability Cloud** | `.env` | verify scripts + detector tooling (**read API only**) |
+| 1 | `O11Y_INGEST` | Splunk **Observability Cloud** | `.env` | OTel **collector** (ingest traces/metrics) |
+| 2 | `O11Y_API` | Splunk **Observability Cloud** | `.env` | verify scripts + detector tooling (**read API only**) |
 | 3 | **HEC token** | **Splunk Core** (Enterprise/Cloud) | **SQLite** `app_settings.hec_destinations[].token` | `backend/hec/` forwarder |
 | 4 | `GALILEO_API_KEY` | Galileo | `.env` | SDK (`backend/galileo_integration.py`) + collector exporter |
 | 5 | `AI_DEFENSE_API_KEY` | Cisco AI Defense | `.env` | `backend/services/ai_defense.py` |
@@ -84,6 +84,18 @@ aws ssm put-parameter --name /demobot/SPLUNK_ACCESS_TOKEN --type SecureString --
 Repeat for `/demobot/SPLUNK_API_TOKEN`, `/demobot/GALILEO_API_KEY`,
 `/demobot/AI_DEFENSE_API_KEY`, `/demobot/ACCESS_KEY`, `/demobot/HEC_TOKEN`.
 
+> **Parameter names still use the old env-var spelling.** The two O11y tokens were
+> renamed in `.env` (`SPLUNK_ACCESS_TOKEN` -> `O11Y_INGEST`, `SPLUNK_API_TOKEN` ->
+> `O11Y_API`) but the SSM parameters were deliberately **not** renamed — they are live
+> AWS resources shared by every deployed box, and renaming them is a separate migration.
+> So the two names differ on purpose; `set_env` below takes the env key and the
+> parameter path as separate arguments precisely so they can diverge:
+>
+> ```bash
+> set_env O11Y_INGEST /demobot/SPLUNK_ACCESS_TOKEN
+> set_env O11Y_API    /demobot/SPLUNK_API_TOKEN
+> ```
+
 *No AWS?* Fallback: a root-owned `/etc/demobot/secrets.env` (`chmod 600`) placed by config
 management. Same bootstrap logic, weaker rotation story.
 
@@ -95,9 +107,9 @@ management. Same bootstrap logic, weaker rotation story.
 A single realm (`us1`) but two distinct tokens. Using the wrong one is the classic failure:
 an **ingest** token can send data but returns **401** on the read API.
 
-- **`SPLUNK_ACCESS_TOKEN` (ingest):** O11y → **Settings → Access Tokens** → use/create a
+- **`O11Y_INGEST` (ingest):** O11y → **Settings → Access Tokens** → use/create a
   token with **INGEST** authorization. Feeds the collector.
-- **`SPLUNK_API_TOKEN` (API):** O11y → **avatar (top-right) → API Access Token** (a User
+- **`O11Y_API` (API):** O11y → **avatar (top-right) → API Access Token** (a User
   API Access Token), *or* Settings → Access Tokens with **API** scope. Feeds
   `verify_observability.sh` Tier 3 + `scripts/observability/create_apm_detectors.py`.
 - Both must belong to the **same org as `SPLUNK_REALM`**, else 401.
@@ -198,8 +210,8 @@ with `After=demobot-app.service`, or the app-side seed loader proposed in
 
 | Secret | Check | Pass |
 |---|---|---|
-| `SPLUNK_ACCESS_TOKEN` | `curl -s localhost:8888/metrics \| grep send_failed` | no/zero failures |
-| `SPLUNK_API_TOKEN` | `./tests/observability/verify_observability.sh` | Tier 3 passes (not 401) |
+| `O11Y_INGEST` | `curl -s localhost:8888/metrics \| grep send_failed` | no/zero failures |
+| `O11Y_API` | `./tests/observability/verify_observability.sh` | Tier 3 passes (not 401) |
 | HEC token | `POST /api/hec/destinations/{id}/test` | `{"ok":true,"status_code":200}` |
 | Galileo | app log after a turn | `galileo: logged turn (...)` |
 | AI Defense | chat turn with `ai_defense_review:true` | `POST .../inspect/chat` → **200** |
@@ -216,7 +228,7 @@ Full sweep: `./tests/observability/verify_observability.sh` then `GET /api/hec/s
   still matched, so it looked correct. **Always assert length**: HEC tokens are 36-char
   UUIDs. Re-read from the authoritative source rather than re-pasting.
 - **401 on O11y Tier 3 while telemetry flows fine.** Ingest vs API token confusion — data
-  kept arriving via `SPLUNK_ACCESS_TOKEN` while `SPLUNK_API_TOKEN` was wrong/expired. The
+  kept arriving via `O11Y_INGEST` while `O11Y_API` was wrong/expired. The
   two are unrelated; a healthy pipeline does **not** imply a valid API token.
 - **Never append a duplicate `.env` line.** Both `backend/config.py` (first wins) and the
   shell scripts (`grep '^KEY=' .env | cut -d= -f2`) break on duplicates — the shell path

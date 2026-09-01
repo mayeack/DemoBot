@@ -146,7 +146,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://medadviceN.yeackbot.com/app
 curl -su "x:$KEY" -o /dev/null -w '%{http_code}\n' https://medadviceN.yeackbot.com/app
 
 # telemetry lands under this box's own environment
-python3 tests/observability/check_o11y_metadata.py us1 "$SPLUNK_API_TOKEN" demobot-v3 demobot-ec2-N
+python3 tests/observability/check_o11y_metadata.py us1 "$O11Y_API" demobot-v3 demobot-ec2-N
 ```
 
 **Measured on a real g5.xlarge, 2026-07-28** (not estimated — this is what a

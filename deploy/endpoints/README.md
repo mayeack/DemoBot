@@ -33,7 +33,7 @@ The design rationale for fanning all four out at once lives in
 | Collector launcher | [`run-collector.sh`](../../run-collector.sh) |
 | Regression test | `verify-observability` skill |
 
-Configured by `.env` `SPLUNK_REALM` / `SPLUNK_ACCESS_TOKEN` + `OTEL_*`. This is
+Configured by `.env` `SPLUNK_REALM` / `O11Y_INGEST` + `OTEL_*`. This is
 the passive path — every turn produces spans and metrics with no opt-in.
 
 ### 2. Splunk platform HEC — governance / audit logs

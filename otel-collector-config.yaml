@@ -5,7 +5,7 @@
 #              gen_ai.evaluation.score, token-usage histograms) are ingested.
 #   traces  -> Splunk APM via the OTLP/HTTP trace ingest endpoint.
 # Realm + token come from the container environment (SPLUNK_REALM /
-# SPLUNK_ACCESS_TOKEN), injected by run-collector.sh from .env.
+# O11Y_INGEST), injected by run-collector.sh from .env.
 receivers:
   otlp:
     protocols:
@@ -53,7 +53,7 @@ processors:
 
 exporters:
   signalfx:
-    access_token: "${env:SPLUNK_ACCESS_TOKEN}"
+    access_token: "${env:O11Y_INGEST}"
     realm: "${env:SPLUNK_REALM}"
     send_otlp_histograms: true
   # Classic-mode fan-out for the gen_ai histograms ONLY (see filter above).
@@ -66,12 +66,12 @@ exporters:
   # under the bare names the moment the limiter is lifted. Remove this exporter
   # + its pipeline once native creation works again.
   signalfx/classic:
-    access_token: "${env:SPLUNK_ACCESS_TOKEN}"
+    access_token: "${env:O11Y_INGEST}"
     realm: "${env:SPLUNK_REALM}"
   otlphttp/traces:
     traces_endpoint: "https://ingest.${env:SPLUNK_REALM}.signalfx.com/v2/trace/otlp"
     headers:
-      X-SF-Token: "${env:SPLUNK_ACCESS_TOKEN}"
+      X-SF-Token: "${env:O11Y_INGEST}"
   # The Galileo (LLM observability) fan-out lives in otel-collector-galileo.yaml
   # and is layered on by run-collector.sh with a second --config flag, ONLY when
   # GALILEO_API_KEY is set. Keeping it out of this file is what makes it a real
