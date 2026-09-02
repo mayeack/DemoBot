@@ -93,6 +93,8 @@ def handle_agent_error(state: Dict[str, Any], exc: Exception) -> Dict[str, Any]:
     ``RecommendationEngine.process_message`` exception handler so an agent failure
     anywhere in the multi-agent stage ends the turn identically.
     """
+    from backend.agents.state import governance_identity_overrides
+
     governance_logger.log_error(
         session_id=state["session_id"],
         request_id=state["request_id"],
@@ -100,6 +102,9 @@ def handle_agent_error(state: Dict[str, Any], exc: Exception) -> Dict[str, Any]:
         error_message=str(exc),
         stack_trace=None,
         enduser_id=state.get("enduser_id"),
+        # Attribute the failure to the workflow/blueprint (and any per-turn
+        # service identity) like every other event of the turn.
+        **governance_identity_overrides(state),
     )
     return {
         "terminal": True,

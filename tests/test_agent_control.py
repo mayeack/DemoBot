@@ -674,17 +674,24 @@ check(
     is True,
 )
 
-graph_src = (ROOT / "backend/agents/graph.py").read_text()
-check("node registered on the theme subgraph", 'g.add_node("agent_control", agent_control_node)' in graph_src)
-check("compliance routes into agent_control", 'g.add_edge("compliance", "agent_control")' in graph_src)
-# NeMo Guardrails' output rails sit between Agent Control and AI Defense, so the
-# chain is agent_control -> nemo_output_rails -> response_defense: Cisco is still
-# the last word on output.
-check(
-    "agent_control routes into nemo_output_rails, which routes into response_defense (AI Defense stays the last word)",
-    '"agent_control", _terminal_router, {"end": END, "next": "nemo_output_rails"}' in graph_src
-    and '"nemo_output_rails", _terminal_router, {"end": END, "next": "response_defense"}' in graph_src,
-)
+# The guardrail chain is wired once for every blueprint (backend/agents/blueprints/
+# guardrails.py), so assert the COMPILED graph rather than source strings.
+from backend.agents.blueprints import list_blueprints  # noqa: E402
+from backend.agents.graph import build_theme_subgraph  # noqa: E402
+from backend.agents.themes import THEMES  # noqa: E402
+
+for _bp in list_blueprints():
+    _edges = {(e.source, e.target) for e in build_theme_subgraph(THEMES["medadvice"], _bp).get_graph().edges}
+    _nodes = set(build_theme_subgraph(THEMES["medadvice"], _bp).get_graph().nodes)
+    check(f"[{_bp.key}] node registered on the theme subgraph", "agent_control" in _nodes)
+    check(f"[{_bp.key}] compliance routes into agent_control", ("compliance", "agent_control") in _edges)
+    # NeMo Guardrails' output rails sit between Agent Control and AI Defense, so
+    # the chain is agent_control -> nemo_output_rails -> response_defense: Cisco
+    # is still the last word on output.
+    check(
+        f"[{_bp.key}] agent_control -> nemo_output_rails -> response_defense (AI Defense stays the last word)",
+        ("agent_control", "nemo_output_rails") in _edges and ("nemo_output_rails", "response_defense") in _edges,
+    )
 
 chat_src = (ROOT / "backend/routers/chat.py").read_text()
 check("router forwards the flag", "agent_control_review=chat_request.agent_control_review" in chat_src)

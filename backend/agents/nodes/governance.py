@@ -78,7 +78,14 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
     if nemo_rails:
         guardrail_ids.append("nemo_guardrails")
 
-    workflow_name = settings.agentic_workflow_name
+    # The blueprint that served the turn names the workflow (each architecture
+    # is its own workflow in Splunk / Galileo); the setting is the fallback.
+    workflow_name = state.get("workflow_name") or settings.agentic_workflow_name
+    # Per-turn identity overrides; workflow/blueprint are passed explicitly
+    # below (with the fallback), so drop them from the splat.
+    identity = governance_identity_overrides(state)
+    identity.pop("workflow_name", None)
+    identity.pop("blueprint", None)
     duration = time.time() - state["start_time"]
 
     with otel.agent_span("governance_agent", theme=state.get("theme")):
@@ -124,6 +131,8 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
             theme=state.get("theme"),
             agent_name=state.get("agent_name"),
             workflow_name=workflow_name,
+            # Additive: which blueprint served the turn (None-stripped when unset).
+            blueprint=state.get("blueprint"),
             # Per-agent transcript (coordinator + specialists + synthesizer) so the
             # Galileo SDK path can rebuild the multi-agent trace; see
             # backend/galileo_integration.py and log_schemas.create_governance_log.
@@ -131,7 +140,7 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
             trace_id=trace_id,
             client_address=client_address,
             enduser_id=enduser_id,
-            **governance_identity_overrides(state),
+            **identity,
         )
 
         if should_escalate:

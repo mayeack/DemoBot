@@ -519,6 +519,31 @@ def main() -> int:
         check("GET /api/settings/ai-provider exposes the local-NIM status block",
               "nvidia" in c.get("/api/settings/ai-provider", headers=AUTH).json())
 
+        # ---- blueprint (agentic architecture) selection — persists: snapshot/restore ----
+        rbp = c.get("/api/settings/blueprint", headers=AUTH)
+        _saved_bp = rbp.json().get("active") if rbp.status_code == 200 else None
+        try:
+            choices = {b["key"]: b for b in rbp.json().get("choices", [])} if rbp.status_code == 200 else {}
+            check("GET /api/settings/blueprint -> 200 + active + choices with labels/stage_labels",
+                  rbp.status_code == 200 and _saved_bp in choices
+                  and all({"key", "label", "description", "workflow_name", "stage_labels", "core_nodes"} <= set(b) for b in choices.values()),
+                  rbp.text[:200])
+            check("the shipped architecture is a blueprint choice", "demobot_multi_agent" in choices)
+            check("PUT /api/settings/blueprint unknown -> 422",
+                  c.put("/api/settings/blueprint", headers=AUTH, json={"key": "not-a-blueprint"}).status_code == 422)
+            rput = c.put("/api/settings/blueprint", headers=AUTH, json={"key": "demobot_multi_agent"})
+            check("PUT /api/settings/blueprint valid -> 200 + active echoed",
+                  rput.status_code == 200 and rput.json().get("active") == "demobot_multi_agent")
+            # A per-request override is accepted by the chat endpoint (unknown keys fall back).
+            _bp_sid = c.post("/api/chat/session/new", headers=AUTH).json()["session_id"]
+            rturn = c.post("/api/chat/message", headers=AUTH,
+                           json={"session_id": _bp_sid, "message": "parity check", "disclaimer_accepted": True,
+                                 "blueprint": "demobot_multi_agent"})
+            check("POST /api/chat/message accepts a per-request blueprint", rturn.status_code == 200, rturn.text[:160])
+        finally:
+            if _saved_bp:
+                c.put("/api/settings/blueprint", headers=AUTH, json={"key": _saved_bp})
+
         # Restore the operator's values (mirrors the ai_defense discovery restore
         # further down). Best-effort: a failure here must not mask a real result.
         try:

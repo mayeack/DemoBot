@@ -47,6 +47,10 @@ class DemoBotState(TypedDict, total=False):
     request_id: str
     trace_id: str
     start_time: float
+    # Which agentic architecture serves this turn (backend/agents/blueprints):
+    # its key, and the workflow_name governance + the OTel workflow span carry.
+    blueprint: str
+    workflow_name: str
     # Wall-clock per non-LLM stage (e.g. AI Defense inspections), reported in
     # the governance event's performance_data for latency triage. Keys are
     # ``{stage}_ms``. Per-agent LLM timing lives in agent_trace.duration_ms.
@@ -194,7 +198,10 @@ def governance_identity_overrides(state: Dict[str, Any]) -> Dict[str, str]:
     splat this dict so unset overrides contribute no key at all.
     """
     overrides: Dict[str, str] = {}
-    for key in ("service_name", "deployment_id"):
+    # workflow_name / blueprint: which architecture served the turn. Carried by
+    # EVERY governance event of the turn — blocked ones included — so a block is
+    # attributable to the blueprint it happened under (parity contract).
+    for key in ("service_name", "deployment_id", "workflow_name", "blueprint"):
         value = state.get(key)
         if value:
             overrides[key] = value

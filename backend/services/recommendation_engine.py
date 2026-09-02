@@ -1946,6 +1946,7 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         enduser_id: Optional[str],
         llm_model: Optional[str] = None,
         usage_data: Optional[Dict[str, Any]] = None,
+        governance_overrides: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Withhold a model response that a Galileo Agent Control denied (or
         that errored under a fail-closed policy), logging the verdict to the
@@ -2023,6 +2024,9 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
             trace_id=trace_id,
             client_address=client_address,
             enduser_id=enduser_id,
+            # Per-turn identity (service/deployment, workflow/blueprint) so the
+            # block is attributed like every other event of the turn.
+            **(governance_overrides or {}),
         )
 
         return {
@@ -2063,6 +2067,8 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         internal_policy_review: Optional[bool] = None,
         multi_agent_mode: Optional[bool] = None,  # accepted for kwargs parity; the legacy engine is inherently single-agent
         agent_control_review: Optional[bool] = None,
+        nemo_guardrails_review: Optional[bool] = None,  # kwargs parity; NeMo rails are graph nodes (no legacy seat)
+        blueprint: Optional[str] = None,  # kwargs parity; the legacy engine predates blueprints
         enduser_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """

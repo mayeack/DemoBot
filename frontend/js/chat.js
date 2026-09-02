@@ -707,9 +707,58 @@ async function onEmissionChange() {
     } catch (e) { /* ignore */ }
 }
 
+// ---- Blueprint (agentic architecture) — the server default lives in
+// settings_store; GET /api/settings/blueprint lists every choice with its
+// stage labels and what Multi-Agent Mode means for it. ----
+let _blueprintState = { active: '', choices: [] };
+
+function activeBlueprint() {
+    return _blueprintState.choices.find(b => b.key === _blueprintState.active) || null;
+}
+
+// Merge the active core's stage labels into STAGE_LABELS and restate the
+// Multi-Agent card for this core (every guardrail runs in both regardless).
+function applyBlueprintLabels() {
+    const bp = activeBlueprint();
+    if (!bp) return;
+    Object.assign(STAGE_LABELS, bp.stage_labels || {});
+    const desc = document.getElementById('multiAgentDesc');
+    if (desc && bp.multi_agent_note) desc.textContent = `${bp.multi_agent_note} (all guardrails still run)`;
+}
+
+async function refreshActiveBlueprint() {
+    try {
+        const res = await fetch('/api/settings/blueprint');
+        if (!res.ok) return;
+        const data = await res.json();   // {active, choices:[{key,label,description,workflow_name,stage_labels,core_nodes,multi_agent_note}]}
+        _blueprintState = { active: data.active || '', choices: data.choices || [] };
+        const sel = document.getElementById('blueprintSelect');
+        if (sel && !_selOpen('blueprintSelect')) {
+            sel.innerHTML = _blueprintState.choices
+                .map(b => `<option value="${b.key}" title="${b.description}">${b.label}</option>`).join('');
+            sel.value = _blueprintState.active;
+            const bp = activeBlueprint();
+            if (bp) sel.title = bp.description;
+        }
+        applyBlueprintLabels();
+    } catch (e) { /* best-effort: never break the chat */ }
+}
+
+async function onBlueprintChange() {
+    const key = document.getElementById('blueprintSelect').value;
+    try {
+        await fetch('/api/settings/blueprint', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key }),
+        });
+    } catch (e) { /* ignore */ }
+    refreshActiveBlueprint();
+}
+
 function refreshIndicators() {
     // Capabilities first: the provider/model gating in refreshActiveProvider reads them.
     refreshServerInfo().then(refreshActiveProvider);
+    refreshActiveBlueprint();
     refreshStaticEmission();
 }
 

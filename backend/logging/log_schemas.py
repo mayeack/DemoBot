@@ -27,6 +27,8 @@ def create_governance_log(
         "response_id": kwargs.get("response_id"),
         "conversation_id": conversation_id,
         "deployment_id": kwargs.get("deployment_id", "demobot-v3-prod"),
+        # Additive: which agentic blueprint served the turn (None-stripped when unset).
+        "blueprint": kwargs.get("blueprint"),
         "request_id": request_id or str(uuid.uuid4()),
         "session_id": session_id,
         "trace_id": trace_id or str(uuid.uuid4()),

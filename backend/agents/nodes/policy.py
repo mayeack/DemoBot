@@ -12,6 +12,7 @@ import time
 from typing import Any, Dict
 
 from backend.agents.nodes.shared import clarifying_service, escalation_rules
+from backend.agents.state import governance_identity_overrides
 from backend.logging.governance_logger import active_response_model, governance_logger
 from backend.models.schemas import MessageType, SeverityLevel
 from backend.services.escalation_rules import EscalationRules
@@ -73,6 +74,7 @@ def policy_block_node(state: Dict[str, Any]) -> Dict[str, Any]:
             trace_id=trace_id,
             client_address=client_address,
             enduser_id=enduser_id,
+            **governance_identity_overrides(state),
         )
 
         governance_logger.log_escalation(

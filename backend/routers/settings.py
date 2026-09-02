@@ -186,6 +186,28 @@ async def update_provider_creds(body: ProviderCredsSettings):
 
 
 # ---------------------------------------------------------------------------
+# Active blueprint (which agentic architecture serves chat turns)
+# ---------------------------------------------------------------------------
+class BlueprintSettings(BaseModel):
+    key: str = Field(min_length=1, max_length=60)
+
+
+@router.get("/settings/blueprint")
+async def get_blueprint_setting():
+    """The server-default blueprint + every choice (key, label, description,
+    workflow_name, stage labels) for the chat header dropdown."""
+    return settings_store.get_blueprint_setting()
+
+
+@router.put("/settings/blueprint")
+async def update_blueprint_setting(body: BlueprintSettings):
+    try:
+        return settings_store.set_blueprint(body.key)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
 # Integration credentials (Cisco AI Defense / Splunk Observability Cloud)
 # ---------------------------------------------------------------------------
 class IntegrationCredsSettings(BaseModel):

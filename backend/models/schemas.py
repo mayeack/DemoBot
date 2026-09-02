@@ -42,6 +42,7 @@ class ChatRequest(BaseModel):
     multi_agent_mode: Optional[bool] = None  # True = coordinator/specialists/synthesizer pipeline; None/False (default) = the domain agent answers directly
     agent_control_review: Optional[bool] = None  # Submit the response to Galileo Agent Control for evaluation against the console's Controls
     nemo_guardrails_review: Optional[bool] = None  # Run NVIDIA NeMo Guardrails input rails on the prompt and output rails on the answer
+    blueprint: Optional[str] = None  # Agentic architecture for this turn (demobot_multi_agent | nvidia_virtual_assistant); None = the server default
 
 class ChatResponse(BaseModel):
     session_id: str

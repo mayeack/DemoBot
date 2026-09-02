@@ -172,6 +172,7 @@ def workflow_span(
     session_id: Optional[str] = None,
     request_id: Optional[str] = None,
     trace_id: Optional[str] = None,
+    blueprint: Optional[str] = None,
 ):
     """Root GenAI Workflow span for the whole graph invocation."""
     return _span(
@@ -181,6 +182,8 @@ def workflow_span(
             "gen_ai.workflow.name": workflow_name,
             "workflow_name": workflow_name,
             "demobot.theme": theme,
+            # Which agentic architecture served the turn (additive attribute).
+            "demobot.blueprint": blueprint,
             "session.id": session_id,
             "demobot.request_id": request_id,
             "demobot.trace_id": trace_id,

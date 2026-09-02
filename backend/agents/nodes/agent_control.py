@@ -19,6 +19,7 @@ import time
 from typing import Any, Dict
 
 from backend.agents.nodes.shared import content_engine
+from backend.agents.state import governance_identity_overrides
 from backend.services.agent_control import agent_control_client
 from backend.telemetry import otel
 
@@ -69,6 +70,7 @@ def agent_control_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 "usage_output_tokens": output_tokens,
                 "usage_total_tokens": input_tokens + output_tokens,
             },
+            governance_overrides=governance_identity_overrides(state),
         )
 
     return {

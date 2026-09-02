@@ -142,6 +142,8 @@ async def startup_event():
         settings_store.apply_integration_creds_from_store()
         # The NemoClaw Guardrails drawer toggle is server-side state: restore it.
         settings_store.apply_nemoclaw_guardrails_from_store()
+        # Same for the Blueprint dropdown (which agentic architecture is default).
+        settings_store.apply_blueprint_from_store()
         # Discover which models each provider currently offers (background thread so
         # startup isn't blocked) — populates the Settings "Model" dropdown.
         from backend import model_catalog

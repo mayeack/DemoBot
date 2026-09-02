@@ -46,6 +46,9 @@ _DEFAULTS: Dict[str, Any] = {
     # The "NemoClaw Guardrails" drawer toggle (server-side: tool calls are not
     # chat requests). Persisted so the demo posture survives a restart.
     "nemoclaw_guardrails": {"enabled": False},
+    # Runtime override of the default agentic architecture (the chat header's
+    # "Blueprint" dropdown). Empty = the ACTIVE_BLUEPRINT config default.
+    "blueprint": {"key": ""},
 }
 _ID_RE = re.compile(r"[^a-z0-9-]+")
 
@@ -314,6 +317,46 @@ def set_ai_defense_enabled_rules_supported(supported: bool) -> bool:
     data["ai_defense_enabled_rules_supported"] = bool(supported)
     _persist(data)
     return bool(supported)
+
+
+# ---------------------------------------------------------------------------
+# Active blueprint (which agentic architecture serves chat turns by default)
+# ---------------------------------------------------------------------------
+def get_blueprint_setting() -> Dict[str, Any]:
+    from backend.agents.blueprints import get_blueprint, list_blueprints
+    from backend.config import settings
+
+    active = get_blueprint(settings.active_blueprint)
+    return {
+        "active": active.key,
+        "choices": [bp.to_public() for bp in list_blueprints()],
+    }
+
+
+def set_blueprint(key: str) -> Dict[str, Any]:
+    from backend.agents.blueprints import BLUEPRINTS
+    from backend.config import settings
+
+    key = (key or "").strip()
+    if key not in BLUEPRINTS:
+        raise ValueError(f"unknown blueprint: {key}. Valid: {', '.join(BLUEPRINTS)}")
+    data = load()
+    data["blueprint"] = {"key": key}
+    _persist(data)
+    settings.active_blueprint = key   # compiled workflows are cached per key: no rebuild needed
+    return get_blueprint_setting()
+
+
+def apply_blueprint_from_store() -> None:
+    """Startup hook: the persisted dropdown choice wins over the .env default."""
+    from backend.agents.blueprints import BLUEPRINTS
+    from backend.config import settings
+
+    key = ((load().get("blueprint") or {}).get("key") or "").strip()
+    if key in BLUEPRINTS:
+        settings.active_blueprint = key
+    elif key:
+        logger.warning("ignoring stored blueprint %r (unknown); keeping %s", key, settings.active_blueprint)
 
 
 # ---------------------------------------------------------------------------
