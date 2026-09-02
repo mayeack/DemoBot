@@ -229,6 +229,15 @@ def _field_current(field: "_CredField") -> str:
 
     if field.settings_attr:
         cur = getattr(settings, field.settings_attr, "")
+    elif field.env_file and field.env:
+        # .env, NOT os.environ: an env_file field's value is owned by .env, and a
+        # library may have rewritten the process copy. The Splunk OTel distro does
+        # exactly that — under opentelemetry-instrument it appends its own
+        # telemetry.distro.* attributes to OTEL_RESOURCE_ATTRIBUTES at bootstrap. If
+        # the field prefilled from os.environ, a save the operator never edited would
+        # write the distro's internal attributes into .env and pin a distro version
+        # that the distro is supposed to report itself.
+        cur = _read_env_file_value(field.env)
     elif field.env:
         cur = os.environ.get(field.env, "")
     else:
@@ -490,6 +499,29 @@ def _env_path() -> Path:
     from backend.config import BASE_DIR
 
     return Path(BASE_DIR) / ".env"
+
+
+def _read_env_file_value(key: str) -> str:
+    """Value of ``key`` as .env currently holds it, or "" if absent.
+
+    Takes the FIRST match and applies the same quote/trailing-comment handling as
+    backend/config.py's loader, so what the Settings page shows is what the app and
+    the shell launchers will read back."""
+    from backend.config import _strip_env_value
+
+    path = _env_path()
+    if not path.exists():
+        return ""
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if line.startswith("export "):
+            line = line[len("export "):]
+        if line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        if k.strip() == key:
+            return _strip_env_value(v)
+    return ""
 
 
 def _write_env_key(key: str, value: str) -> None:

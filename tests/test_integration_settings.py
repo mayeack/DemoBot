@@ -289,6 +289,44 @@ def test_resource_attributes_rejects_malformed_values() -> None:
               _value(env, "OTEL_RESOURCE_ATTRIBUTES").startswith("deployment.environment=a,"))
 
 
+def test_env_file_fields_prefill_from_env_not_the_process() -> None:
+    """An env_file field is owned by .env, and a library may rewrite the process
+    copy. The Splunk OTel distro appends its own telemetry.distro.* attributes to
+    OTEL_RESOURCE_ATTRIBUTES at bootstrap, so prefilling from os.environ would show
+    a value .env does not have — and a save the operator never edited would write
+    the distro's internals into .env."""
+    key = "OTEL_RESOURCE_ATTRIBUTES"
+    orig = os.environ.get(key)
+    os.environ[key] = ("deployment.environment=demobot-local,"
+                       "telemetry.distro.name=splunk-opentelemetry,"
+                       "telemetry.distro.version=2.8.0")
+    try:
+        with _TempEnv(f"{key}=deployment.environment=demobot-local\n"):
+            f = [x for x in settings_store.get_integration_fields()["splunk_o11y"]
+                 if x["key"] == "resource_attributes"][0]
+            check("prefills from .env, not the mutated process environment",
+                  f["value"] == "deployment.environment=demobot-local")
+            check("the distro's own attributes are not offered back for saving",
+                  "telemetry.distro" not in f["value"])
+    finally:
+        if orig is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = orig
+
+    with _TempEnv('SPLUNK_REALM="eu0"  \nO11Y_API=tok # the read-only one\n'):
+        vals = {x["key"]: x.get("value") for x
+                in settings_store.get_integration_fields()["splunk_o11y"]}
+        check("a quoted .env value is unquoted for display", vals["realm"] == "eu0")
+        check("a secret still reports presence only, never its value",
+              "api_token" in vals and vals["api_token"] is None)
+
+    with _TempEnv(""):
+        vals = {x["key"]: x.get("value") for x
+                in settings_store.get_integration_fields()["splunk_o11y"]}
+        check("a key absent from .env prefills blank", vals["resource_attributes"] == "")
+
+
 def test_a_rejected_field_does_not_half_write_the_card() -> None:
     """One card saves every field in one PUT and .env is written key by key, so
     validation has to run over the whole payload BEFORE anything is applied."""
@@ -325,6 +363,7 @@ def main() -> int:
         test_collector_keys_go_to_env_not_the_blob,
         test_resource_attributes_round_trip,
         test_resource_attributes_rejects_malformed_values,
+        test_env_file_fields_prefill_from_env_not_the_process,
         test_a_rejected_field_does_not_half_write_the_card,
         test_live_fields_report_no_restart,
         test_unknown_integration_and_empty_payload,
