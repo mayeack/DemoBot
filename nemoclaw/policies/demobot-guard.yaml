@@ -1,0 +1,19 @@
+# NemoClaw network-policy preset: let the sandboxed OpenClaw reach DemoBot's
+# governance seat. Applied by run-nemoclaw.sh with
+#   nemoclaw <sandbox> policy add --from-file nemoclaw/policies/demobot-guard.yaml \
+#       --trusted-private-host <DEMOBOT_HOST>
+# NemoClaw's docs say not to rely on host.docker.internal (it bypasses the
+# OpenShell policy path), so the host is a real host IP (127.0.0.1 when DemoBot
+# runs on the same box, the LAN IP otherwise) — run-nemoclaw.sh substitutes
+# __DEMOBOT_HOST__ before applying. Everything else stays deny-by-default: the
+# agent still cannot exfiltrate anywhere, which is the demo.
+name: demobot-guard
+endpoints:
+  - host: "__DEMOBOT_HOST__"
+    port: 8001
+    protocol: tcp
+    methods: [POST, GET]
+    paths: ["/api/toolguard/**", "/health"]
+binaries:
+  - /usr/bin/node
+  - /usr/local/bin/node

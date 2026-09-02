@@ -1,10 +1,13 @@
 {
   "id": "demobot-toolguard",
   "name": "DemoBot Tool Guard",
-  "description": "Governed before_tool_call: DemoBot tool policy + Cisco AI Defense inspect every agent tool call before execution",
-  "version": "1.0.0",
+  "description": "Governed before_tool_call: DemoBot tool policy + NemoClaw policy layer + Cisco AI Defense inspect every agent tool call before execution; after_tool_call reports sandbox policy denials",
+  "version": "1.1.0",
   "activation": {
     "onStartup": true
+  },
+  "contracts": {
+    "tools": []
   },
   "configSchema": {
     "type": "object",
@@ -12,7 +15,7 @@
     "properties": {
       "guardUrl": {
         "type": "string",
-        "description": "Base URL of the DemoBot app as seen from the gateway container, e.g. http://host.containers.internal:8001"
+        "description": "Base URL of the DemoBot app as seen from the gateway/sandbox, e.g. http://host.containers.internal:8001 (podman) or http://<host ip>:8001 (NemoClaw)"
       },
       "accessKey": {
         "type": "string",
@@ -27,6 +30,11 @@
         "type": "number",
         "description": "HTTP timeout for the guard call in milliseconds (keep under the hook timeoutMs of 10000)",
         "default": 8000
+      },
+      "agentSurface": {
+        "type": "string",
+        "description": "Attribution label for governance events: openclaw (default) or nemoclaw when running inside the NemoClaw/OpenShell sandbox",
+        "default": "openclaw"
       }
     },
     "required": ["guardUrl"]

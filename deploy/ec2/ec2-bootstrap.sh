@@ -51,6 +51,13 @@ NUM_PARALLEL=""
 SETS=()
 REPO_URL="https://github.com/mayeack/DemoBot.git"
 REPO="$HOME/DemoBot"
+# --with-nim [model]: run a LOCAL NVIDIA NIM (docker, :8000) and point
+# provider=nvidia at it. Default model fits one A10G; nemotron-3-super-120b-a12b
+# needs 8x H100 (p5-class). --with-nemoclaw: run the NVIDIA NemoClaw runtime
+# (OpenClaw in an OpenShell sandbox) with DemoBot's governance seat baked in.
+WITH_NIM=false
+NIM_MODEL="nvidia/nvidia-nemotron-nano-9b-v2"
+WITH_NEMOCLAW=false
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -60,6 +67,9 @@ while [ $# -gt 0 ]; do
     --gpu)       GPU_MODE="$2"; shift 2 ;;
     --num-parallel) NUM_PARALLEL="$2"; shift 2 ;;
     --set)       SETS+=("$2");  shift 2 ;;
+    --with-nim)  WITH_NIM=true
+                 if [ $# -gt 1 ] && [ "${2#-}" = "$2" ]; then NIM_MODEL="$2"; shift 2; else shift; fi ;;
+    --with-nemoclaw) WITH_NEMOCLAW=true; shift ;;
     --no-start)  START=false;   shift ;;
     -h|--help)
       sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -397,9 +407,114 @@ if [ "$GPU" = true ]; then
   nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader || true
 fi
 
+# --- 9b. Docker + NVIDIA Container Toolkit (local NIM and/or NemoClaw) ------
+# The Deep Learning base AMI ships both; a plain Ubuntu box gets them here.
+if [ "$WITH_NIM" = true ] || [ "$WITH_NEMOCLAW" = true ]; then
+  log "docker + NVIDIA Container Toolkit"
+  if ! command -v docker >/dev/null; then
+    curl -fsSL https://get.docker.com | sudo sh
+  fi
+  sudo usermod -aG docker "$(id -un)" || true
+  if [ "$GPU" = true ] && ! sudo docker info 2>/dev/null | grep -q nvidia; then
+    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor --yes -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+    curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+      | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+      | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null
+    sudo -E apt-get update -y && sudo -E apt-get install -y nvidia-container-toolkit
+    sudo nvidia-ctk runtime configure --runtime=docker
+    sudo systemctl restart docker
+  fi
+  sudo docker info >/dev/null || die "docker is not running"
+fi
+
+# --- 9c. local NVIDIA NIM (provider=nvidia = inference on THIS host) --------
+if [ "$WITH_NIM" = true ]; then
+  log "local NIM: $NIM_MODEL"
+  [ "$GPU" = true ] || die "--with-nim needs an NVIDIA GPU on this host (a NIM cannot run on CPU)"
+  # nvcr.io image pull needs an NGC key: from the installed .env (NGC_API_KEY=)
+  # or the payload overrides — never from argv.
+  NGC_API_KEY=$(grep -E '^NGC_API_KEY=' "$REPO/.env" "$PAYLOAD/overrides.env" 2>/dev/null | head -1 | cut -d= -f2- || true)
+  [ -n "$NGC_API_KEY" ] || die "--with-nim needs NGC_API_KEY in .env (or the payload overrides) to pull nvcr.io/nim images"
+  NIM_IMAGE="nvcr.io/nim/${NIM_MODEL}:latest"
+  sudo install -m 600 -o root -g root /dev/null /etc/demobot-nim.env
+  printf 'NGC_API_KEY=%s\nNIM_IMAGE=%s\n' "$NGC_API_KEY" "$NIM_IMAGE" | sudo tee /etc/demobot-nim.env >/dev/null
+  sudo mkdir -p /opt/nim-cache && sudo chown "$(id -u):$(id -g)" /opt/nim-cache
+  printf '%s' "$NGC_API_KEY" | sg docker -c "docker login nvcr.io -u '\$oauthtoken' --password-stdin" >/dev/null \
+    || die "docker login nvcr.io failed — is NGC_API_KEY valid?"
+  # provider=nvidia on this replica = this NIM. Prepended so an explicit --set wins.
+  SETS=("AI_PROVIDER=nvidia" "NVIDIA_BASE_URL=http://localhost:8000/v1" "NVIDIA_MODEL=$NIM_MODEL" "${SETS[@]}")
+fi
+
 # --- 10. systemd units ------------------------------------------------------
 log "systemd units"
 SVC_USER=$(id -un)
+
+if [ "$WITH_NIM" = true ]; then
+  sudo tee /etc/systemd/system/demobot-nim.service >/dev/null <<UNIT
+[Unit]
+Description=DemoBot local NVIDIA NIM ($NIM_MODEL) on :8000
+After=network-online.target docker.service
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+User=$SVC_USER
+EnvironmentFile=/etc/demobot-nim.env
+ExecStartPre=-/usr/bin/docker rm -f demobot-nim
+ExecStart=/usr/bin/docker run --rm --name demobot-nim --gpus all --shm-size=16GB \\
+  -e NGC_API_KEY -p 127.0.0.1:8000:8000 -v /opt/nim-cache:/opt/nim/.cache -u $(id -u) \${NIM_IMAGE}
+ExecStop=/usr/bin/docker stop demobot-nim
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+fi
+
+if [ "$WITH_NEMOCLAW" = true ]; then
+  # NemoClaw guarantees nothing restarts after a reboot: this unit re-runs the
+  # (idempotent) launcher, which starts the existing sandbox and re-applies the
+  # guard policy; the forwarder unit tails the sandbox's OCSF denials.
+  sudo install -m 600 -o root -g root /dev/null /etc/demobot-nemoclaw.env
+  grep -E '^(ACCESS_KEY|NVIDIA_INFERENCE_API_KEY)=' "$REPO/.env" 2>/dev/null | sudo tee /etc/demobot-nemoclaw.env >/dev/null || true
+  sudo tee /etc/systemd/system/demobot-nemoclaw.service >/dev/null <<UNIT
+[Unit]
+Description=DemoBot NemoClaw sandbox (OpenClaw in OpenShell, governed by /api/toolguard)
+After=network-online.target docker.service demobot-app.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=$SVC_USER
+WorkingDirectory=$REPO
+EnvironmentFile=/etc/demobot-nemoclaw.env
+Environment=PATH=$HOME/.nemoclaw/bin:$HOME/.local/bin:$REPO/venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash $REPO/run-nemoclaw.sh --host=127.0.0.1 --no-forwarder
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  sudo tee /etc/systemd/system/demobot-nemoclaw-forwarder.service >/dev/null <<UNIT
+[Unit]
+Description=DemoBot NemoClaw OCSF denial forwarder (-> /api/toolguard/nemoclaw/events)
+After=demobot-nemoclaw.service demobot-app.service
+Requires=demobot-nemoclaw.service
+
+[Service]
+User=$SVC_USER
+WorkingDirectory=$REPO
+EnvironmentFile=/etc/demobot-nemoclaw.env
+Environment=PATH=$HOME/.nemoclaw/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=$REPO/venv/bin/python $REPO/scripts/nemoclaw/ocsf_forwarder.py --sandbox demobot-nemoclaw --guard http://127.0.0.1:8001 --state $HOME/.demobot-nemoclaw
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+fi
 
 sudo tee /etc/systemd/system/demobot-collector.service >/dev/null <<UNIT
 [Unit]
@@ -465,6 +580,29 @@ sudo systemctl enable --now demobot-collector demobot-app demobot-tunnel
 # Collector must own :4317 before the app's first spans; units encode the
 # ordering, this is just the settling time.
 sleep 10
+
+if [ "$WITH_NIM" = true ]; then
+  log "starting the local NIM (first start pulls the image + weights — minutes)"
+  sudo systemctl enable --now demobot-nim
+  for _ in $(seq 1 90); do
+    curl -sf -o /dev/null http://localhost:8000/v1/health/ready && break
+    sleep 10
+  done
+  curl -sf -o /dev/null http://localhost:8000/v1/health/ready \
+    && echo "NIM ready: $(curl -s http://localhost:8000/v1/models | head -c 200)" \
+    || warn "NIM not ready after 15 min — check: sudo journalctl -u demobot-nim -n 50 --no-pager"
+fi
+
+if [ "$WITH_NEMOCLAW" = true ]; then
+  log "onboarding the NemoClaw sandbox (first run installs NemoClaw + builds the image)"
+  # As the service user with the docker group active; needs the app up (the
+  # guard is fail-closed) and NVIDIA_INFERENCE_API_KEY in .env for the
+  # sandbox's own inference provider.
+  sg docker -c "cd '$REPO' && ./run-nemoclaw.sh --host=127.0.0.1 --no-forwarder" \
+    || warn "NemoClaw onboarding failed — see the output above; the policy layer still works without the runtime"
+  sudo systemctl enable demobot-nemoclaw demobot-nemoclaw-forwarder
+  sudo systemctl start demobot-nemoclaw-forwarder || true
+fi
 
 log "verify"
 rc=0
