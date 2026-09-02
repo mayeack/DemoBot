@@ -137,6 +137,46 @@ def test_probes_never_raise_and_cache_refreshes() -> None:
         hc._cache.clear(); hc._cached_at = 0.0
 
 
+def test_current_revalidates_a_stale_snapshot() -> None:
+    """A NIM that comes up AFTER the app (the normal order on a fresh GPU box)
+    must flip nim_local within a TTL, not never: current() kicks one
+    background re-probe when the snapshot is older than _CACHE_TTL."""
+    import threading
+    import time
+
+    orig_now = hc._detect_now
+    calls = {"n": 0}
+    done = threading.Event()
+
+    def _fake_now(_settings):
+        calls["n"] += 1
+        done.set()
+        return _caps(gpu_present=True, runtime="docker", nim_ready=calls["n"] > 1)
+
+    try:
+        hc._detect_now = _fake_now  # type: ignore[assignment]
+        hc._cache.clear(); hc._cached_at = 0.0; hc._refreshing = False
+        hc.detect(force=True)                       # snapshot 1: NIM down
+        check("fresh snapshot: current() does not re-probe", hc.current() and calls["n"] == 1)
+        hc._cached_at = time.monotonic() - hc._CACHE_TTL - 1   # age it past the TTL
+        done.clear()
+        stale = hc.current()
+        check("stale snapshot is returned immediately (stale-while-revalidate)",
+              stale["gated"]["nim_local"]["enabled"] is False)
+        done.wait(5)
+        for _ in range(50):                          # the thread updates the cache right after
+            if hc.current()["gated"]["nim_local"]["enabled"]:
+                break
+            time.sleep(0.05)
+        check("one background re-probe ran and the cache now says NIM ready",
+              calls["n"] == 2 and hc.current()["gated"]["nim_local"]["enabled"] is True)
+        hc.current(); hc.current()
+        check("a fresh snapshot does not re-probe again", calls["n"] == 2 and hc._refreshing is False)
+    finally:
+        hc._detect_now = orig_now
+        hc._cache.clear(); hc._cached_at = 0.0; hc._refreshing = False
+
+
 def main() -> int:
     for fn in (
         test_gpu_less_mac_greys_nvidia_and_nemoclaw_on_podman,
@@ -144,6 +184,7 @@ def main() -> int:
         test_gpu_but_nim_down_and_remote_url,
         test_nemoclaw_runtime_rules,
         test_probes_never_raise_and_cache_refreshes,
+        test_current_revalidates_a_stale_snapshot,
     ):
         try:
             fn()
