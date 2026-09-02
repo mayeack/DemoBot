@@ -143,14 +143,20 @@ fi
 
 # ---------- plugin config (guard URL + access key), never baked into an image layer ----------
 log "configuring the governance seat inside the sandbox"
-# A (re)started sandbox sits in phase Provisioning for a minute or more and
-# refuses exec meanwhile ("Connection refused"); the config write then silently
-# kept the image's loopback URL. Wait for phase Ready (up to 5 min), then exec.
-for _ in $(seq 1 60); do
-  openshell sandbox list 2>/dev/null | grep -E "^$SANDBOX[[:space:]]" | grep -q "Ready" \
-    && timeout 90 openshell sandbox exec --name "$SANDBOX" -- true >/dev/null 2>&1 && break
+# A (re)started sandbox sits in phase Provisioning for MINUTES (5 min observed
+# on a g5.xlarge, 2026-09-02) and refuses exec meanwhile ("Connection
+# refused"); the config write then silently kept the image's loopback URL and
+# the policy add died with "could not reach the selected gateway". Wait until
+# the gateway answers, the phase is Ready AND an exec succeeds — up to 10 min.
+SANDBOX_READY=false
+for _ in $(seq 1 120); do
+  if openshell sandbox list 2>/dev/null | grep -E "^$SANDBOX[[:space:]]" | grep -q "Ready" \
+     && timeout 90 openshell sandbox exec --name "$SANDBOX" -- true >/dev/null 2>&1; then
+    SANDBOX_READY=true; break
+  fi
   sleep 5
 done
+[ "$SANDBOX_READY" = true ] || die "sandbox $SANDBOX did not become Ready within 10 min — check: openshell sandbox list ; nemoclaw $SANDBOX logs"
 timeout 90 openshell sandbox exec --name "$SANDBOX" -- env \
     DEMOBOT_GUARD_URL="$GUARD" DEMOBOT_ACCESS_KEY="$ACCESS_KEY" \
     node -e '
