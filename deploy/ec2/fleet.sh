@@ -114,7 +114,10 @@ claimed_replicas() {
       --filters "Name=tag:$TAG_KEY,Values=true" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
       --query "Reservations[].Instances[].Tags[?Key=='Replica'].Value" --output text 2>/dev/null | tr '\t' '\n'
     cloudflared tunnel list 2>/dev/null | grep -oE 'demobot-[0-9]+' | grep -oE '[0-9]+$'
-  } | grep -E '^[0-9]+$' | sort -un
+  } | grep -E '^[0-9]+$' | sort -un || true
+  # `|| true`: with nothing claimed yet (first box, or after a full teardown)
+  # grep matches nothing and exits 1, which under pipefail + set -e silently
+  # killed next-replica AND provision with no message. Seen 2026-09-02.
 }
 
 # Lowest unused replica number, counting up from 1.

@@ -150,6 +150,24 @@ def test_push_replica_forwards_flags() -> None:
     check("ARGS+=(--with-nemoclaw)" in text, "--with-nemoclaw is appended to the bootstrap args")
 
 
+def test_fleet_claimed_replicas_tolerates_nothing_claimed() -> None:
+    """First box / after a teardown: no instances and no demobot-N tunnels.
+    `grep` then matches nothing and exits 1; under `set -euo pipefail` that
+    used to abort next-replica AND provision silently (seen 2026-09-02)."""
+    print("== fleet: claimed_replicas with nothing claimed ==")
+    text = FLEET.read_text()
+    start = text.find("claimed_replicas() {")
+    end = text.find("\n}\n", start) + 3
+    fn = text[start:end]
+    script = (
+        "set -euo pipefail\nTAG_KEY=demobot-fleet\nfake_aws() { :; }\nAWS=(fake_aws)\n"
+        "cloudflared() { :; }\n" + fn + "\nout=$(claimed_replicas)\necho \"ok:[$out]\"\n"
+    )
+    r = run(["bash", "-c", script])
+    check(r.returncode == 0 and "ok:[]" in r.stdout,
+          f"claimed_replicas exits 0 with empty output when nothing is claimed (rc={r.returncode} {r.stderr.strip()[:80]})")
+
+
 def test_fleet_forwards_env() -> None:
     print("== fleet: FLEET_NIM / FLEET_NEMOCLAW reach push-replica ==")
     text = FLEET.read_text()
@@ -165,7 +183,8 @@ def test_fleet_forwards_env() -> None:
 if __name__ == "__main__":
     for fn in (test_syntax_and_help, test_bootstrap_ordering, test_bootstrap_vram_handling,
                test_bootstrap_start_order_and_gate, test_push_replica_refuses_without_keys,
-               test_push_replica_forwards_flags, test_fleet_forwards_env):
+               test_push_replica_forwards_flags, test_fleet_claimed_replicas_tolerates_nothing_claimed,
+               test_fleet_forwards_env):
         fn()
     print()
     if _failures:
