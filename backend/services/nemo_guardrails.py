@@ -152,14 +152,8 @@ class NemoGuardrailsClient:
     def _build_rails(self):
         from nemoguardrails import LLMRails
 
-        from backend.agents.llm import get_chat_model
-
         # The judge: DemoBot's active chat model, deterministic and short.
-        judge = get_chat_model(
-            settings,
-            max_tokens=int(settings.nemo_guardrails_judge_max_tokens or 64),
-            temperature=0.0,
-        )
+        judge = _judge_model(int(settings.nemo_guardrails_judge_max_tokens or 64))
         config = self._build_config()
         try:
             return LLMRails(config, llm=judge)
@@ -211,12 +205,14 @@ class NemoGuardrailsClient:
         reason: Optional[str] = None
 
         if hasattr(rails, "check"):
+            # 0.24's check() wants RailType enum members, not "input"/"output".
+            types = _rail_type_enums(rail_types)
             try:
-                result = rails.check(messages=messages, rail_types=rail_types)
+                result = rails.check(messages=messages, rail_types=types)
             except RuntimeError as exc:
                 if "async" not in str(exc).lower() and "event loop" not in str(exc).lower():
                     raise
-                result = _run_in_fresh_thread(lambda: rails.check(messages=messages, rail_types=rail_types))
+                result = _run_in_fresh_thread(lambda: rails.check(messages=messages, rail_types=types))
             status = getattr(result, "status", None)
             status_name = getattr(status, "name", None) or str(status or "").upper()
             blocked = "BLOCKED" in status_name
@@ -281,6 +277,85 @@ class NemoGuardrailsClient:
     def check_tool_call(self, rendered: str) -> RailVerdict:
         """Input rails over a rendered agent tool call (the NemoClaw seat)."""
         return self._check([{"role": "user", "content": rendered}], ["input"], "tool")
+
+
+# Ollama sampling parameters live under the request's "options" object.
+_OLLAMA_OPTION_KEYS = {
+    "temperature", "top_p", "top_k", "seed", "num_predict", "num_ctx", "repeat_penalty",
+    "repeat_last_n", "mirostat", "mirostat_eta", "mirostat_tau", "tfs_z", "num_gpu", "num_thread",
+}
+_KWARG_TO_OPTION = {"max_tokens": "num_predict", "max_new_tokens": "num_predict", "max_completion_tokens": "num_predict"}
+_OLLAMA_REQUEST_KEYS = {"options", "format", "response_format", "stream", "model", "reasoning",
+                        "logprobs", "top_logprobs", "keep_alive", "tools", "tool_choice", "strict"}
+
+
+def _judge_model(max_tokens: int):
+    """The rails' judge = DemoBot's active chat model, deterministic and short.
+
+    NeMo's LangChain adapter passes ``temperature`` / ``max_tokens`` as
+    per-call kwargs. Cloud chat models absorb those; ``ChatOllama`` spreads
+    unknown kwargs into ``ollama.AsyncClient.chat()``, which rejects them
+    (``unexpected keyword argument 'temperature'``). For Ollama the judge is
+    therefore a subclass that folds sampling kwargs into the request's
+    ``options`` (merged with the model's own defaults, since an explicit
+    ``options`` replaces them) and drops anything Ollama does not accept.
+    """
+    from backend.agents.llm import get_chat_model
+
+    if (settings.ai_provider or "").lower() != "ollama":
+        return get_chat_model(settings, max_tokens=max_tokens, temperature=0.0)
+
+    from langchain_ollama import ChatOllama
+
+    class _JudgeOllama(ChatOllama):
+        def _chat_params(self, messages, stop=None, **kwargs):  # type: ignore[override]
+            options = dict(kwargs.pop("options", None) or {})
+            for key in list(kwargs):
+                opt = _KWARG_TO_OPTION.get(key, key)
+                if opt in _OLLAMA_OPTION_KEYS:
+                    options[opt] = kwargs.pop(key)
+                elif key not in _OLLAMA_REQUEST_KEYS:
+                    kwargs.pop(key)  # not an Ollama request field: drop it
+            if options:
+                base = {k: v for k, v in {
+                    "num_ctx": self.num_ctx, "num_predict": self.num_predict,
+                    "temperature": self.temperature, "top_p": self.top_p, "top_k": self.top_k,
+                    "seed": self.seed, "repeat_penalty": self.repeat_penalty,
+                }.items() if v is not None}
+                base.update(options)
+                kwargs["options"] = base
+            return super()._chat_params(messages, stop, **kwargs)
+
+    # Same construction as backend/agents/llm.py's ollama branch (see its notes
+    # on num_predict / num_ctx / keep_alive), pinned to the judge's params.
+    return _JudgeOllama(
+        model=settings.ollama_model,
+        base_url=settings.ollama_base_url,
+        temperature=0.0,
+        num_predict=max_tokens,
+        num_ctx=settings.ollama_num_ctx,
+        keep_alive=settings.ollama_keep_alive,
+    )
+
+
+def _rail_type_enums(rail_types: List[str]) -> List[Any]:
+    """Map "input"/"output" to nemoguardrails' RailType members (0.24's check()
+    reads ``.value`` on them). Falls back to the strings when the enum is not
+    importable (older builds, or the stubbed rails in tests)."""
+    try:
+        from nemoguardrails.rails.llm.options import RailType
+    except Exception:  # noqa: BLE001
+        return list(rail_types)
+    out: List[Any] = []
+    for rt in rail_types:
+        if not isinstance(rt, str):
+            out.append(rt)
+            continue
+        try:
+            out.append(RailType(rt))
+        except ValueError:
+            out.append(getattr(RailType, rt.upper(), rt))
+    return out
 
 
 def _run_in_fresh_thread(fn):

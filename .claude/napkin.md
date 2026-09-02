@@ -364,3 +364,11 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
   `update-index --cacheinfo` + `--skip-worktree`) — `openclaw-edit.sh` is
   interactive. `run-nemoclaw.sh` materialises the plugin into `nemoclaw/plugins/`
   only for the docker build and deletes it (EDR).
+- **NeMo judge on Ollama needs the `_JudgeOllama` wrapper** (`services/nemo_guardrails.py`):
+  NeMo's LangChain adapter passes `temperature`/`max_tokens` per call and
+  `ChatOllama` spreads unknown kwargs into `ollama.AsyncClient.chat()` →
+  `unexpected keyword argument 'temperature'`. Cloud models absorb them. Also
+  `LLMRails.check()` wants `RailType` enums, not "input"/"output" strings.
+  Both only surfaced live (verified 2026-09-02 on mistral-nemo:12b: jailbreak →
+  `self check input`, oxycodone answer → `self check output`, ~4-9 s per judge
+  call, so a toggled turn adds ~10-15 s on the 12B model).

@@ -292,6 +292,40 @@ def test_settings_card_and_mapping() -> None:
          settings.nemo_guardrails_content_safety_url, settings.nemo_guardrails_fail_open) = orig
 
 
+def test_ollama_judge_folds_call_kwargs_into_options() -> None:
+    """Found live: NeMo's LangChain adapter passes temperature / max_tokens as
+    per-call kwargs; ChatOllama spreads unknown kwargs into ollama's
+    AsyncClient.chat(), which rejects them. The Ollama judge must fold them into
+    the request's `options` (merged with the model defaults) and drop the rest."""
+    from langchain_core.messages import HumanMessage
+
+    orig = (settings.ai_provider, settings.ollama_model, settings.ollama_num_ctx)
+    try:
+        settings.ai_provider, settings.ollama_model, settings.ollama_num_ctx = "ollama", "mistral-nemo:12b", 4096
+        judge = ng._judge_model(64)
+        check("ollama judge is a ChatOllama subclass", type(judge).__name__ == "_JudgeOllama"
+              and any(b.__name__ == "ChatOllama" for b in type(judge).__mro__))
+        params = judge._chat_params([HumanMessage(content="hi")], temperature=0.0, max_tokens=32, foo="bar")
+        opts = params.get("options") or {}
+        check("temperature folded into options", opts.get("temperature") == 0.0, str(opts))
+        check("max_tokens mapped to num_predict", opts.get("num_predict") == 32, str(opts))
+        check("model defaults kept alongside (num_ctx)", opts.get("num_ctx") == 4096, str(opts))
+        check("unknown kwargs dropped, none leak to the request",
+              "temperature" not in params and "max_tokens" not in params and "foo" not in params, str(sorted(params)))
+        settings.ai_provider = "anthropic"
+        check("non-ollama providers use the regular chat model", type(ng._judge_model(64)).__name__ != "_JudgeOllama")
+    finally:
+        settings.ai_provider, settings.ollama_model, settings.ollama_num_ctx = orig
+
+    try:
+        from nemoguardrails.rails.llm.options import RailType
+        enums = ng._rail_type_enums(["input", "output"])
+        check("rail types passed to check() as RailType enums (0.24 reads .value)",
+              enums == [RailType.INPUT, RailType.OUTPUT], str(enums))
+    except ImportError:
+        check("rail types fall back to strings without the package", ng._rail_type_enums(["input"]) == ["input"])
+
+
 def test_client_degrades_without_package() -> None:
     """Without nemoguardrails installed (or with a broken config) the client must
     return an errored verdict — never raise into the graph."""
@@ -318,6 +352,7 @@ def main() -> int:
         test_governance_attributes_nonblocking_rail,
         test_graph_order,
         test_settings_card_and_mapping,
+        test_ollama_judge_folds_call_kwargs_into_options,
         test_client_degrades_without_package,
     ):
         try:
