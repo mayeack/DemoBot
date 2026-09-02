@@ -28,6 +28,10 @@ Run the regression test after editing any of:
 - `otel-collector-config.yaml`, `run-collector.sh`
 - `run.sh` (the `opentelemetry-instrument` / OTEL_* section)
 - `backend/agents/llm.py`, `backend/agents/graph.py`, `backend/agents/nodes/*`
+- `backend/agents/blueprints/*` (both cores run every guardrail node — run the
+  regression with the Blueprint dropdown on each, or `blueprint=` per request)
+- `backend/services/nemo_guardrails.py`, `backend/agents/nodes/nemo_rails.py`
+  (new agent spans `nemo_guardrails_input_agent` / `nemo_guardrails_output_agent`)
 - the OpenTelemetry / `splunk-*` packages in `requirements.txt`
 - `.env` `OTEL_*` / `SPLUNK_*` keys (or the Python version of `venv/`)
 
@@ -43,6 +47,15 @@ It SKIPs its live-gateway tiers when the gateway is down, so it is safe to run
 without Mode C up (Tier 0 config/selftest still runs). Tier 0 runs the plugin
 selftest inside the `demobot-openclaw` image, so it SKIPs until that image has
 been built once by `./run-openclaw.sh`.
+
+For the **NemoClaw Guardrails** surface (the policy layer in
+`/api/toolguard/inspect`, the runtime denial feed, the NemoClaw sandbox), run
+`./tests/observability/verify_nemoclaw_observability.sh` after editing any of:
+- `backend/services/nemoclaw_guard.py`, `guardrails/nemoclaw/policy.yaml`
+- `backend/routers/toolguard.py` (`compose_decision`, `/nemoclaw/events`, `/observe`)
+- `nemoclaw/*`, `run-nemoclaw.sh`, `scripts/nemoclaw/ocsf_forwarder.py`
+- the plugin's `after_tool_call` observer (`openclaw/plugins/demobot-toolguard/*`)
+Its live-sandbox tier SKIPs on this Mac (NemoClaw needs Docker/Colima, not podman).
 
 ## How to run
 

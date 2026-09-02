@@ -254,3 +254,20 @@ Full sweep: `./tests/observability/verify_observability.sh` then `GET /api/hec/s
   `splunk104` MCP queries) and EC2's. Events from the EC2 app index into **EC2's** Splunk,
   so the MCP will not find them. Verify EC2 indexing via
   `grep per_index_thruput /opt/splunk/var/log/splunk/metrics.log`.
+
+## NVIDIA credentials (added with the NVIDIA stack, DemoBot 4.2)
+
+| Secret | Consumer | SSM parameter | Notes |
+|---|---|---|---|
+| `NGC_API_KEY` | `deploy/ec2/ec2-bootstrap.sh --with-nim` (`docker login nvcr.io`, `/etc/demobot-nim.env`) | `/demobot/NGC_API_KEY` | Pulls `nvcr.io/nim/*` images. Not read by the app. |
+| `NVIDIA_INFERENCE_API_KEY` | `run-nemoclaw.sh` / `--with-nemoclaw` (the NemoClaw sandbox's own inference provider, `--provider build`) | `/demobot/NVIDIA_INFERENCE_API_KEY` | nvapi- key. NOT DemoBot's provider — `provider=nvidia` is a local NIM and needs no key. |
+| `NVIDIA_API_KEY` | app, optional | — | Only if a local NIM was started behind an API-key gate. Usually unset. |
+
+Seed once (human, from a machine with the values):
+
+```bash
+aws ssm put-parameter --name /demobot/NGC_API_KEY --type SecureString --overwrite --value "<paste>"
+aws ssm put-parameter --name /demobot/NVIDIA_INFERENCE_API_KEY --type SecureString --overwrite --value "<paste>"
+```
+
+Fetch into `.env` with the same replace-in-place helper as the other keys.

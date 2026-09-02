@@ -34,11 +34,17 @@
 ├───────────────────────────────────────────────────────────────┤
 │   START ─▶ router (supervisor) ─▶ {theme}_subgraph ─▶ END      │
 │                                                                 │
-│   Per-theme decomposed agent pipeline:                          │
-│   policy ▶ prompt_defense ▶ intake ▶ domain(theme) ▶ safety     │
-│         ▶ injection ▶ compliance ▶ response_defense ▶ governance│
-│   (any node may short-circuit to END: policy/AIDefense block,   │
-│    clarifying question, generation error)                       │
+│   Per-theme pipeline = shared guardrail chain around the        │
+│   selected BLUEPRINT core (backend/agents/blueprints):          │
+│   policy ▶ prompt_defense ▶ nemo_input_rails ▶ <core> ▶ safety  │
+│     ▶ injection ▶ compliance ▶ agent_control ▶ nemo_output_rails│
+│     ▶ response_defense ▶ governance                             │
+│   cores: demobot_multi_agent (intake ▶ [coordinator ▶           │
+│          specialists] ▶ synthesizer) | nvidia_virtual_assistant │
+│          (fetch_record ▶ ask_clarification ▶ primary_assistant  │
+│           ▶ sub_assistant ▶ respond)                            │
+│   (any node may short-circuit to END: policy/AIDefense/NeMo/    │
+│    Agent Control block, clarifying question, generation error)  │
 │                                                                 │
 │   Themes: medadvice · taxadvice · benefitsadvice · legaladvice  │
 │           · financeadvice · telecomchatbot                      │

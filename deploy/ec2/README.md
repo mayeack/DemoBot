@@ -349,3 +349,23 @@ count and prints the exact increase request.
   12B models on every turn — which is why the fleet spec requires a GPU.
 - **OpenClaw is not deployed here.** `run-openclaw.sh` needs podman, which these
   boxes do not have. It runs on the Mac only.
+
+## NVIDIA options: local NIM and the NemoClaw runtime
+
+```bash
+# provider=nvidia = a NIM on THIS box (loopback :8000). Default image fits one A10G.
+./ec2-bootstrap.sh --with-nim                                   # nvidia/nvidia-nemotron-nano-9b-v2
+./ec2-bootstrap.sh --with-nim nvidia/nemotron-3-super-120b-a12b # needs 8x H100 (p5-class), not g5
+# NemoClaw runtime (OpenClaw in an OpenShell sandbox, governed by /api/toolguard)
+./ec2-bootstrap.sh --with-nemoclaw
+```
+
+`--with-nim` installs Docker + the NVIDIA Container Toolkit (the DL base AMI has
+both), logs into `nvcr.io` with `NGC_API_KEY` (from `.env` or the payload
+overrides), runs `demobot-nim.service` and sets `AI_PROVIDER=nvidia`,
+`NVIDIA_BASE_URL`, `NVIDIA_MODEL` (an explicit `--set` still wins). First start
+pulls the image + weights (minutes). `--with-nemoclaw` runs `run-nemoclaw.sh`
+once (needs `NVIDIA_INFERENCE_API_KEY` in `.env` for the sandbox's provider) and
+installs `demobot-nemoclaw` + `demobot-nemoclaw-forwarder` units — NemoClaw
+restarts nothing after a reboot by itself. Units: `demobot-nim`,
+`demobot-nemoclaw`, `demobot-nemoclaw-forwarder`. Details: `docs/nvidia-integration.md`.

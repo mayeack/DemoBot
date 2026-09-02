@@ -323,3 +323,44 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
 - venv is **Python 3.11** (the Splunk GenAI stack needs ≥3.10; 3.9 silently breaks
   the LangChain instrumentation). `venv.py39.bak/` is the old 3.9 venv.
 - Secrets live only in `.env` + `medadvice.db` (both gitignored). Never commit them.
+
+## NVIDIA stack (provider=nvidia, NeMo/NemoClaw toggles, blueprints) — 2026-09
+- **`provider=nvidia` is a LOCAL NIM, never the cloud catalog.** `backend/nvidia_nim.py`
+  rejects a non-loopback `NVIDIA_BASE_URL` at every seam (llm factory, legacy client,
+  Settings save, startup re-apply). This Mac has no NVIDIA GPU → the provider is
+  greyed out by `backend/host_capabilities.py` (`GET /api/server-info` `gated`).
+  Do instead: exercise it on a GPU replica (`ec2-bootstrap.sh --with-nim`).
+- **Nemotron 3 defaults reasoning ON** → the JSON answer contract gets wrapped in a
+  trace. `llm.py` sends `chat_template_kwargs.enable_thinking=False` unless
+  `NVIDIA_REASONING`, and `_extract_text` strips a leading `<think>` block.
+- **Featured-model VRAM floors are what the card REPORTS** (A10G ≈ 23028 MB, not
+  24000) and per-GPU × count — Super = `76000|8`. A marketing-size floor greys out
+  the very box that fits.
+- **Artifactory token in `~/.pip/pip.conf` expires ~12 h after `dev-login`** — then
+  EVERY package 403s and pip says "No matching distribution" (it looked like a
+  curation block for `nemoguardrails`). Do instead: `dev-login artifactory`, retry.
+- `nemoguardrails==0.24.0` core resolves against our pins (no LangChain dep);
+  **never the `[server]` extra** (needs starlette>=0.49 → breaks the fastapi 0.109 /
+  httpx 0.27 TestClient pin). In-process `LLMRails(config, llm=get_chat_model())`
+  is the integration; `check()` runs rails without generation; sync calls only
+  off the event loop (graph nodes run in a threadpool — fine).
+- **NeMo node order:** `prompt_defense → nemo_input_rails → …` and
+  `agent_control → nemo_output_rails → response_defense` — Cisco stays last.
+  `test_agent_control` asserts the COMPILED graph edges, not source strings.
+- **LangGraph drops state keys not declared on `DemoBotState`.** The NVIDIA
+  blueprint's `blueprint_record` silently vanished until declared. Any new core
+  key → `state.py` first. Guard: `tests/test_nvidia_blueprint.py`.
+- **Blueprint parity is structural**: cores only add generation nodes;
+  `blueprints/guardrails.py` wires the chain. New guardrail/toggle → the chain +
+  `tests/test_blueprint_parity.py` in the same change (CLAUDE.md rule). The suite
+  found that blocked turns lacked `workflow_name`/`blueprint` — fixed via
+  `governance_identity_overrides`; keep passing it from every block handler.
+- **NemoClaw does not support podman** (onboarding refuses); Docker Engine /
+  Docker Desktop / Colima only. Primary host = EC2 replica (`--with-nemoclaw`);
+  Mac needs Colima. The drawer toggle is the *enforcement* switch for the policy
+  layer (unlike `TOOL_GUARD_ENABLED`); the pill reads RUNTIME only when the
+  sandbox's OCSF denials / `after_tool_call` reports arrive.
+- Plugin edits still go through git objects (`git hash-object -w` +
+  `update-index --cacheinfo` + `--skip-worktree`) — `openclaw-edit.sh` is
+  interactive. `run-nemoclaw.sh` materialises the plugin into `nemoclaw/plugins/`
+  only for the docker build and deletes it (EDR).
