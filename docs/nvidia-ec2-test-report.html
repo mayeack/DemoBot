@@ -106,6 +106,12 @@ plus the prior-version (Ollama) regression on the same box.</p>
 <td><code>current()</code> returns a snapshot older than the TTL as-is and kicks one background re-probe (stale-while-revalidate); unit test added</td>
 </tr>
 <tr>
+<td>11</td>
+<td><code>tests/observability/verify_nemoclaw_observability.sh</code>, <code>run-nemoclaw.sh</code></td>
+<td>an <code>openshell sandbox exec</code> can hang indefinitely; one Tier 2 check sat for 2 h 51 min on the box and blocked everything queued behind it</td>
+<td>every exec bounded (<code>timeout 60</code> / <code>timeout 90</code>); the script test refuses an unbounded one</td>
+</tr>
+<tr>
 <td>5</td>
 <td><code>deploy/ec2/fleet.sh</code></td>
 <td><code>next-replica</code> and <code>provision</code> died silently (exit 1, no output) when nothing was claimed yet — empty <code>grep</code> under <code>pipefail</code></td>
@@ -259,6 +265,18 @@ left <code>0 MiB</code> used before the NIM started; the dpkg-lock wait absorbed
 <td>performance</td>
 <td>measured</td>
 <td>see §5</td>
+</tr>
+<tr>
+<td>F</td>
+<td>Public URL through the box's own tunnel: <code>/health</code> 200, <code>/app</code> 401 without the key, 200 with it; public API reports provider=nvidia with the NIM ready</td>
+<td><strong>PASS</strong> 4/4</td>
+<td><code>https://medadvice1.yeackbot.com</code> (replica 1's Cloudflare tunnel <code>demobot-1</code>)</td>
+</tr>
+<tr>
+<td>F</td>
+<td>Telemetry under <code>deployment.environment=demobot-ec2-1</code></td>
+<td><strong>PASS (spans)</strong> / <strong>known gap (metrics)</strong></td>
+<td>box collector counters: 510 spans → Splunk APM, 147 → Splunk Agent Observability, 10 503 metric points, no <code>send_failed</code> counters; <code>check_o11y_metadata.py … demobot-ec2-1</code> fails on the gen_ai metric MTS exactly as the Mac does (org-wide metric cap since 2026-07-29, unrelated to 4.2)</td>
 </tr>
 </tbody>
 </table>

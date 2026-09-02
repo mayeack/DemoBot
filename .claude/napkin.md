@@ -325,6 +325,25 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
 - Secrets live only in `.env` + `medadvice.db` (both gitignored). Never commit them.
 
 ## NVIDIA stack (provider=nvidia, NeMo/NemoClaw toggles, blueprints) — 2026-09
+- **A local NIM on the A10G needs three knobs** (`/etc/demobot-nim.env`, all
+  overridable when bootstrapping): `NIM_MAX_NUM_SEQS=8` (Nemotron Nano's hybrid-
+  Mamba SSM cache is pre-allocated per sequence — 33.75 GiB at the default 256,
+  and capping the context does NOT help), `NIM_KVCACHE_PERCENT=0.95`,
+  `NIM_MAX_MODEL_LEN=8192`. vLLM's `reserved for KV Cache is …GiB` log line must
+  be positive (was −0.69 with 16 seqs at 0.90; 1.52 with 8 at 0.95). Expect
+  ~26 tok/s per stream (bf16, no quantized A10G profile) vs Ollama's 85 (Q4).
+- **NIM model downloads need the NGC org's NIM entitlement, not just a key.**
+  402 `User does not have subscription to product` = generate the key through
+  build.nvidia.com's NIM "deploy" flow (joins the Developer Program); a personal
+  `nvapi-` key then works as a direct Bearer on api.ngc.nvidia.com (the legacy
+  token-exchange 401s for it, which is fine). Legacy 84-char keys pull the
+  image but not the weights on an un-entitled org.
+- **NemoClaw user presets:** `preset:` header + `network_policies` map; target
+  THIS HOST'S PRIVATE IP with `--trusted-private-host <ip>`; the validator
+  refuses loopback (inside the sandbox 127.0.0.1 is the sandbox), its managed
+  aliases (host.openshell.internal) and `allowed_ips` for user files. Read the
+  rules in `~/.nemoclaw/source/dist/lib/security/trusted-private-endpoint.js`.
+  Bound every `openshell sandbox exec` with `timeout` — one hung for 2 h 51 min.
 - **EC2 `--with-nim` needs its `.env` override decided BEFORE step 8's rewrite.**
   4.2.0 prepended `AI_PROVIDER=nvidia` in step 9c, after the rewrite, so a NIM box
   booted on the Mac's Ollama provider with the NIM idle. Also: a NIM (~20 GB) and
