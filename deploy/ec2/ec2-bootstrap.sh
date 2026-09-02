@@ -513,8 +513,15 @@ if [ "$WITH_NIM" = true ]; then
   NGC_API_KEY=$(grep -E '^NGC_API_KEY=' "$REPO/.env" "$PAYLOAD/overrides.env" 2>/dev/null | head -1 | cut -d= -f2- || true)
   [ -n "$NGC_API_KEY" ] || die "--with-nim needs NGC_API_KEY in .env (or the payload overrides) to pull nvcr.io/nim images"
   NIM_IMAGE="nvcr.io/nim/${NIM_MODEL}:latest"
+  # Context cap. The image defaults to the model's full 131072 tokens, and
+  # vLLM's profiling pass then tries to allocate a max_model_len x vocab
+  # logits buffer (33.75 GiB for Nemotron Nano) next to 17 GiB of weights —
+  # CUDA OOM on a 22 GiB A10G, in a restart loop that never becomes ready
+  # (replica 1, 2026-09-02). 8192 matches OLLAMA_NUM_CTX for the same demo;
+  # override with NIM_MAX_MODEL_LEN=N in the environment when bootstrapping.
+  NIM_MAX_MODEL_LEN="${NIM_MAX_MODEL_LEN:-8192}"
   sudo install -m 600 -o root -g root /dev/null /etc/demobot-nim.env
-  printf 'NGC_API_KEY=%s\nNIM_IMAGE=%s\n' "$NGC_API_KEY" "$NIM_IMAGE" | sudo tee /etc/demobot-nim.env >/dev/null
+  printf 'NGC_API_KEY=%s\nNIM_IMAGE=%s\nNIM_MAX_MODEL_LEN=%s\n' "$NGC_API_KEY" "$NIM_IMAGE" "$NIM_MAX_MODEL_LEN" | sudo tee /etc/demobot-nim.env >/dev/null
   sudo mkdir -p /opt/nim-cache && sudo chown "$(id -u):$(id -g)" /opt/nim-cache
   printf '%s' "$NGC_API_KEY" | sg docker -c "docker login nvcr.io -u '\$oauthtoken' --password-stdin" >/dev/null \
     || die "docker login nvcr.io failed — is NGC_API_KEY valid?"
@@ -538,7 +545,7 @@ User=$SVC_USER
 EnvironmentFile=/etc/demobot-nim.env
 ExecStartPre=-/usr/bin/docker rm -f demobot-nim
 ExecStart=/usr/bin/docker run --rm --name demobot-nim --gpus all --shm-size=16GB \\
-  -e NGC_API_KEY -p 127.0.0.1:8000:8000 -v /opt/nim-cache:/opt/nim/.cache -u $(id -u) \${NIM_IMAGE}
+  -e NGC_API_KEY -e NIM_MAX_MODEL_LEN -p 127.0.0.1:8000:8000 -v /opt/nim-cache:/opt/nim/.cache -u $(id -u) \${NIM_IMAGE}
 ExecStop=/usr/bin/docker stop demobot-nim
 Restart=always
 RestartSec=10

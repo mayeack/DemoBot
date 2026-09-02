@@ -102,6 +102,10 @@ def test_bootstrap_start_order_and_gate() -> None:
     check("^NVIDIA_INFERENCE_API_KEY=" in seg, "step 0 requires NVIDIA_INFERENCE_API_KEY for --with-nemoclaw")
     check("deb.nodesource.com/setup_22.x" in text and "binutils" in text,
           "--with-nemoclaw installs Node 22 + binutils (NemoClaw prerequisites)")
+    # The NIM must not start at its 131072-token default on a 24 GB card (CUDA
+    # OOM in vLLM's profiling pass, restart loop, never ready — 2026-09-02).
+    check("NIM_MAX_MODEL_LEN=" in text and "-e NIM_MAX_MODEL_LEN" in text,
+          "the NIM unit caps the context via NIM_MAX_MODEL_LEN (default 8192)")
     # apt must wait for the dpkg lock (unattended-upgrades killed a deploy at
     # step 9b on 2026-09-02): every apt-get goes through apt_get(), which does.
     bare = [l for l in text.splitlines() if "apt-get " in l and "apt_get()" not in l
