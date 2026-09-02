@@ -148,10 +148,10 @@ log "configuring the governance seat inside the sandbox"
 # kept the image's loopback URL. Wait for phase Ready (up to 5 min), then exec.
 for _ in $(seq 1 60); do
   openshell sandbox list 2>/dev/null | grep -E "^$SANDBOX[[:space:]]" | grep -q "Ready" \
-    && openshell sandbox exec --name "$SANDBOX" -- true >/dev/null 2>&1 && break
+    && timeout 90 openshell sandbox exec --name "$SANDBOX" -- true >/dev/null 2>&1 && break
   sleep 5
 done
-openshell sandbox exec --name "$SANDBOX" -- env \
+timeout 90 openshell sandbox exec --name "$SANDBOX" -- env \
     DEMOBOT_GUARD_URL="$GUARD" DEMOBOT_ACCESS_KEY="$ACCESS_KEY" \
     node -e '
 const fs = require("fs"); const p = "/sandbox/.openclaw/openclaw.json";
@@ -161,7 +161,7 @@ c.plugins.entries["demobot-toolguard"] = { enabled: true, config: {
   guardUrl: process.env.DEMOBOT_GUARD_URL, accessKey: process.env.DEMOBOT_ACCESS_KEY,
   failOpen: false, timeoutMs: 8000, agentSurface: "nemoclaw" } };
 fs.writeFileSync(p, JSON.stringify(c, null, 2));' \
-  && openshell sandbox exec --name "$SANDBOX" -- sh -c 'sha256sum /sandbox/.openclaw/openclaw.json > /sandbox/.openclaw/.config-hash' \
+  && timeout 90 openshell sandbox exec --name "$SANDBOX" -- sh -c 'sha256sum /sandbox/.openclaw/openclaw.json > /sandbox/.openclaw/.config-hash' \
   || warn "could not write the plugin config inside the sandbox — check the image built with the plugin"
 
 # ---------- network policy: only DemoBot's guard endpoint ----------

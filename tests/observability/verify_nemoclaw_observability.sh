@@ -76,7 +76,10 @@ if ! command -v nemoclaw >/dev/null || ! nemoclaw "$SANDBOX" status >/dev/null 2
   skip "NemoClaw sandbox '$SANDBOX' not running on this host (./run-nemoclaw.sh on a Docker/Colima host)"
 else
   ok "sandbox $SANDBOX answers status"
-  if openshell sandbox exec --name "$SANDBOX" -- sh -c 'grep -q demobot-toolguard /sandbox/.openclaw/openclaw.json' 2>/dev/null; then
+  # Every exec below is bounded: an exec into a sandbox can hang indefinitely
+  # (seen 2026-09-02: 2 h 51 min inside one Tier 2 check), and a hung verify
+  # blocks everything queued behind it.
+  if timeout 60 openshell sandbox exec --name "$SANDBOX" -- sh -c 'grep -q demobot-toolguard /sandbox/.openclaw/openclaw.json' 2>/dev/null; then
     ok "demobot-toolguard is enabled inside the sandbox"
   else
     bad "demobot-toolguard not enabled inside the sandbox"
@@ -84,10 +87,10 @@ else
   # A guard call from inside the sandbox proves the egress policy for the seat.
   # Use the guard URL the plugin was configured with (run-nemoclaw.sh --host):
   # inside the sandbox 127.0.0.1 is the container, not this host.
-  GUARD_URL=$(openshell sandbox exec --name "$SANDBOX" -- sh -c 'sed -n "s/.*\"guardUrl\": *\"\([^\"]*\)\".*/\1/p" /sandbox/.openclaw/openclaw.json | head -1' 2>/dev/null | tr -d '[:space:]')
+  GUARD_URL=$(timeout 60 openshell sandbox exec --name "$SANDBOX" -- sh -c 'sed -n "s/.*\"guardUrl\": *\"\([^\"]*\)\".*/\1/p" /sandbox/.openclaw/openclaw.json | head -1' 2>/dev/null | tr -d '[:space:]')
   GUARD_URL=${GUARD_URL:-http://127.0.0.1:8001}
   echo "  sandbox guard URL: $GUARD_URL"
-  if openshell sandbox exec --name "$SANDBOX" -- sh -c "curl -s --max-time 5 -o /dev/null -w '%{http_code}' -u x:$KEY -X POST $GUARD_URL/api/toolguard/inspect -H 'Content-Type: application/json' -d '{\"tool_name\":\"read\",\"arguments\":{\"path\":\"/sandbox/.openclaw/workspace/x\"},\"agent_surface\":\"nemoclaw\"}'" 2>/dev/null | grep -q 200; then
+  if timeout 60 openshell sandbox exec --name "$SANDBOX" -- sh -c "curl -s --max-time 5 -o /dev/null -w '%{http_code}' -u x:$KEY -X POST $GUARD_URL/api/toolguard/inspect -H 'Content-Type: application/json' -d '{\"tool_name\":\"read\",\"arguments\":{\"path\":\"/sandbox/.openclaw/workspace/x\"},\"agent_surface\":\"nemoclaw\"}'" 2>/dev/null | grep -q 200; then
     ok "sandbox can reach DemoBot's guard endpoint (demobot-guard policy applied)"
   else
     bad "sandbox cannot reach the guard endpoint — check run-nemoclaw.sh --host and the policy preset"

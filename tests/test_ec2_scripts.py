@@ -110,6 +110,9 @@ def test_bootstrap_start_order_and_gate() -> None:
     check("hostname -I" in rn and "HOST=127.0.0.1" not in rn and 'LOCAL_GUARD="http://127.0.0.1:8001"' in rn,
           "run-nemoclaw.sh defaults the sandbox's guard host to this host's private IP and checks the app locally")
     check("openshell sandbox list" in rn and "Ready" in rn, "run-nemoclaw.sh waits for the sandbox phase Ready before writing the plugin config")
+    vn = (ROOT / "tests/observability/verify_nemoclaw_observability.sh").read_text()
+    bare = [l for l in (rn + vn).splitlines() if "openshell sandbox exec" in l and "timeout " not in l and not l.lstrip().startswith("#")]
+    check(not bare, f"every openshell sandbox exec is bounded by timeout ({len(bare)} unbounded)")
     pr = "\n".join(l for l in (ROOT / "nemoclaw/policies/demobot-guard.yaml").read_text().splitlines()
                    if not l.lstrip().startswith("#"))     # YAML keys only, not the commentary
     check("preset:" in pr and "network_policies:" in pr and "allowed_ips" not in pr and "__DEMOBOT_HOST__" in pr,
