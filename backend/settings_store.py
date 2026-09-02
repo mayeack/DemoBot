@@ -73,10 +73,16 @@ class _CredField:
     collector, or run.sh before it re-execs the app), which reads ``.env`` directly.
     Those fields are written to ``.env`` and are NOT mirrored into the settings blob
     — ``.env`` stays their single source of truth. ``restart`` names the process that
-    must be restarted before such a change takes effect ("collector" or "app")."""
+    must be restarted before such a change takes effect ("collector" or "app").
+
+    ``wide`` renders the input across both grid columns, for values too long to read
+    in a half-width box. ``validate`` is an optional callable run on the submitted
+    value before anything is applied; it raises ``ValueError`` to reject the save
+    (the router turns that into a 422 the Settings page shows inline)."""
 
     def __init__(self, key, label, *, secret=False, boolean=False, settings_attr=None,
-                 env=None, env_file=False, restart="", placeholder="", help=""):
+                 env=None, env_file=False, restart="", placeholder="", help="",
+                 wide=False, validate=None):
         self.key = key
         self.label = label
         self.secret = secret
@@ -87,6 +93,8 @@ class _CredField:
         self.restart = restart
         self.placeholder = placeholder
         self.help = help
+        self.wide = wide
+        self.validate = validate
 
 
 # Access fields per provider (the "Model" id is handled separately by the dropdown).
@@ -131,6 +139,37 @@ _PROVIDER_FIELDS: Dict[str, List[_CredField]] = {
 # are annotated and rarely change per-demo.
 INTEGRATION_CHOICES: List[str] = ["ai_defense", "splunk_o11y", "agent_observability"]
 
+
+def _validate_resource_attributes(value: str) -> None:
+    """Reject an OTEL_RESOURCE_ATTRIBUTES value the OTel SDK would silently ignore.
+
+    The format is a comma-separated ``key=value`` list. A typo here fails SILENTLY —
+    the SDK drops the malformed pair, the app still starts, telemetry still flows, and
+    the box just never gets the identity it was supposed to have. That is exactly the
+    failure a per-instance identity field exists to prevent, so validate on the way in
+    rather than discovering it in O11y.
+    """
+    if " #" in value:
+        # backend/config.py::_strip_env_value drops an unquoted trailing " # comment"
+        # when it reloads .env, so this would be truncated on the next restart.
+        raise ValueError(
+            "resource attributes must not contain ' #' — it is stripped as a comment "
+            "when .env is reloaded"
+        )
+    for pair in value.split(","):
+        pair = pair.strip()
+        if not pair:
+            raise ValueError("resource attributes contain an empty entry (stray comma?)")
+        if "=" not in pair:
+            raise ValueError(
+                f"resource attribute {pair!r} is not key=value — expected a "
+                "comma-separated list like "
+                "'deployment.environment=demobot-local,host.name=my-box'"
+            )
+        if not pair.split("=", 1)[0].strip():
+            raise ValueError(f"resource attribute {pair!r} has an empty key")
+
+
 _INTEGRATION_FIELDS: Dict[str, List[_CredField]] = {
     # Applies live: AIDefenseClient.reconfigure() re-reads the settings singleton.
     "ai_defense": [
@@ -157,6 +196,16 @@ _INTEGRATION_FIELDS: Dict[str, List[_CredField]] = {
                    help="Read-only API token used by the observability regression test."),
         _CredField("otlp_endpoint", "OTLP endpoint", env="OTEL_EXPORTER_OTLP_ENDPOINT",
                    env_file=True, restart="app", placeholder="http://localhost:4317"),
+        _CredField("resource_attributes", "Resource attributes",
+                   env="OTEL_RESOURCE_ATTRIBUTES", env_file=True, restart="app",
+                   wide=True, validate=_validate_resource_attributes,
+                   placeholder="deployment.environment=demobot-local,host.name=my-box",
+                   help="Comma-separated key=value list stamped on every span and "
+                        "metric. deployment.environment is what splits one DemoBot "
+                        "instance from another in O11y — give every box in a "
+                        "multi-instance workshop a distinct value. Leave "
+                        "service.name alone (OTEL_SERVICE_NAME) so they stay one "
+                        "service."),
     ],
     # Applies live: the SDK path builds a fresh GalileoLogger per turn and reads
     # these from os.environ at call time.
@@ -180,6 +229,15 @@ def _field_current(field: "_CredField") -> str:
 
     if field.settings_attr:
         cur = getattr(settings, field.settings_attr, "")
+    elif field.env_file and field.env:
+        # .env, NOT os.environ: an env_file field's value is owned by .env, and a
+        # library may have rewritten the process copy. The Splunk OTel distro does
+        # exactly that — under opentelemetry-instrument it appends its own
+        # telemetry.distro.* attributes to OTEL_RESOURCE_ATTRIBUTES at bootstrap. If
+        # the field prefilled from os.environ, a save the operator never edited would
+        # write the distro's internal attributes into .env and pin a distro version
+        # that the distro is supposed to report itself.
+        cur = _read_env_file_value(field.env)
     elif field.env:
         cur = os.environ.get(field.env, "")
     else:
@@ -443,6 +501,29 @@ def _env_path() -> Path:
     return Path(BASE_DIR) / ".env"
 
 
+def _read_env_file_value(key: str) -> str:
+    """Value of ``key`` as .env currently holds it, or "" if absent.
+
+    Takes the FIRST match and applies the same quote/trailing-comment handling as
+    backend/config.py's loader, so what the Settings page shows is what the app and
+    the shell launchers will read back."""
+    from backend.config import _strip_env_value
+
+    path = _env_path()
+    if not path.exists():
+        return ""
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if line.startswith("export "):
+            line = line[len("export "):]
+        if line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        if k.strip() == key:
+            return _strip_env_value(v)
+    return ""
+
+
 def _write_env_key(key: str, value: str) -> None:
     """Set ``key`` in .env, replacing in place and collapsing any duplicates.
 
@@ -511,6 +592,7 @@ def get_integration_fields() -> Dict[str, List[Dict[str, Any]]]:
                 "placeholder": f.placeholder,
                 "help": f.help,
                 "restart": f.restart,
+                "wide": f.wide,
                 "present": bool(cur) if not f.boolean else True,
             }
             if not f.secret:
@@ -548,13 +630,11 @@ def set_integration_creds(integration: str, fields: Dict[str, str]) -> List[str]
     if not specs or not fields:
         return []
 
-    data = load()
-    store = dict(data.get("integration_creds") or {})
-    istore = dict(store.get(integration) or {})
-    applied: List[str] = []
-    restart: List[str] = []
-    persist_blob = False
-
+    # Resolve + validate EVERY submitted field before applying any of them. A card
+    # saves all its fields in one PUT and .env is written field-by-field, so
+    # validating inside the apply loop below would leave .env half-updated whenever a
+    # later field is rejected — reported to the operator as a plain error.
+    pending: List[tuple] = []
     for f in specs:
         if f.key not in fields:
             continue
@@ -565,7 +645,20 @@ def set_integration_creds(integration: str, fields: Dict[str, str]) -> List[str]
             val = (raw or "").strip()
             if not val:  # blank = keep existing (never wipe)
                 continue
+            if f.validate:
+                f.validate(val)  # ValueError -> 422, nothing written
+        if f.env_file and not f.env:
+            raise ValueError(f"{f.key}: env_file field needs an env var name")
+        pending.append((f, val))
 
+    data = load()
+    store = dict(data.get("integration_creds") or {})
+    istore = dict(store.get(integration) or {})
+    applied: List[str] = []
+    restart: List[str] = []
+    persist_blob = False
+
+    for f, val in pending:
         if f.settings_attr:
             setattr(settings, f.settings_attr, _as_bool(val) if f.boolean else val)
         if f.env:
@@ -573,8 +666,6 @@ def set_integration_creds(integration: str, fields: Dict[str, str]) -> List[str]
         if f.env_file:
             # .env is the single source of truth for these — the consumer is a
             # different process, so mirroring them into the blob could only drift.
-            if not f.env:
-                raise ValueError(f"{f.key}: env_file field needs an env var name")
             _write_env_key(f.env, val)
         else:
             istore[f.key] = val
