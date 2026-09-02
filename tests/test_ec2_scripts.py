@@ -102,6 +102,10 @@ def test_bootstrap_start_order_and_gate() -> None:
     check("^NVIDIA_INFERENCE_API_KEY=" in seg, "step 0 requires NVIDIA_INFERENCE_API_KEY for --with-nemoclaw")
     check("deb.nodesource.com/setup_22.x" in text and "binutils" in text,
           "--with-nemoclaw installs Node 22 + binutils (NemoClaw prerequisites)")
+    # NemoClaw onboarding needs the app up and the inference key in its env.
+    onb = text[text.find('onboarding the NemoClaw sandbox'):text.find('sudo systemctl enable demobot-nemoclaw')]
+    check("localhost:8001/health" in onb and "/etc/demobot-nemoclaw.env" in onb and "set -a" in onb,
+          "NemoClaw onboarding waits for /health and exports /etc/demobot-nemoclaw.env first")
     # The NIM must not start at its 131072-token default on a 24 GB card (CUDA
     # OOM in vLLM's profiling pass, restart loop, never ready — 2026-09-02).
     check("NIM_MAX_MODEL_LEN=" in text and "-e NIM_MAX_MODEL_LEN" in text,

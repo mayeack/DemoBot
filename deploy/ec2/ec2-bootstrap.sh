@@ -687,11 +687,23 @@ sleep 10
 
 if [ "$WITH_NEMOCLAW" = true ]; then
   log "onboarding the NemoClaw sandbox (first run installs NemoClaw + builds the image)"
-  # As the service user with the docker group active; needs the app up (the
-  # guard is fail-closed) and NVIDIA_INFERENCE_API_KEY in .env for the
-  # sandbox's own inference provider.
+  # run-nemoclaw.sh needs the app answering (the tool guard is fail-closed) and
+  # NVIDIA_INFERENCE_API_KEY in its ENVIRONMENT — it does not read .env for
+  # that key. The first live run (2026-09-02) hit both: the app was still
+  # starting 10 s after enable --now, and the key was only in the unit's
+  # EnvironmentFile, so onboarding died before installing anything. Wait for
+  # /health, then run it exactly as the unit does: with /etc/demobot-nemoclaw.env
+  # exported, as the service user with the docker group active.
+  for _ in $(seq 1 60); do
+    curl -sf -o /dev/null http://localhost:8001/health && break
+    sleep 5
+  done
+  curl -sf -o /dev/null http://localhost:8001/health || warn "app not answering on :8001 yet — NemoClaw onboarding will likely fail"
+  set -a; # shellcheck disable=SC1091
+  . <(sudo cat /etc/demobot-nemoclaw.env); set +a
   sg docker -c "cd '$REPO' && ./run-nemoclaw.sh --host=127.0.0.1 --no-forwarder" \
     || warn "NemoClaw onboarding failed — see the output above; the policy layer still works without the runtime"
+  unset NVIDIA_INFERENCE_API_KEY
   sudo systemctl enable demobot-nemoclaw demobot-nemoclaw-forwarder
   sudo systemctl start demobot-nemoclaw-forwarder || true
 fi
