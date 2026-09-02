@@ -402,14 +402,17 @@ wants a 150 GB volume.
   every 30 s), so the app's startup catalog probe sees NIM READY. The final
   health gate includes `/v1/health/ready` and `/v1/models`: `BOOTSTRAP_OK` on a
   NIM box means the NIM is serving.
-- **The NIM is capped at 16 concurrent sequences and 8192 tokens**
-  (`NIM_MAX_NUM_SEQS`, `NIM_MAX_MODEL_LEN` in `/etc/demobot-nim.env`, passed to
-  the container; set either in the bootstrap's environment to change it).
+- **The NIM runs with 8 concurrent sequences, 0.95 GPU-memory utilization
+  and 8192 tokens** (`NIM_MAX_NUM_SEQS`, `NIM_KVCACHE_PERCENT`, `NIM_MAX_MODEL_LEN`
+  in `/etc/demobot-nim.env`, passed to the container; set any of them in the
+  bootstrap's environment to change it).
   Nemotron Nano is a hybrid Mamba model: vLLM pre-allocates its SSM state cache
   for `max_num_seqs` (default 256), a flat 33.75 GiB that cannot sit next to
   17 GiB of weights on a 22 GiB A10G — the container OOM-loops without ever
-  becoming ready, and the context cap alone does not help. 16 sequences is
-  ~2.1 GiB; 8192 is what the demo runs Ollama at.
+  becoming ready, and the context cap alone does not help. vLLM's own profile
+  line (`reserved for KV Cache is …GiB`) is the number to watch: 16 sequences at
+  0.90 still left −0.69 GiB; 8 at 0.95 leaves ~1.5 GiB, ample for a model with
+  only a few attention layers. 8192 is what the demo runs Ollama at.
 - **NemoClaw prerequisites** (`binutils` for the installer's `strings` check,
   Node ≥ 22.19 from NodeSource) are installed by `--with-nemoclaw`; both keys are
   checked in the payload preflight (step 0), not twenty minutes in.

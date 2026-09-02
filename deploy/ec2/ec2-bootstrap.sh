@@ -513,23 +513,21 @@ if [ "$WITH_NIM" = true ]; then
   NGC_API_KEY=$(grep -E '^NGC_API_KEY=' "$REPO/.env" "$PAYLOAD/overrides.env" 2>/dev/null | head -1 | cut -d= -f2- || true)
   [ -n "$NGC_API_KEY" ] || die "--with-nim needs NGC_API_KEY in .env (or the payload overrides) to pull nvcr.io/nim images"
   NIM_IMAGE="nvcr.io/nim/${NIM_MODEL}:latest"
-  # Context cap. The image defaults to the model's full 131072 tokens, and
-  # vLLM's profiling pass then tries to allocate a max_model_len x vocab
-  # logits buffer (33.75 GiB for Nemotron Nano) next to 17 GiB of weights —
-  # CUDA OOM on a 22 GiB A10G, in a restart loop that never becomes ready
-  # (replica 1, 2026-09-02). 8192 matches OLLAMA_NUM_CTX for the same demo;
-  # override with NIM_MAX_MODEL_LEN=N in the environment when bootstrapping.
+  # Memory budget on a 22 GiB A10G (measured, replica 1, 2026-09-02). vLLM's
+  # profile logs it: budget = 22.06 GiB x NIM_KVCACHE_PERCENT; weights 16.58 GiB;
+  # activation peak = Nemotron Nano's hybrid-Mamba SSM state cache (pre-allocated
+  # for NIM_MAX_NUM_SEQS, ~135 MB each — 33.75 GiB at the default 256!) + ~1.8
+  # GiB; whatever is left is the KV cache, and zero left = "No available memory
+  # for the cache blocks", restart loop, never ready. Context length barely
+  # matters for this model (only a few attention layers). Defaults below leave
+  # ~1.5 GiB of KV cache: 8 sequences (Ollama ran NUM_PARALLEL=4 on this demo),
+  # 0.95 utilization, 8192 tokens. Override any of them in the environment.
   NIM_MAX_MODEL_LEN="${NIM_MAX_MODEL_LEN:-8192}"
-  # Concurrency cap — the one that actually mattered. Nemotron Nano is a hybrid
-  # Mamba model and vLLM pre-allocates its SSM state cache for max_num_seqs
-  # (default 256): 33.75 GiB regardless of context length, so the cap above
-  # alone still OOMed. ~135 MB per sequence -> 16 seqs is ~2.1 GiB, leaving
-  # room for the KV cache next to 17 GiB of weights on a 22 GiB A10G. (The
-  # model card's own advice for OOM is --max-num-seqs 64, on 48 GB cards.)
-  NIM_MAX_NUM_SEQS="${NIM_MAX_NUM_SEQS:-16}"
+  NIM_MAX_NUM_SEQS="${NIM_MAX_NUM_SEQS:-8}"
+  NIM_KVCACHE_PERCENT="${NIM_KVCACHE_PERCENT:-0.95}"
   sudo install -m 600 -o root -g root /dev/null /etc/demobot-nim.env
-  printf 'NGC_API_KEY=%s\nNIM_IMAGE=%s\nNIM_MAX_MODEL_LEN=%s\nNIM_MAX_NUM_SEQS=%s\n' \
-    "$NGC_API_KEY" "$NIM_IMAGE" "$NIM_MAX_MODEL_LEN" "$NIM_MAX_NUM_SEQS" | sudo tee /etc/demobot-nim.env >/dev/null
+  printf 'NGC_API_KEY=%s\nNIM_IMAGE=%s\nNIM_MAX_MODEL_LEN=%s\nNIM_MAX_NUM_SEQS=%s\nNIM_KVCACHE_PERCENT=%s\n' \
+    "$NGC_API_KEY" "$NIM_IMAGE" "$NIM_MAX_MODEL_LEN" "$NIM_MAX_NUM_SEQS" "$NIM_KVCACHE_PERCENT" | sudo tee /etc/demobot-nim.env >/dev/null
   sudo mkdir -p /opt/nim-cache && sudo chown "$(id -u):$(id -g)" /opt/nim-cache
   printf '%s' "$NGC_API_KEY" | sg docker -c "docker login nvcr.io -u '\$oauthtoken' --password-stdin" >/dev/null \
     || die "docker login nvcr.io failed — is NGC_API_KEY valid?"
@@ -553,7 +551,7 @@ User=$SVC_USER
 EnvironmentFile=/etc/demobot-nim.env
 ExecStartPre=-/usr/bin/docker rm -f demobot-nim
 ExecStart=/usr/bin/docker run --rm --name demobot-nim --gpus all --shm-size=16GB \\
-  -e NGC_API_KEY -e NIM_MAX_MODEL_LEN -e NIM_MAX_NUM_SEQS -p 127.0.0.1:8000:8000 -v /opt/nim-cache:/opt/nim/.cache -u $(id -u) \${NIM_IMAGE}
+  -e NGC_API_KEY -e NIM_MAX_MODEL_LEN -e NIM_MAX_NUM_SEQS -e NIM_KVCACHE_PERCENT -p 127.0.0.1:8000:8000 -v /opt/nim-cache:/opt/nim/.cache -u $(id -u) \${NIM_IMAGE}
 ExecStop=/usr/bin/docker stop demobot-nim
 Restart=always
 RestartSec=10

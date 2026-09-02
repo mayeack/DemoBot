@@ -238,7 +238,8 @@ used means a third model, or a much larger context, fits without swapping.
   pre-allocates Nemotron Nano's SSM state cache for `max_num_seqs` (default
   256): a flat 33.75 GiB on top of the weights, `CUDA out of memory` on the
   A10G, forever — and capping the context does NOT change it. The bootstrap
-  passes `NIM_MAX_NUM_SEQS=16` (+ `NIM_MAX_MODEL_LEN=8192`);
+  passes `NIM_MAX_NUM_SEQS=8`, `NIM_KVCACHE_PERCENT=0.95` (+ `NIM_MAX_MODEL_LEN=8192`);
+  vLLM's `reserved for KV Cache is …GiB` log line must be positive;
   `sudo journalctl -u demobot-nim | grep -i "out of memory"` confirms the symptom
   if someone raises either.
 - **First NIM start is a 30-40 GB download** (image + weights into

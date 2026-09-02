@@ -111,7 +111,9 @@ def test_bootstrap_start_order_and_gate() -> None:
     check("NIM_MAX_MODEL_LEN=" in text and "-e NIM_MAX_MODEL_LEN" in text,
           "the NIM unit caps the context via NIM_MAX_MODEL_LEN (default 8192)")
     check("NIM_MAX_NUM_SEQS=" in text and "-e NIM_MAX_NUM_SEQS" in text,
-          "the NIM unit caps concurrency via NIM_MAX_NUM_SEQS (Mamba state cache; default 16)")
+          "the NIM unit caps concurrency via NIM_MAX_NUM_SEQS (Mamba state cache; default 8)")
+    check("NIM_KVCACHE_PERCENT=" in text and "-e NIM_KVCACHE_PERCENT" in text,
+          "the NIM unit sets NIM_KVCACHE_PERCENT (default 0.95) so KV blocks fit next to the weights")
     # apt must wait for the dpkg lock (unattended-upgrades killed a deploy at
     # step 9b on 2026-09-02): every apt-get goes through apt_get(), which does.
     bare = [l for l in text.splitlines() if "apt-get " in l and "apt_get()" not in l
