@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DemoBot — EC2 replica deployment</title>
+<title>EC2 replica deployment</title>
 <style>
 :root{--bg:#ffffff;--fg:#1c1e21;--muted:#5c6370;--border:#d7dbe0;--accent:#0b6bcb;--code-bg:#f5f7f9;--th:#eef2f6;--warn:#8a5a00}
 @media (prefers-color-scheme: dark){:root{--bg:#14171a;--fg:#e6e8ea;--muted:#9aa3ad;--border:#2c3238;--accent:#63a9f0;--code-bg:#1c2126;--th:#1f252b;--warn:#e0b050}}
@@ -469,8 +469,9 @@ restarts nothing after a reboot by itself. Units: <code>demobot-nim</code>,
 ./deploy/ec2/fleet.sh provision &amp;&amp; ./deploy/ec2/fleet.sh deploy
 </code></pre>
 <p><code>fleet.sh deploy</code> forwards <code>--with-nim [FLEET_NIM_MODEL]</code> and <code>--with-nemoclaw</code> to
-<code>push-replica.sh</code>, which refuses to ship without the matching <code>nvapi-</code> key in
-<code>.env</code> (the keys ride in the payload, never on argv). Expect 25-45 minutes: the
+<code>push-replica.sh</code>, which refuses to ship without the matching key in <code>.env</code>
+(a personal <code>nvapi-…</code> key or a legacy NGC key; the keys ride in the payload,
+never on argv, and <code>docker login nvcr.io</code> on the box is the real validation). Expect 25-45 minutes: the
 NIM image (~10 GB) and weights (~18 GB) are pulled on first start, so the box
 wants a 150 GB volume.</p>
 <h3 id="what-a-nim-box-does-differently-fixed-in-421">What a NIM box does differently (fixed in 4.2.1)</h3>

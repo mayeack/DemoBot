@@ -379,8 +379,9 @@ export FLEET_NIM=1 FLEET_NEMOCLAW=1 FLEET_VOLUME_GB=150   # + the usual FLEET_* 
 ```
 
 `fleet.sh deploy` forwards `--with-nim [FLEET_NIM_MODEL]` and `--with-nemoclaw` to
-`push-replica.sh`, which refuses to ship without the matching `nvapi-` key in
-`.env` (the keys ride in the payload, never on argv). Expect 25-45 minutes: the
+`push-replica.sh`, which refuses to ship without the matching key in `.env`
+(a personal `nvapi-…` key or a legacy NGC key; the keys ride in the payload,
+never on argv, and `docker login nvcr.io` on the box is the real validation). Expect 25-45 minutes: the
 NIM image (~10 GB) and weights (~18 GB) are pulled on first start, so the box
 wants a 150 GB volume.
 

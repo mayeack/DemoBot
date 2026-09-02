@@ -15,7 +15,8 @@
 #       --with-nim [nvidia/nvidia-nemotron-nano-9b-v2] --with-nemoclaw
 #   The keys ride in this Mac's .env (shipped in the payload, never argv):
 #   NGC_API_KEY (nvcr.io image pull) and NVIDIA_INFERENCE_API_KEY (the sandbox's
-#   own inference). This script refuses to push without them.
+#   own inference) — a personal nvapi-… key or a legacy NGC key; the same key
+#   can serve both. This script refuses to push without them.
 #
 # TUNNEL MODES
 #   default      all hosts run replicas of the ONE tunnel in ~/.cloudflared/
@@ -105,12 +106,12 @@ SCP=(scp "${SSH_OPTS[@]}" -i "$KEY" -P "$PORT")
 # --- preflight -------------------------------------------------------------
 [ -f "$REPO/.env" ]                 || die "$REPO/.env not found"
 if [ "$WITH_NIM" = true ]; then
-  grep -qE '^NGC_API_KEY=nvapi-' "$REPO/.env" \
-    || die "--with-nim needs NGC_API_KEY=nvapi-… in $REPO/.env (free key: https://org.ngc.nvidia.com/setup/api-key); it ships in the payload"
+  grep -qE '^NGC_API_KEY=[^[:space:]]{20,}$' "$REPO/.env" \
+    || die "--with-nim needs NGC_API_KEY in $REPO/.env — a personal nvapi-… key or a legacy NGC key (free: https://org.ngc.nvidia.com/setup/api-key); it ships in the payload"
 fi
 if [ "$WITH_NEMOCLAW" = true ]; then
-  grep -qE '^NVIDIA_INFERENCE_API_KEY=nvapi-' "$REPO/.env" \
-    || die "--with-nemoclaw needs NVIDIA_INFERENCE_API_KEY=nvapi-… in $REPO/.env (the sandbox's inference provider)"
+  grep -qE '^NVIDIA_INFERENCE_API_KEY=[^[:space:]]{20,}$' "$REPO/.env" \
+    || die "--with-nemoclaw needs NVIDIA_INFERENCE_API_KEY in $REPO/.env (an NGC key; the sandbox's inference provider)"
 fi
 CF="$HOME/.cloudflared/config.yml"
 [ -f "$CF" ]                        || die "$CF not found — set up the named tunnel first (./setup-named-tunnel.sh)"

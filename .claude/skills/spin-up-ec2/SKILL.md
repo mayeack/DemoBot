@@ -116,8 +116,9 @@ export FLEET_COUNT=N          # <- the user's answer, never a guess
 # 4b. NVIDIA variant — a box whose chat provider is a LOCAL NIM, plus the NemoClaw runtime.
 #     Set BEFORE preflight/provision/deploy (deploy forwards --with-nim/--with-nemoclaw):
 #       export FLEET_NIM=1 FLEET_NEMOCLAW=1 FLEET_VOLUME_GB=150
-#     Needs NGC_API_KEY=nvapi-… (nvcr.io image pull) and NVIDIA_INFERENCE_API_KEY=nvapi-…
-#     (the NemoClaw sandbox's own inference) in this Mac's .env — they ride in the
+#     Needs NGC_API_KEY (nvcr.io image pull) and NVIDIA_INFERENCE_API_KEY (the NemoClaw
+#     sandbox's own inference) in this Mac's .env — one NGC key (personal nvapi-… or
+#     legacy 84-char) serves both — they ride in the
 #     payload; push-replica refuses without them. Deploy takes 25-45 min (NIM pull).
 #     Every agent then runs on nvidia/nvidia-nemotron-nano-9b-v2; Ollama stays installed
 #     but holds no VRAM. Details: deploy/ec2/README.md "NVIDIA options".

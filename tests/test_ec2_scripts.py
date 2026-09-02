@@ -98,8 +98,8 @@ def test_bootstrap_start_order_and_gate() -> None:
     step0 = text.find("# --- 0. payload preflight")
     step1 = text.find("# --- 1. base packages")
     seg = text[step0:step1]
-    check("NGC_API_KEY=nvapi-" in seg, "step 0 requires NGC_API_KEY for --with-nim")
-    check("NVIDIA_INFERENCE_API_KEY=nvapi-" in seg, "step 0 requires NVIDIA_INFERENCE_API_KEY for --with-nemoclaw")
+    check("^NGC_API_KEY=" in seg, "step 0 requires NGC_API_KEY for --with-nim")
+    check("^NVIDIA_INFERENCE_API_KEY=" in seg, "step 0 requires NVIDIA_INFERENCE_API_KEY for --with-nemoclaw")
     check("deb.nodesource.com/setup_22.x" in text and "binutils" in text,
           "--with-nemoclaw installs Node 22 + binutils (NemoClaw prerequisites)")
     # The key never reaches argv: only stdin login, the env file, and -e NGC_API_KEY.
@@ -124,7 +124,7 @@ def test_push_replica_refuses_without_keys() -> None:
     cases = [
         (["AI_PROVIDER=ollama"], ["--with-nim"], "NGC_API_KEY"),
         (["AI_PROVIDER=ollama"], ["--with-nemoclaw"], "NVIDIA_INFERENCE_API_KEY"),
-        # Wrong shape (not an nvapi- key) is refused too.
+        # Too short to be any NGC key shape is refused too.
         (["NGC_API_KEY=not-a-key"], ["--with-nim"], "NGC_API_KEY"),
     ]
     for env_lines, flags, want in cases:
@@ -140,6 +140,13 @@ def test_push_replica_refuses_without_keys() -> None:
     check(r.returncode != 0 and "NGC_API_KEY" not in r.stderr and "NVIDIA_INFERENCE_API_KEY" not in r.stderr,
           "with both keys the NVIDIA gate passes (failure moves on to the tunnel preflight)")
     check(fake_key not in r.stdout + r.stderr, "the key value is never printed")
+    # A legacy NGC key (84 alphanumerics, no nvapi- prefix) is accepted too — it
+    # works for nvcr.io pulls and the hosted API; docker login is the real check.
+    legacy = "L" * 84
+    repo = _fake_repo([f"NGC_API_KEY={legacy}"])
+    r = run(["bash", "deploy/ec2/push-replica.sh", "--host", "127.0.0.1", "--replica", "99", "--with-nim"],
+            cwd=repo, env={**os.environ, "HOME": str(repo)})
+    check("NGC_API_KEY" not in r.stderr, "a legacy (non-nvapi) NGC key passes the shape gate")
 
 
 def test_push_replica_forwards_flags() -> None:

@@ -214,14 +214,14 @@ cmd_preflight() {
     log "NVIDIA options"
     if [ "$NIM" = 1 ]; then
       echo "  local NIM: ${NIM_MODEL:-nvidia/nvidia-nemotron-nano-9b-v2} (provider=nvidia on every box)"
-      grep -qE '^NGC_API_KEY=nvapi-' "$REPO/.env" && echo "  NGC_API_KEY: present in .env" \
-        || warn "NGC_API_KEY=nvapi-… missing from $REPO/.env — deploy will refuse (free key: https://org.ngc.nvidia.com/setup/api-key)"
+      grep -qE '^NGC_API_KEY=[^[:space:]]{20,}$' "$REPO/.env" && echo "  NGC_API_KEY: present in .env" \
+        || warn "NGC_API_KEY missing from $REPO/.env — deploy will refuse (free key, personal or legacy: https://org.ngc.nvidia.com/setup/api-key)"
       [ "$VOLUME_GB" -ge 150 ] 2>/dev/null || warn "FLEET_VOLUME_GB=$VOLUME_GB — a NIM box wants 150 (image + weights ~30 GB on top of Ollama's models)"
     fi
     if [ "$NEMOCLAW" = 1 ]; then
       echo "  NemoClaw runtime: yes"
-      grep -qE '^NVIDIA_INFERENCE_API_KEY=nvapi-' "$REPO/.env" && echo "  NVIDIA_INFERENCE_API_KEY: present in .env" \
-        || warn "NVIDIA_INFERENCE_API_KEY=nvapi-… missing from $REPO/.env — deploy will refuse"
+      grep -qE '^NVIDIA_INFERENCE_API_KEY=[^[:space:]]{20,}$' "$REPO/.env" && echo "  NVIDIA_INFERENCE_API_KEY: present in .env" \
+        || warn "NVIDIA_INFERENCE_API_KEY missing from $REPO/.env — deploy will refuse"
     fi
   fi
 }

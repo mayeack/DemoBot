@@ -102,13 +102,15 @@ TUNNEL_ID=$(awk '/^tunnel:/{print $2; exit}' "$PAYLOAD/config.yml")
 [ -f "$PAYLOAD/$TUNNEL_ID.json" ] || die "payload incomplete: tunnel credentials $TUNNEL_ID.json missing"
 # NVIDIA credentials travel inside the payload (.env or overrides.env), never
 # argv. Check them here so a missing key fails before the 10-minute install.
+# Shape only (personal nvapi-… keys and legacy 84-char NGC keys both work);
+# `docker login nvcr.io` in step 9c is the real validation.
 if [ "$WITH_NIM" = true ]; then
-  grep -qsE '^NGC_API_KEY=nvapi-' "$PAYLOAD/.env" "$PAYLOAD/overrides.env" \
-    || die "--with-nim needs NGC_API_KEY=nvapi-… in the payload .env (image pull from nvcr.io)"
+  grep -qsE '^NGC_API_KEY=[^[:space:]]{20,}$' "$PAYLOAD/.env" "$PAYLOAD/overrides.env" \
+    || die "--with-nim needs NGC_API_KEY (personal nvapi-… or legacy NGC key) in the payload .env (image pull from nvcr.io)"
 fi
 if [ "$WITH_NEMOCLAW" = true ]; then
-  grep -qsE '^NVIDIA_INFERENCE_API_KEY=nvapi-' "$PAYLOAD/.env" "$PAYLOAD/overrides.env" \
-    || die "--with-nemoclaw needs NVIDIA_INFERENCE_API_KEY=nvapi-… in the payload .env (the sandbox's own inference provider)"
+  grep -qsE '^NVIDIA_INFERENCE_API_KEY=[^[:space:]]{20,}$' "$PAYLOAD/.env" "$PAYLOAD/overrides.env" \
+    || die "--with-nemoclaw needs NVIDIA_INFERENCE_API_KEY (an NGC key) in the payload .env (the sandbox's own inference provider)"
 fi
 
 # --- 1. base packages + Python 3.11 ---------------------------------------
