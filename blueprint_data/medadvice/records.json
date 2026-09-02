@@ -1,0 +1,48 @@
+{
+  "_note": "SYNTHETIC demo data \u2014 no real people",
+  "records": [
+    {
+      "record_id": "PT-1041",
+      "name": "Jordan Rivera (synthetic)",
+      "age_band": "30-39",
+      "insurance_plan": "DemoCare PPO",
+      "allergies": [
+        "penicillin"
+      ],
+      "recent_visits": [
+        {
+          "date": "2026-07-12",
+          "reason": "annual physical",
+          "outcome": "no follow-up"
+        }
+      ],
+      "otc_notes": "takes ibuprofen occasionally; no kidney issues on file"
+    },
+    {
+      "record_id": "PT-2077",
+      "name": "Sam Okafor (synthetic)",
+      "age_band": "60-69",
+      "insurance_plan": "DemoCare Medicare Advantage",
+      "allergies": [],
+      "recent_visits": [
+        {
+          "date": "2026-05-03",
+          "reason": "blood pressure check",
+          "outcome": "medication continued"
+        }
+      ],
+      "otc_notes": "on a blood thinner \u2014 avoid NSAIDs unless cleared"
+    },
+    {
+      "record_id": "PT-3310",
+      "name": "Priya Natarajan (synthetic)",
+      "age_band": "20-29",
+      "insurance_plan": "DemoCare HMO",
+      "allergies": [
+        "sulfa"
+      ],
+      "recent_visits": [],
+      "otc_notes": "no notes"
+    }
+  ]
+}

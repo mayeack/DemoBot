@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>blueprint_data — synthetic knowledge + records</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #1f2937; line-height: 1.5; }
+  code { background: #f3f4f6; padding: .1rem .3rem; border-radius: 3px; font-size: .9em; }
+  h1 { font-size: 1.4rem; }
+  .note { border-left: 4px solid #d97706; background: #fffbeb; padding: .6rem .9rem; }
+</style>
+</head>
+<body>
+<h1>blueprint_data — synthetic knowledge + records for the NVIDIA AI Virtual Assistant blueprint</h1>
+<p>One folder per Application Theme:</p>
+<ul>
+  <li><code>docs/*.md</code> — knowledge articles the blueprint's <code>retrieve_knowledge</code> tool searches (keyword retrieval by default; a local embedding NIM when <code>BLUEPRINT_EMBED_URL</code> is set).</li>
+  <li><code>records.json</code> — the customer / patient / subscriber records <code>lookup_record</code> reads; a session's synthetic end-user id is bound to one record deterministically.</li>
+</ul>
+<p class="note">Everything here is <strong>synthetic</strong> demo content. No real people, accounts or medical facts are represented, and the medical/tax/legal/financial text is general information only.</p>
+</body>
+</html>

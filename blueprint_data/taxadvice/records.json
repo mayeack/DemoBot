@@ -1,0 +1,41 @@
+{
+  "_note": "SYNTHETIC demo data \u2014 no real people",
+  "records": [
+    {
+      "record_id": "TX-5501",
+      "name": "Jordan Rivera (synthetic)",
+      "filing_status": "single",
+      "state": "CA",
+      "prior_year": {
+        "filed": "2026-04-10",
+        "refund": 640
+      },
+      "estimated_payments": "none",
+      "notes": "W-2 income only"
+    },
+    {
+      "record_id": "TX-5620",
+      "name": "Sam Okafor (synthetic)",
+      "filing_status": "married filing jointly",
+      "state": "TX",
+      "prior_year": {
+        "filed": "2026-04-14",
+        "balance_due": 1200
+      },
+      "estimated_payments": "quarterly (self-employed)",
+      "notes": "Schedule C consulting income"
+    },
+    {
+      "record_id": "TX-5777",
+      "name": "Priya Natarajan (synthetic)",
+      "filing_status": "head of household",
+      "state": "NY",
+      "prior_year": {
+        "filed": "2026-10-02 (extension)",
+        "refund": 210
+      },
+      "estimated_payments": "none",
+      "notes": "student-loan interest paid"
+    }
+  ]
+}

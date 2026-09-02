@@ -1,0 +1,53 @@
+{
+  "_note": "SYNTHETIC demo data \u2014 no real people",
+  "records": [
+    {
+      "record_id": "BN-8102",
+      "name": "Jordan Rivera (synthetic)",
+      "household_size": 2,
+      "programs": [
+        {
+          "name": "housing assistance",
+          "status": "active",
+          "renewal_due": "2026-11-01"
+        }
+      ],
+      "open_claims": [],
+      "notes": "address change reported 2026-08-20"
+    },
+    {
+      "record_id": "BN-8230",
+      "name": "Sam Okafor (synthetic)",
+      "household_size": 1,
+      "programs": [
+        {
+          "name": "energy assistance",
+          "status": "pending verification",
+          "renewal_due": null
+        }
+      ],
+      "open_claims": [
+        {
+          "claim_id": "C-4471",
+          "status": "awaiting documents",
+          "filed": "2026-08-15"
+        }
+      ],
+      "notes": "pay stubs requested"
+    },
+    {
+      "record_id": "BN-8399",
+      "name": "Priya Natarajan (synthetic)",
+      "household_size": 4,
+      "programs": [
+        {
+          "name": "childcare subsidy",
+          "status": "active",
+          "renewal_due": "2027-01-15"
+        }
+      ],
+      "open_claims": [],
+      "notes": ""
+    }
+  ]
+}

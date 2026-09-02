@@ -409,6 +409,17 @@ class Settings(BaseSettings):
     # toggle / governance field is shared by all blueprints (CLAUDE.md
     # "Blueprint feature parity").
     active_blueprint: str = "demobot_multi_agent"
+    # NVIDIA AI Virtual Assistant blueprint knobs.
+    # How the primary assistant routes to sub-assistants: auto = native tool
+    # calling when the provider supports it (anthropic/openai/bedrock/nvidia),
+    # otherwise a JSON tool-call plan (Ollama models without a tools template);
+    # tools | json force one.
+    blueprint_routing: str = "auto"
+    # LOCAL embedding endpoint for the blueprint's knowledge retrieval (an
+    # OpenAI-compatible /v1/embeddings on this host, e.g. a
+    # llama-nemotron-embed-1b-v2 NIM). Empty = keyword retrieval (no model).
+    blueprint_embed_url: str = ""
+    blueprint_embed_model: str = "nvidia/llama-nemotron-embed-1b-v2"
 
     # -------------------------------------------------------------------------
     # Agentic observability (OpenTelemetry GenAI -> Splunk Observability Cloud)

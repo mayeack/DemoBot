@@ -65,6 +65,13 @@ class DemoBotState(TypedDict, total=False):
     # post-LLM injection fallback agree on a single decision.
     requested_categories: Dict[str, bool]
 
+    # ---- NVIDIA AI Virtual Assistant blueprint (blueprints/nvidia_virtual_assistant.py) ----
+    # LangGraph only carries keys declared here: a node's undeclared return key
+    # is silently dropped, so every blueprint's core keys must be listed.
+    blueprint_record: Dict[str, Any]      # lookup_record: the session's synthetic record
+    blueprint_route: Dict[str, Any]       # the primary assistant's tool call(s) + routing mode
+    blueprint_tools: List[Dict[str, Any]] # tools the sub-assistants ran (retrieve_knowledge, lookup_record)
+
     # ---- Multi-agent stage (coordinator -> specialists -> synthesizer) ----
     # The coordinator picks 1-N specialists per query; the specialists node runs
     # each as its own themed agent; the synthesizer fuses their findings into the

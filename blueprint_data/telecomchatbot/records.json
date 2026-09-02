@@ -1,0 +1,59 @@
+{
+  "_note": "SYNTHETIC demo data \u2014 no real people",
+  "records": [
+    {
+      "record_id": "TC-9001",
+      "name": "Jordan Rivera (synthetic)",
+      "plan": "Fiber 500",
+      "modem": "DG-3200",
+      "autopay": true,
+      "open_tickets": [],
+      "recent_bills": [
+        {
+          "date": "2026-08-01",
+          "amount": 79.99,
+          "status": "paid"
+        }
+      ],
+      "area_outage": false
+    },
+    {
+      "record_id": "TC-9142",
+      "name": "Sam Okafor (synthetic)",
+      "plan": "Cable 200",
+      "modem": "CM-1100",
+      "autopay": false,
+      "open_tickets": [
+        {
+          "ticket": "T-55821",
+          "issue": "intermittent drops",
+          "status": "technician scheduled 2026-09-04"
+        }
+      ],
+      "recent_bills": [
+        {
+          "date": "2026-08-01",
+          "amount": 64.99,
+          "status": "past due"
+        }
+      ],
+      "area_outage": true
+    },
+    {
+      "record_id": "TC-9260",
+      "name": "Priya Natarajan (synthetic)",
+      "plan": "Fiber 1000",
+      "modem": "DG-3200",
+      "autopay": true,
+      "open_tickets": [],
+      "recent_bills": [
+        {
+          "date": "2026-08-01",
+          "amount": 99.99,
+          "status": "paid"
+        }
+      ],
+      "area_outage": false
+    }
+  ]
+}

@@ -9,20 +9,23 @@ drive both without flipping global state.
 
 from __future__ import annotations
 
+import logging
 from typing import Dict, List, Optional
 
 from backend.agents.blueprints import demobot_multi_agent
 from backend.agents.blueprints.base import CORE_STATE_CONTRACT, Blueprint
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_BLUEPRINT = demobot_multi_agent.KEY
 
 _MODULES = [demobot_multi_agent]
-try:  # the NVIDIA blueprint is optional at import time so a broken core never takes the default down
+try:
     from backend.agents.blueprints import nvidia_virtual_assistant  # noqa: E402
 
     _MODULES.append(nvidia_virtual_assistant)
-except ImportError:  # pragma: no cover - only while the module does not exist yet
-    pass
+except Exception:  # noqa: BLE001 - a broken optional core must never take the default down, but say so loudly
+    logger.exception("NVIDIA AI Virtual Assistant blueprint failed to load; only the DemoBot blueprint is available")
 
 BLUEPRINTS: Dict[str, Blueprint] = {m.BLUEPRINT.key: m.BLUEPRINT for m in _MODULES}
 

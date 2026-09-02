@@ -11,7 +11,7 @@ from backend.database.db import init_db
 from backend.logging.log_handlers import setup_logging
 from backend.middleware.request_logging import RequestLoggingMiddleware
 from backend.middleware.access_key import AccessKeyMiddleware
-from backend.routers import chat, admin, auth, settings as settings_routes, incident, spray, toolguard
+from backend.routers import chat, admin, auth, settings as settings_routes, incident, spray, toolguard, analytics
 from backend.telemetry import otel
 
 # Setup logging
@@ -69,6 +69,7 @@ app.include_router(settings_routes.router)
 app.include_router(incident.router)
 app.include_router(spray.router)
 app.include_router(toolguard.router)
+app.include_router(analytics.router)
 
 def _prewarm_llm_stack() -> None:
     """Absorb the first-turn cold start off the request path.
