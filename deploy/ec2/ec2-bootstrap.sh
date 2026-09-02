@@ -84,6 +84,21 @@ log()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33mwarning: %s\033[0m\n' "$*" >&2; }
 die()  { printf '\033[31merror: %s\033[0m\n' "$*" >&2; exit 1; }
 
+# apt on a fresh Ubuntu box races unattended-upgrades: it grabs the dpkg lock a
+# few minutes after first boot, and a plain apt-get then dies with "Could not
+# get lock /var/lib/dpkg/lock-frontend" (killed a deploy at step 9b on
+# 2026-09-02, ~10 min in). Wait for the lock instead of failing.
+wait_dpkg_lock() {
+  local i
+  for i in $(seq 1 120); do
+    sudo fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock >/dev/null 2>&1 || return 0
+    [ "$i" -eq 1 ] && echo "  waiting for the dpkg lock (unattended-upgrades?) ..."
+    sleep 5
+  done
+  warn "dpkg lock still held after 10 min — trying anyway"
+}
+apt_get() { wait_dpkg_lock; sudo -E apt-get -o DPkg::Lock::Timeout=600 "$@"; }
+
 ARCH=$(uname -m)
 case "$ARCH" in
   x86_64)  CF_ARCH=amd64; OTEL_ARCH=amd64 ;;
@@ -117,10 +132,10 @@ fi
 # 3.11 from deadsnakes: Ubuntu 22.04 ships 3.10, on which LangChain 1.x fails.
 log "base packages + Python 3.11"
 export DEBIAN_FRONTEND=noninteractive
-sudo -E apt-get update -y
-sudo -E apt-get install -y git lsof curl jq software-properties-common
-sudo -E add-apt-repository -y ppa:deadsnakes/ppa
-sudo -E apt-get install -y python3.11 python3.11-venv python3.11-dev
+apt_get update -y
+apt_get install -y git lsof curl jq software-properties-common
+wait_dpkg_lock; sudo -E add-apt-repository -y ppa:deadsnakes/ppa
+apt_get install -y python3.11 python3.11-venv python3.11-dev
 
 # --- 2. cloudflared --------------------------------------------------------
 log "cloudflared"
@@ -467,7 +482,7 @@ if [ "$WITH_NIM" = true ] || [ "$WITH_NEMOCLAW" = true ]; then
     curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
       | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
       | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null
-    sudo -E apt-get update -y && sudo -E apt-get install -y nvidia-container-toolkit
+    apt_get update -y && apt_get install -y nvidia-container-toolkit
     sudo nvidia-ctk runtime configure --runtime=docker
     sudo systemctl restart docker
   fi
@@ -476,7 +491,7 @@ fi
 if [ "$WITH_NEMOCLAW" = true ]; then
   # NemoClaw's installer verifies the OpenShell binary with `strings` (binutils)
   # and needs Node >= 22.19 on PATH; the Deep Learning AMI ships neither.
-  sudo -E apt-get install -y binutils
+  apt_get install -y binutils
   NODE_OK=false
   if command -v node >/dev/null; then
     NODE_V=$(node --version | sed 's/^v//'); NODE_MAJ=${NODE_V%%.*}; NODE_MIN=${NODE_V#*.}; NODE_MIN=${NODE_MIN%%.*}
@@ -485,7 +500,7 @@ if [ "$WITH_NEMOCLAW" = true ]; then
   if [ "$NODE_OK" != true ]; then
     log "Node.js 22 (NemoClaw needs >= 22.19; found ${NODE_V:-none})"
     curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-    sudo -E apt-get install -y nodejs
+    apt_get install -y nodejs
   fi
   node --version
 fi

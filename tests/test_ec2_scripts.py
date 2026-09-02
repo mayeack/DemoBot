@@ -102,6 +102,12 @@ def test_bootstrap_start_order_and_gate() -> None:
     check("^NVIDIA_INFERENCE_API_KEY=" in seg, "step 0 requires NVIDIA_INFERENCE_API_KEY for --with-nemoclaw")
     check("deb.nodesource.com/setup_22.x" in text and "binutils" in text,
           "--with-nemoclaw installs Node 22 + binutils (NemoClaw prerequisites)")
+    # apt must wait for the dpkg lock (unattended-upgrades killed a deploy at
+    # step 9b on 2026-09-02): every apt-get goes through apt_get(), which does.
+    bare = [l for l in text.splitlines() if "apt-get " in l and "apt_get()" not in l
+            and not l.lstrip().startswith("#") and "sudo apt-get install -y nvidia-driver" not in l]
+    check(not bare, f"no bare apt-get outside the apt_get() helper ({len(bare)} found)")
+    check("DPkg::Lock::Timeout" in text and "wait_dpkg_lock" in text, "apt_get() waits for the dpkg lock")
     # The key never reaches argv: only stdin login, the env file, and -e NGC_API_KEY.
     argv_leak = re.search(r"docker login[^\n]*-p\s", text)
     check(argv_leak is None, "docker login uses --password-stdin, never -p on argv")
