@@ -110,6 +110,8 @@ def test_bootstrap_start_order_and_gate() -> None:
     # OOM in vLLM's profiling pass, restart loop, never ready — 2026-09-02).
     check("NIM_MAX_MODEL_LEN=" in text and "-e NIM_MAX_MODEL_LEN" in text,
           "the NIM unit caps the context via NIM_MAX_MODEL_LEN (default 8192)")
+    check("NIM_MAX_NUM_SEQS=" in text and "-e NIM_MAX_NUM_SEQS" in text,
+          "the NIM unit caps concurrency via NIM_MAX_NUM_SEQS (Mamba state cache; default 16)")
     # apt must wait for the dpkg lock (unattended-upgrades killed a deploy at
     # step 9b on 2026-09-02): every apt-get goes through apt_get(), which does.
     bare = [l for l in text.splitlines() if "apt-get " in l and "apt_get()" not in l
