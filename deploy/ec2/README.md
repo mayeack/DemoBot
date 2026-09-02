@@ -402,6 +402,12 @@ wants a 150 GB volume.
   every 30 s), so the app's startup catalog probe sees NIM READY. The final
   health gate includes `/v1/health/ready` and `/v1/models`: `BOOTSTRAP_OK` on a
   NIM box means the NIM is serving.
+- **The NIM context is capped at 8192 tokens** (`NIM_MAX_MODEL_LEN` in
+  `/etc/demobot-nim.env`, passed to the container; set `NIM_MAX_MODEL_LEN=N` in
+  the bootstrap's environment to change it). At the image default of 131072,
+  vLLM's profiling pass allocates a 33.75 GiB logits buffer next to 17 GiB of
+  weights and the container OOM-loops on a 22 GiB A10G without ever becoming
+  ready. 8192 is what the demo runs Ollama at.
 - **NemoClaw prerequisites** (`binutils` for the installer's `strings` check,
   Node ≥ 22.19 from NodeSource) are installed by `--with-nemoclaw`; both keys are
   checked in the payload preflight (step 0), not twenty minutes in.

@@ -234,6 +234,11 @@ used means a third model, or a much larger context, fits without swapping.
   provider while the NIM sat idle. Fixed in 4.2.1 (decided in step 3);
   `tests/test_ec2_scripts.py` guards the order. If a NIM box answers with
   `provider_name=ollama`, check `grep ^AI_PROVIDER ~/DemoBot/.env` on the box.
+- **A NIM that loads weights then restart-loops is a context-size OOM.** The
+  image default is 131072 tokens; vLLM's profiling pass then wants ~34 GiB on
+  top of the weights and dies with `CUDA out of memory` on the A10G, forever.
+  The bootstrap passes `NIM_MAX_MODEL_LEN=8192`; `sudo journalctl -u demobot-nim
+  | grep -i "out of memory"` confirms the symptom if someone raises it.
 - **First NIM start is a 30-40 GB download** (image + weights into
   `/opt/nim-cache`). `/v1/health/ready` stays non-200 until the engine is
   loaded; the bootstrap waits up to 40 min and prints the container's last log
