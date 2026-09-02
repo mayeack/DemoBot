@@ -1,14 +1,14 @@
 #!/bin/bash
 # Run a local OpenTelemetry Collector that forwards the app's OTLP telemetry to
 # Splunk Observability Cloud (metrics via the signalfx exporter, traces via the
-# Splunk OTLP/APM ingest). Reads SPLUNK_REALM + SPLUNK_ACCESS_TOKEN from .env.
+# Splunk OTLP/APM ingest). Reads SPLUNK_REALM + O11Y_INGEST from .env.
 # Prefers the native ./bin/otelcol-contrib binary; falls back to podman/docker.
 # Run this alongside ./run.sh.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 export SPLUNK_REALM=$(grep '^SPLUNK_REALM=' .env 2>/dev/null | cut -d= -f2- || true)
-export SPLUNK_ACCESS_TOKEN=$(grep '^SPLUNK_ACCESS_TOKEN=' .env 2>/dev/null | cut -d= -f2- || true)
+export O11Y_INGEST=$(grep '^O11Y_INGEST=' .env 2>/dev/null | cut -d= -f2- || true)
 # Galileo (LLM observability) — optional second trace destination.
 export GALILEO_API_KEY=$(grep '^GALILEO_API_KEY=' .env 2>/dev/null | cut -d= -f2- || true)
 export GALILEO_PROJECT=$(grep '^GALILEO_PROJECT=' .env 2>/dev/null | cut -d= -f2- || true)
@@ -40,8 +40,8 @@ if [ -n "${SPLUNK_HEC_TOKEN:-}" ] && [ -n "${SPLUNK_HEC_URL:-}" ]; then
 else
   LOGS_STATE="OFF (no SPLUNK_HEC_URL/SPLUNK_HEC_TOKEN in .env)"
 fi
-if [ -z "${SPLUNK_REALM:-}" ] || [ -z "${SPLUNK_ACCESS_TOKEN:-}" ]; then
-  echo "ERROR: set SPLUNK_REALM and SPLUNK_ACCESS_TOKEN in .env first." >&2
+if [ -z "${SPLUNK_REALM:-}" ] || [ -z "${O11Y_INGEST:-}" ]; then
+  echo "ERROR: set SPLUNK_REALM and O11Y_INGEST in .env first." >&2
   exit 1
 fi
 
@@ -71,7 +71,7 @@ if [ -n "${SPLUNK_HEC_TOKEN:-}" ] && [ -n "${SPLUNK_HEC_URL:-}" ]; then
 fi
 exec "$RUNTIME" run --rm --name otel-collector \
   -p 4317:4317 -p 4318:4318 \
-  -e SPLUNK_REALM -e SPLUNK_ACCESS_TOKEN \
+  -e SPLUNK_REALM -e O11Y_INGEST \
   -e GALILEO_API_KEY -e GALILEO_PROJECT -e GALILEO_LOG_STREAM \
   -e SPLUNK_HEC_URL -e SPLUNK_HEC_TOKEN -e SPLUNK_HEC_INDEX \
   -v "$PWD/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro" \

@@ -518,11 +518,11 @@ GALILEO_LOG_STREAM=DemoBot
 <td>HTTP Basic password gating public access — <strong>required</strong> when the tunnel is up</td>
 </tr>
 <tr>
-<td><code>SPLUNK_ACCESS_TOKEN</code></td>
+<td><code>O11Y_INGEST</code></td>
 <td>O11y <strong>ingest</strong> token, realm us1</td>
 </tr>
 <tr>
-<td><code>SPLUNK_API_TOKEN</code></td>
+<td><code>O11Y_API</code></td>
 <td>O11y <strong>API</strong> token — ⚠️ currently expired (401), see §8</td>
 </tr>
 <tr>
@@ -811,9 +811,9 @@ runs the same checks in tiers.</p>
 <hr />
 <h2 id="8-known-issues-and-gotchas">8. Known issues and gotchas</h2>
 <ul>
-<li><strong><code>SPLUNK_API_TOKEN</code> is expired</strong> (401). It only affects tier 3 of
+<li><strong><code>O11Y_API</code> is expired</strong> (401). It only affects tier 3 of
   <code>verify_observability.sh</code>, which queries O11y to confirm metrics landed. The
-  <em>ingest</em> token (<code>SPLUNK_ACCESS_TOKEN</code>) is valid and telemetry flows normally.
+  <em>ingest</em> token (<code>O11Y_INGEST</code>) is valid and telemetry flows normally.
   See <strong>§10</strong> for the reissue procedure.</li>
 <li><strong><code>cloudflared tunnel list</code> fails on EC2</strong> — no <code>cert.pem</code> by design. Only
   <code>tunnel run</code> is supported on replicas. Not a fault.</li>
@@ -863,11 +863,11 @@ runs the same checks in tiers.</p>
 separate backup.</p>
 <p><code>~/DemoBot/medadvice.db</code> is demo state and does not need backing up.</p>
 <hr />
-<h2 id="10-reissuing-splunk_api_token">10. Reissuing <code>SPLUNK_API_TOKEN</code></h2>
+<h2 id="10-reissuing-o11y_api">10. Reissuing <code>O11Y_API</code></h2>
 <h3 id="what-kind-of-token">What kind of token</h3>
 <p>Both consumers call <code>https://api.us1.signalfx.com</code> with an <code>X-SF-Token</code> header,
 so this must be a token with <strong>API authorization scope</strong> — <em>not</em> an ingest token
-(<code>SPLUNK_ACCESS_TOKEN</code> is the ingest one and is a separate value).</p>
+(<code>O11Y_INGEST</code> is the ingest one and is a separate value).</p>
 <table>
 <thead>
 <tr>
@@ -912,19 +912,19 @@ so this must be a token with <strong>API authorization scope</strong> — <em>no
 <p>Three places (Mac + each EC2 replica), same value.</p>
 <p>Mac — BSD sed needs the empty <code>-i</code> argument:</p>
 <pre><code class="language-bash">cd /Applications/DemoBot &amp;&amp; cp .env .env.bak &amp;&amp; read -rs NEWTOK \
-  &amp;&amp; sed -i '' &quot;s|^SPLUNK_API_TOKEN=.*|SPLUNK_API_TOKEN=${NEWTOK}|&quot; .env \
-  &amp;&amp; grep -c '^SPLUNK_API_TOKEN=' .env
+  &amp;&amp; sed -i '' &quot;s|^O11Y_API=.*|O11Y_API=${NEWTOK}|&quot; .env \
+  &amp;&amp; grep -c '^O11Y_API=' .env
 </code></pre>
 <p>EC2 — GNU sed, no <code>''</code>:</p>
 <pre><code class="language-bash">cd ~/DemoBot &amp;&amp; cp .env .env.bak &amp;&amp; read -rs NEWTOK \
-  &amp;&amp; sed -i &quot;s|^SPLUNK_API_TOKEN=.*|SPLUNK_API_TOKEN=${NEWTOK}|&quot; .env \
-  &amp;&amp; chmod 600 .env &amp;&amp; grep -c '^SPLUNK_API_TOKEN=' .env
+  &amp;&amp; sed -i &quot;s|^O11Y_API=.*|O11Y_API=${NEWTOK}|&quot; .env \
+  &amp;&amp; chmod 600 .env &amp;&amp; grep -c '^O11Y_API=' .env
 </code></pre>
 <p><code>read -rs</code> keeps the secret out of shell history. Expect <code>1</code> from <code>grep -c</code>.</p>
-<p><strong>No service restart is required.</strong> <code>SPLUNK_API_TOKEN</code> is read only by the two
+<p><strong>No service restart is required.</strong> <code>O11Y_API</code> is read only by the two
 test/script files, at invocation, directly from <code>.env</code>. Neither <code>run.sh</code> nor
 <code>run-collector.sh</code> references it — the live telemetry path uses
-<code>SPLUNK_ACCESS_TOKEN</code> and is unaffected.</p>
+<code>O11Y_INGEST</code> and is unaffected.</p>
 <h3 id="verify">Verify</h3>
 <p>Test the token in isolation before blaming telemetry:</p>
 <pre><code class="language-bash">curl -s -o /dev/null -w '%{http_code}\n' -H &quot;X-SF-Token: $NEWTOK&quot; \

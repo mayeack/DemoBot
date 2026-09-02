@@ -260,7 +260,7 @@ the environment (line 76), so tier 3 queries the wrong replica and fails on any
 EC2 box even with a valid token. Run the checker directly instead — the
 bootstrap prints this line for you, filled in:</p>
 <pre><code class="language-bash">python3 tests/observability/check_o11y_metadata.py \
-    us1 &quot;$(grep '^SPLUNK_API_TOKEN=' .env | cut -d= -f2-)&quot; demobot-v3 demobot-ec2-2
+    us1 &quot;$(grep '^O11Y_API=' .env | cut -d= -f2-)&quot; demobot-v3 demobot-ec2-2
 </code></pre>
 <p>Then confirm in Splunk O11y that the new value appears as its own environment
 alongside <code>demobot-local</code>.</p>

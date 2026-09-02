@@ -8,7 +8,7 @@ demobot-local:
   - High request latency  (service.request.duration.ns.p90)
   - High error rate        (service.request.count + sf_error)
 
-Reads SPLUNK_REALM + SPLUNK_API_TOKEN from .env (the API token, not the ingest
+Reads SPLUNK_REALM + O11Y_API from .env (the API token, not the ingest
 token). Re-running is safe — existing detectors (by name) are left alone.
 
 Usage:  venv/bin/python scripts/observability/create_apm_detectors.py
@@ -33,9 +33,9 @@ def env(key: str):
 
 
 REALM = env("SPLUNK_REALM") or "us1"
-TOKEN = env("SPLUNK_API_TOKEN")
+TOKEN = env("O11Y_API")
 if not TOKEN:
-    print("ERROR: SPLUNK_API_TOKEN not set in .env (need an O11y API token)")
+    print("ERROR: O11Y_API not set in .env (need an O11y API token)")
     sys.exit(1)
 API = f"https://api.{REALM}.signalfx.com"
 SVC, ENVN = "demobot-v3", "demobot-local"

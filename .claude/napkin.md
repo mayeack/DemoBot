@@ -247,7 +247,7 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
 
 ## Running the app
 - `./run.sh` (local, :8001) launches under `opentelemetry-instrument` when
-  `SPLUNK_ACCESS_TOKEN`/OTLP is set in `.env`. `./tunnel.sh` for a public
+  `O11Y_INGEST`/OTLP is set in `.env`. `./tunnel.sh` for a public
   Cloudflare URL (ephemeral; needs the app running).
 - Access gate: `ACCESS_KEY` in `.env` (currently word-style). Log in at `/login`,
   or `curl -u x:$ACCESS_KEY`. `/health` is the only open route.

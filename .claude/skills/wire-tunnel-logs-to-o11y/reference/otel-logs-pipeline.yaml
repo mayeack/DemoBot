@@ -18,7 +18,7 @@
 #   traces  -> Splunk APM via the OTLP/HTTP trace ingest endpoint.
 #   logs    -> Splunk Cloud HEC backing the workshop org's Log Observer Connect.
 # Realm + token come from the container environment (SPLUNK_REALM /
-# SPLUNK_ACCESS_TOKEN), injected by run-collector.sh from .env.
+# O11Y_INGEST), injected by run-collector.sh from .env.
 extensions:
   # Checkpoints filelog read offsets so a collector restart resumes where it
   # left off instead of re-shipping every log file from the top.
@@ -89,13 +89,13 @@ processors:
 
 exporters:
   signalfx:
-    access_token: "${env:SPLUNK_ACCESS_TOKEN}"
+    access_token: "${env:O11Y_INGEST}"
     realm: "${env:SPLUNK_REALM}"
     send_otlp_histograms: true
   otlphttp/traces:
     traces_endpoint: "https://ingest.${env:SPLUNK_REALM}.signalfx.com/v2/trace/otlp"
     headers:
-      X-SF-Token: "${env:SPLUNK_ACCESS_TOKEN}"
+      X-SF-Token: "${env:O11Y_INGEST}"
   # Galileo (LLM observability). Same gen_ai.* spans fan out here over OTLP/HTTP.
   # Header KEYS are fixed (Galileo-API-Key/project/logstream); values from env,
   # injected by run-collector.sh. Galileo auto-maps OpenTelemetry GenAI semconv.

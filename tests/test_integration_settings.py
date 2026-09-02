@@ -190,8 +190,8 @@ def test_env_writer_collapses_pre_existing_duplicates() -> None:
 
 def test_env_writer_appends_when_absent_and_preserves_mode() -> None:
     with _TempEnv("A=1\n") as p:
-        settings_store._write_env_key("SPLUNK_API_TOKEN", "tok")
-        check("absent key is appended", _value(p, "SPLUNK_API_TOKEN") == "tok")
+        settings_store._write_env_key("O11Y_API", "tok")
+        check("absent key is appended", _value(p, "O11Y_API") == "tok")
         check("file mode stays 0600", stat.S_IMODE(p.stat().st_mode) == 0o600)
 
     # A file with no trailing newline must not get its last line glued to the new one.
@@ -202,11 +202,11 @@ def test_env_writer_appends_when_absent_and_preserves_mode() -> None:
 
 
 def test_env_writer_survives_awkward_values() -> None:
-    with _TempEnv("SPLUNK_ACCESS_TOKEN=old\n") as p:
+    with _TempEnv("O11Y_INGEST=old\n") as p:
         awkward = "a=b&c/d|e+f=="
-        settings_store._write_env_key("SPLUNK_ACCESS_TOKEN", awkward)
+        settings_store._write_env_key("O11Y_INGEST", awkward)
         check("a value containing = & / | round-trips verbatim",
-              _value(p, "SPLUNK_ACCESS_TOKEN") == awkward)
+              _value(p, "O11Y_INGEST") == awkward)
         rejected = False
         try:
             settings_store._write_env_key("SPLUNK_REALM", "us1\nEVIL=1")

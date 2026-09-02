@@ -482,7 +482,7 @@ if [ $rc -eq 0 ]; then
   echo
   echo "Confirm telemetry is landing under this replica's own environment:"
   echo "  cd $REPO && python3 tests/observability/check_o11y_metadata.py \\"
-  echo "      us1 \"\$(grep '^SPLUNK_API_TOKEN=' .env | cut -d= -f2-)\" demobot-v3 $ENV_NAME"
+  echo "      us1 \"\$(grep '^O11Y_API=' .env | cut -d= -f2-)\" demobot-v3 $ENV_NAME"
   echo "  (verify_observability.sh hard-codes demobot-local, so it is wrong on a replica)"
 else
   echo "BOOTSTRAP_INCOMPLETE — a health check failed. Logs:"

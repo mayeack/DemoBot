@@ -316,8 +316,8 @@ GALILEO_LOG_STREAM=DemoBot
 | `ANTHROPIC_API_KEY` | only used if `AI_PROVIDER=anthropic` |
 | `AI_DEFENSE_API_KEY` | Cisco AI Defense inspection key |
 | `ACCESS_KEY` | HTTP Basic password gating public access — **required** when the tunnel is up |
-| `SPLUNK_ACCESS_TOKEN` | O11y **ingest** token, realm us1 |
-| `SPLUNK_API_TOKEN` | O11y **API** token — ⚠️ currently expired (401), see §8 |
+| `O11Y_INGEST` | O11y **ingest** token, realm us1 |
+| `O11Y_API` | O11y **API** token — ⚠️ currently expired (401), see §8 |
 | `GALILEO_API_KEY` | Galileo ingest key |
 
 ### The active model is set in **two** places — the database wins
@@ -559,9 +559,9 @@ runs the same checks in tiers.
 
 ## 8. Known issues and gotchas
 
-- **`SPLUNK_API_TOKEN` is expired** (401). It only affects tier 3 of
+- **`O11Y_API` is expired** (401). It only affects tier 3 of
   `verify_observability.sh`, which queries O11y to confirm metrics landed. The
-  *ingest* token (`SPLUNK_ACCESS_TOKEN`) is valid and telemetry flows normally.
+  *ingest* token (`O11Y_INGEST`) is valid and telemetry flows normally.
   See **§10** for the reissue procedure.
 - **`cloudflared tunnel list` fails on EC2** — no `cert.pem` by design. Only
   `tunnel run` is supported on replicas. Not a fault.
@@ -616,13 +616,13 @@ separate backup.
 
 ---
 
-## 10. Reissuing `SPLUNK_API_TOKEN`
+## 10. Reissuing `O11Y_API`
 
 ### What kind of token
 
 Both consumers call `https://api.us1.signalfx.com` with an `X-SF-Token` header,
 so this must be a token with **API authorization scope** — *not* an ingest token
-(`SPLUNK_ACCESS_TOKEN` is the ingest one and is a separate value).
+(`O11Y_INGEST` is the ingest one and is a separate value).
 
 | Consumer | Call | Minimum role |
 |---|---|---|
@@ -658,24 +658,24 @@ Mac — BSD sed needs the empty `-i` argument:
 
 ```bash
 cd /Applications/DemoBot && cp .env .env.bak && read -rs NEWTOK \
-  && sed -i '' "s|^SPLUNK_API_TOKEN=.*|SPLUNK_API_TOKEN=${NEWTOK}|" .env \
-  && grep -c '^SPLUNK_API_TOKEN=' .env
+  && sed -i '' "s|^O11Y_API=.*|O11Y_API=${NEWTOK}|" .env \
+  && grep -c '^O11Y_API=' .env
 ```
 
 EC2 — GNU sed, no `''`:
 
 ```bash
 cd ~/DemoBot && cp .env .env.bak && read -rs NEWTOK \
-  && sed -i "s|^SPLUNK_API_TOKEN=.*|SPLUNK_API_TOKEN=${NEWTOK}|" .env \
-  && chmod 600 .env && grep -c '^SPLUNK_API_TOKEN=' .env
+  && sed -i "s|^O11Y_API=.*|O11Y_API=${NEWTOK}|" .env \
+  && chmod 600 .env && grep -c '^O11Y_API=' .env
 ```
 
 `read -rs` keeps the secret out of shell history. Expect `1` from `grep -c`.
 
-**No service restart is required.** `SPLUNK_API_TOKEN` is read only by the two
+**No service restart is required.** `O11Y_API` is read only by the two
 test/script files, at invocation, directly from `.env`. Neither `run.sh` nor
 `run-collector.sh` references it — the live telemetry path uses
-`SPLUNK_ACCESS_TOKEN` and is unaffected.
+`O11Y_INGEST` and is unaffected.
 
 ### Verify
 

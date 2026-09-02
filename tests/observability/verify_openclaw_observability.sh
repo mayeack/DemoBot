@@ -10,7 +10,7 @@
 #   Tier 2  forwarding: an agent tool call produces execute_tool spans that
 #           reach Splunk, 0 export failures
 #   Tier 3  metadata: gen_ai token/duration for openclaw-gateway in O11y
-#           (needs SPLUNK_API_TOKEN; --no-agent since OpenClaw metrics carry
+#           (needs O11Y_API; --no-agent since OpenClaw metrics carry
 #           no gen_ai.agent.name)
 #
 # Exit 0 = pass, non-zero = fail. Tiers that need the live gateway SKIP (not
@@ -114,10 +114,10 @@ gfail=$(sum 'otelcol_exporter_send_failed_spans.*galileo')
   || bad "Galileo span send failures=$gfail -> orphaned-parent drop? add transform/openclaw_genai"
 
 echo "== Tier 3: openclaw-gateway GenAI metadata in Observability Cloud =="
-APITOK=$(grep '^SPLUNK_API_TOKEN=' .env 2>/dev/null | cut -d= -f2)
+APITOK=$(grep '^O11Y_API=' .env 2>/dev/null | cut -d= -f2)
 REALM=$(grep '^SPLUNK_REALM=' .env 2>/dev/null | cut -d= -f2)
 if [ -z "${APITOK:-}" ]; then
-  skip "SPLUNK_API_TOKEN not set in .env (an O11y API token) -> skipping metadata assertion"
+  skip "O11Y_API not set in .env (an O11y API token) -> skipping metadata assertion"
 else
   if python3 tests/observability/check_o11y_metadata.py "$REALM" "$APITOK" openclaw-gateway --no-agent; then
     ok "gen_ai token usage + operation.duration present for openclaw-gateway"
