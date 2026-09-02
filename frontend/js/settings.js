@@ -94,7 +94,10 @@ function credHelpHtml(f) {
 }
 
 // One credential input (secret = password that starts EMPTY; "(set)" means one exists).
+// A `wide` field spans both grid columns \u2014 for values (a resource-attribute list)
+// that are unreadable in a half-width box.
 function credFieldHtml(f) {
+  const cell = f.wide ? ' class="sm:col-span-2"' : '';
   if (f.boolean) {
     // A checkbox always reports its state, so it is the one field type where an
     // unchecked box means "off" rather than "leave the stored value alone".
@@ -108,13 +111,13 @@ function credFieldHtml(f) {
   }
   if (f.secret) {
     const ph = f.present ? '•••••••• (set) — leave blank to keep' : (f.placeholder || ('enter ' + f.label));
-    return `<div>
+    return `<div${cell}>
       <label class="block text-xs font-semibold text-gray-600 mb-1">${esc(f.label)}</label>
       <input data-cred="${attr(f.key)}" type="password" autocomplete="new-password" placeholder="${attr(ph)}"
         class="w-full p-2 border border-gray-300 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500">
       ${credHelpHtml(f)}</div>`;
   }
-  return `<div>
+  return `<div${cell}>
     <label class="block text-xs font-semibold text-gray-600 mb-1">${esc(f.label)}</label>
     <input data-cred="${attr(f.key)}" type="text" value="${attr(f.value || '')}" placeholder="${attr(f.placeholder || '')}"
       class="w-full p-2 border border-gray-300 rounded text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500">
@@ -230,7 +233,7 @@ const INTEGRATION_TITLES = {
 const INTEGRATION_NOTES = {
   ai_defense: '',
   nemo_guardrails: 'Applies on the next chat turn — no restart. Rails are rebuilt automatically when the active provider/model changes.',
-  splunk_o11y: 'Read by the OpenTelemetry collector, not the app \u2014 saving writes .env, so the collector must be restarted to pick it up. On a fleet replica these are replaced by the next deploy.',
+  splunk_o11y: 'Read by a separate process \u2014 the collector (realm, ingest token) or the app at startup (OTLP endpoint, resource attributes). Saving writes .env; the save message names which process to restart. On a fleet replica these are replaced by the next deploy.',
   agent_observability: 'Applies on the next chat turn \u2014 no restart.',
 };
 

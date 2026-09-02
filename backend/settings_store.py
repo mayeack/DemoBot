@@ -170,6 +170,37 @@ def _validate_optional_nim_url(value: str) -> None:
     local-only rule as the inference NIM. Blank never reaches here."""
     _validate_nim_base_url(value)
 
+
+def _validate_resource_attributes(value: str) -> None:
+    """Reject an OTEL_RESOURCE_ATTRIBUTES value the OTel SDK would silently ignore.
+
+    The format is a comma-separated ``key=value`` list. A typo here fails SILENTLY —
+    the SDK drops the malformed pair, the app still starts, telemetry still flows, and
+    the box just never gets the identity it was supposed to have. That is exactly the
+    failure a per-instance identity field exists to prevent, so validate on the way in
+    rather than discovering it in O11y.
+    """
+    if " #" in value:
+        # backend/config.py::_strip_env_value drops an unquoted trailing " # comment"
+        # when it reloads .env, so this would be truncated on the next restart.
+        raise ValueError(
+            "resource attributes must not contain ' #' — it is stripped as a comment "
+            "when .env is reloaded"
+        )
+    for pair in value.split(","):
+        pair = pair.strip()
+        if not pair:
+            raise ValueError("resource attributes contain an empty entry (stray comma?)")
+        if "=" not in pair:
+            raise ValueError(
+                f"resource attribute {pair!r} is not key=value — expected a "
+                "comma-separated list like "
+                "'deployment.environment=demobot-local,host.name=my-box'"
+            )
+        if not pair.split("=", 1)[0].strip():
+            raise ValueError(f"resource attribute {pair!r} has an empty key")
+
+
 _INTEGRATION_FIELDS: Dict[str, List[_CredField]] = {
     # Applies live: AIDefenseClient.reconfigure() re-reads the settings singleton.
     "ai_defense": [
@@ -196,6 +227,16 @@ _INTEGRATION_FIELDS: Dict[str, List[_CredField]] = {
                    help="Read-only API token used by the observability regression test."),
         _CredField("otlp_endpoint", "OTLP endpoint", env="OTEL_EXPORTER_OTLP_ENDPOINT",
                    env_file=True, restart="app", placeholder="http://localhost:4317"),
+        _CredField("resource_attributes", "Resource attributes",
+                   env="OTEL_RESOURCE_ATTRIBUTES", env_file=True, restart="app",
+                   wide=True, validate=_validate_resource_attributes,
+                   placeholder="deployment.environment=demobot-local,host.name=my-box",
+                   help="Comma-separated key=value list stamped on every span and "
+                        "metric. deployment.environment is what splits one DemoBot "
+                        "instance from another in O11y — give every box in a "
+                        "multi-instance workshop a distinct value. Leave "
+                        "service.name alone (OTEL_SERVICE_NAME) so they stay one "
+                        "service."),
     ],
     # Applies live: the SDK path builds a fresh GalileoLogger per turn and reads
     # these from os.environ at call time.
@@ -237,6 +278,15 @@ def _field_current(field: "_CredField") -> str:
 
     if field.settings_attr:
         cur = getattr(settings, field.settings_attr, "")
+    elif field.env_file and field.env:
+        # .env, NOT os.environ: an env_file field's value is owned by .env, and a
+        # library may have rewritten the process copy. The Splunk OTel distro does
+        # exactly that — under opentelemetry-instrument it appends its own
+        # telemetry.distro.* attributes to OTEL_RESOURCE_ATTRIBUTES at bootstrap. If
+        # the field prefilled from os.environ, a save the operator never edited would
+        # write the distro's internal attributes into .env and pin a distro version
+        # that the distro is supposed to report itself.
+        cur = _read_env_file_value(field.env)
     elif field.env:
         cur = os.environ.get(field.env, "")
     else:
@@ -592,6 +642,29 @@ def _env_path() -> Path:
     from backend.config import BASE_DIR
 
     return Path(BASE_DIR) / ".env"
+
+
+def _read_env_file_value(key: str) -> str:
+    """Value of ``key`` as .env currently holds it, or "" if absent.
+
+    Takes the FIRST match and applies the same quote/trailing-comment handling as
+    backend/config.py's loader, so what the Settings page shows is what the app and
+    the shell launchers will read back."""
+    from backend.config import _strip_env_value
+
+    path = _env_path()
+    if not path.exists():
+        return ""
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if line.startswith("export "):
+            line = line[len("export "):]
+        if line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        if k.strip() == key:
+            return _strip_env_value(v)
+    return ""
 
 
 def _write_env_key(key: str, value: str) -> None:

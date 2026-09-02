@@ -236,6 +236,111 @@ def test_live_fields_report_no_restart() -> None:
         settings.ai_defense_region = orig
 
 
+def test_resource_attributes_round_trip() -> None:
+    """The per-instance identity field: what a multi-instance workshop edits."""
+    with _TempEnv("SPLUNK_REALM=us1\n"
+                  "OTEL_RESOURCE_ATTRIBUTES=deployment.environment=demobot-local\n"
+                  "OTEL_ENABLED=True\n") as env:
+        restart = settings_store.set_integration_creds(
+            "splunk_o11y",
+            {"resource_attributes": "deployment.environment=medadvice2,host.name=box2"})
+        check("resource attributes rewritten in place",
+              _value(env, "OTEL_RESOURCE_ATTRIBUTES")
+              == "deployment.environment=medadvice2,host.name=box2")
+        check("exactly one OTEL_RESOURCE_ATTRIBUTES line",
+              _count(env, "OTEL_RESOURCE_ATTRIBUTES") == 1)
+        check("the comma-separated value survives the .env round-trip",
+              "," in _value(env, "OTEL_RESOURCE_ATTRIBUTES"))
+        check("save reports the app needs a restart", restart == ["app"])
+        check("neighbouring keys untouched",
+              _value(env, "SPLUNK_REALM") == "us1" and _value(env, "OTEL_ENABLED") == "True")
+        check("it is a .env field, not mirrored into the blob",
+              "resource_attributes" not in (
+                  settings_store.load().get("integration_creds", {}).get("splunk_o11y") or {}))
+
+
+def test_resource_attributes_rejects_malformed_values() -> None:
+    """A malformed list fails SILENTLY in the OTel SDK — the box would just never
+    get its identity. Reject it at save time instead."""
+    bad = {
+        "no key=value pair": "demobot-local",
+        "a stray comma": "deployment.environment=a,,host.name=b",
+        "an empty key": "=demobot-local",
+        # backend/config.py::_strip_env_value would truncate this on the next reload.
+        "an unquoted ' #' comment": "deployment.environment=a # box 2",
+    }
+    for name, value in bad.items():
+        with _TempEnv("OTEL_RESOURCE_ATTRIBUTES=deployment.environment=keep-me\n") as env:
+            try:
+                settings_store.set_integration_creds(
+                    "splunk_o11y", {"resource_attributes": value})
+                check(f"rejects {name}", False)
+            except ValueError:
+                check(f"rejects {name}", True)
+            check(f"...and leaves the existing value alone ({name})",
+                  _value(env, "OTEL_RESOURCE_ATTRIBUTES") == "deployment.environment=keep-me")
+
+    with _TempEnv() as env:
+        for value in ("deployment.environment=demobot-local",
+                      "deployment.environment=a, host.name=b , service.version=4.1.0"):
+            settings_store.set_integration_creds(
+                "splunk_o11y", {"resource_attributes": value})
+        check("a well-formed list is accepted",
+              _value(env, "OTEL_RESOURCE_ATTRIBUTES").startswith("deployment.environment=a,"))
+
+
+def test_env_file_fields_prefill_from_env_not_the_process() -> None:
+    """An env_file field is owned by .env, and a library may rewrite the process
+    copy. The Splunk OTel distro appends its own telemetry.distro.* attributes to
+    OTEL_RESOURCE_ATTRIBUTES at bootstrap, so prefilling from os.environ would show
+    a value .env does not have — and a save the operator never edited would write
+    the distro's internals into .env."""
+    key = "OTEL_RESOURCE_ATTRIBUTES"
+    orig = os.environ.get(key)
+    os.environ[key] = ("deployment.environment=demobot-local,"
+                       "telemetry.distro.name=splunk-opentelemetry,"
+                       "telemetry.distro.version=2.8.0")
+    try:
+        with _TempEnv(f"{key}=deployment.environment=demobot-local\n"):
+            f = [x for x in settings_store.get_integration_fields()["splunk_o11y"]
+                 if x["key"] == "resource_attributes"][0]
+            check("prefills from .env, not the mutated process environment",
+                  f["value"] == "deployment.environment=demobot-local")
+            check("the distro's own attributes are not offered back for saving",
+                  "telemetry.distro" not in f["value"])
+    finally:
+        if orig is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = orig
+
+    with _TempEnv('SPLUNK_REALM="eu0"  \nO11Y_API=tok # the read-only one\n'):
+        vals = {x["key"]: x.get("value") for x
+                in settings_store.get_integration_fields()["splunk_o11y"]}
+        check("a quoted .env value is unquoted for display", vals["realm"] == "eu0")
+        check("a secret still reports presence only, never its value",
+              "api_token" in vals and vals["api_token"] is None)
+
+    with _TempEnv(""):
+        vals = {x["key"]: x.get("value") for x
+                in settings_store.get_integration_fields()["splunk_o11y"]}
+        check("a key absent from .env prefills blank", vals["resource_attributes"] == "")
+
+
+def test_a_rejected_field_does_not_half_write_the_card() -> None:
+    """One card saves every field in one PUT and .env is written key by key, so
+    validation has to run over the whole payload BEFORE anything is applied."""
+    with _TempEnv("SPLUNK_REALM=us1\n") as env:
+        try:
+            settings_store.set_integration_creds(
+                "splunk_o11y", {"realm": "eu0", "resource_attributes": "malformed"})
+            check("a malformed field rejects the whole save", False)
+        except ValueError:
+            check("a malformed field rejects the whole save", True)
+        check("the valid sibling field was NOT written (no partial save)",
+              _value(env, "SPLUNK_REALM") == "us1")
+
+
 def test_unknown_integration_and_empty_payload() -> None:
     check("unknown integration id is a no-op at the store layer",
           settings_store.set_integration_creds("nope", {"api_key": "x"}) == [])
@@ -256,6 +361,10 @@ def main() -> int:
         test_env_writer_appends_when_absent_and_preserves_mode,
         test_env_writer_survives_awkward_values,
         test_collector_keys_go_to_env_not_the_blob,
+        test_resource_attributes_round_trip,
+        test_resource_attributes_rejects_malformed_values,
+        test_env_file_fields_prefill_from_env_not_the_process,
+        test_a_rejected_field_does_not_half_write_the_card,
         test_live_fields_report_no_restart,
         test_unknown_integration_and_empty_payload,
     ):
