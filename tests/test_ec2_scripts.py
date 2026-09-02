@@ -102,6 +102,10 @@ def test_bootstrap_start_order_and_gate() -> None:
     check("^NVIDIA_INFERENCE_API_KEY=" in seg, "step 0 requires NVIDIA_INFERENCE_API_KEY for --with-nemoclaw")
     check("deb.nodesource.com/setup_22.x" in text and "binutils" in text,
           "--with-nemoclaw installs Node 22 + binutils (NemoClaw prerequisites)")
+    # The sandbox's guard URL must be the host's IP, never loopback (inside the
+    # sandbox 127.0.0.1 is the container — verified live 2026-09-02).
+    check("run-nemoclaw.sh --host=127.0.0.1" not in text and "--host=$NEMOCLAW_HOST" in text
+          and "hostname -I" in text, "NemoClaw runs with --host=<this host's IP>, not 127.0.0.1")
     # NemoClaw onboarding needs the app up and the inference key in its env.
     onb = text[text.find('onboarding the NemoClaw sandbox'):text.find('sudo systemctl enable demobot-nemoclaw')]
     check("localhost:8001/health" in onb and "/etc/demobot-nemoclaw.env" in onb and "set -a" in onb,

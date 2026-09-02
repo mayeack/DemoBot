@@ -82,7 +82,12 @@ else
     bad "demobot-toolguard not enabled inside the sandbox"
   fi
   # A guard call from inside the sandbox proves the egress policy for the seat.
-  if openshell sandbox exec --name "$SANDBOX" -- sh -c "curl -s --max-time 5 -o /dev/null -w '%{http_code}' -u x:$KEY -X POST http://127.0.0.1:8001/api/toolguard/inspect -H 'Content-Type: application/json' -d '{\"tool_name\":\"read\",\"arguments\":{\"path\":\"/sandbox/.openclaw/workspace/x\"},\"agent_surface\":\"nemoclaw\"}'" 2>/dev/null | grep -q 200; then
+  # Use the guard URL the plugin was configured with (run-nemoclaw.sh --host):
+  # inside the sandbox 127.0.0.1 is the container, not this host.
+  GUARD_URL=$(openshell sandbox exec --name "$SANDBOX" -- sh -c 'sed -n "s/.*\"guardUrl\": *\"\([^\"]*\)\".*/\1/p" /sandbox/.openclaw/openclaw.json | head -1' 2>/dev/null | tr -d '[:space:]')
+  GUARD_URL=${GUARD_URL:-http://127.0.0.1:8001}
+  echo "  sandbox guard URL: $GUARD_URL"
+  if openshell sandbox exec --name "$SANDBOX" -- sh -c "curl -s --max-time 5 -o /dev/null -w '%{http_code}' -u x:$KEY -X POST $GUARD_URL/api/toolguard/inspect -H 'Content-Type: application/json' -d '{\"tool_name\":\"read\",\"arguments\":{\"path\":\"/sandbox/.openclaw/workspace/x\"},\"agent_surface\":\"nemoclaw\"}'" 2>/dev/null | grep -q 200; then
     ok "sandbox can reach DemoBot's guard endpoint (demobot-guard policy applied)"
   else
     bad "sandbox cannot reach the guard endpoint — check run-nemoclaw.sh --host and the policy preset"

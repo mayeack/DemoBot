@@ -562,6 +562,12 @@ UNIT
 fi
 
 if [ "$WITH_NEMOCLAW" = true ]; then
+  # The sandbox reaches DemoBot's guard over the network policy, so the guard
+  # URL must be THIS HOST's IP: inside the sandbox 127.0.0.1 is the container
+  # (verified 2026-09-02 — "sandbox cannot reach the guard endpoint"), and
+  # host.docker.internal bypasses OpenShell's policy path per NemoClaw's docs.
+  NEMOCLAW_HOST=$(hostname -I 2>/dev/null | awk '{print $1}')
+  NEMOCLAW_HOST="${NEMOCLAW_HOST:-127.0.0.1}"
   # NemoClaw guarantees nothing restarts after a reboot: this unit re-runs the
   # (idempotent) launcher, which starts the existing sandbox and re-applies the
   # guard policy; the forwarder unit tails the sandbox's OCSF denials.
@@ -580,7 +586,7 @@ User=$SVC_USER
 WorkingDirectory=$REPO
 EnvironmentFile=/etc/demobot-nemoclaw.env
 Environment=PATH=$HOME/.nemoclaw/bin:$HOME/.local/bin:$REPO/venv/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/bin/bash $REPO/run-nemoclaw.sh --host=127.0.0.1 --no-forwarder
+ExecStart=/bin/bash $REPO/run-nemoclaw.sh --host=$NEMOCLAW_HOST --no-forwarder
 
 [Install]
 WantedBy=multi-user.target
@@ -707,7 +713,7 @@ if [ "$WITH_NEMOCLAW" = true ]; then
   curl -sf -o /dev/null http://localhost:8001/health || warn "app not answering on :8001 yet — NemoClaw onboarding will likely fail"
   set -a; # shellcheck disable=SC1091
   . <(sudo cat /etc/demobot-nemoclaw.env); set +a
-  sg docker -c "cd '$REPO' && ./run-nemoclaw.sh --host=127.0.0.1 --no-forwarder" \
+  sg docker -c "cd '$REPO' && ./run-nemoclaw.sh --host=$NEMOCLAW_HOST --no-forwarder" \
     || warn "NemoClaw onboarding failed — see the output above; the policy layer still works without the runtime"
   unset NVIDIA_INFERENCE_API_KEY
   sudo systemctl enable demobot-nemoclaw demobot-nemoclaw-forwarder
