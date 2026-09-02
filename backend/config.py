@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # "anthropic" = Direct Anthropic API (local development)
     # "bedrock" = AWS Bedrock (production on AWS)
     # "openai" = OpenAI-compatible APIs (OpenAI, DeepSeek, etc.)
-    # "nvidia" = NVIDIA NIM (hosted build.nvidia.com or self-hosted container)
+    # "nvidia" = a local NVIDIA NIM container on this host (never the cloud API)
     ai_provider: str = "anthropic"
 
     # Anthropic API Configuration (used when ai_provider="anthropic")
@@ -64,12 +64,38 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.openai.com/v1"
 
     # NVIDIA NIM Configuration (used when ai_provider="nvidia")
-    # Hosted NVIDIA API catalog (build.nvidia.com) by default; the endpoint is
-    # OpenAI-compatible, so a self-hosted NIM container works by pointing
-    # nvidia_base_url at it (e.g. http://localhost:8000/v1).
-    nvidia_api_key: str = ""  # nvapi-... bearer key from build.nvidia.com
-    nvidia_model: str = "meta/llama-3.1-8b-instruct"
-    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
+    # provider=nvidia is LOCAL inference, always: a NIM (NVIDIA Inference
+    # Microservice) container serving an OpenAI-compatible API on THIS host. It
+    # is never the hosted API catalog (build.nvidia.com) — that is a cloud call,
+    # and this provider exists to demonstrate on-box GPU inference. The base URL
+    # must be loopback (enforced by backend/nvidia_nim.py wherever it is set); a
+    # remote GPU box runs its own DemoBot replica against its own NIM.
+    nvidia_base_url: str = "http://localhost:8000/v1"
+    # Model id the local NIM serves. A NIM serves exactly one model, so switching
+    # models means running a different NIM image (deploy/ec2/ec2-bootstrap.sh
+    # --with-nim <image>). nvidia-nemotron-nano-9b-v2 fits one A10G 24 GB
+    # (g5.xlarge); nemotron-3-super-120b-a12b needs 8x H100-80GB.
+    nvidia_model: str = "nvidia/nvidia-nemotron-nano-9b-v2"
+    # Optional bearer token when the NIM was started behind an API-key gate.
+    # Empty = none (a placeholder is sent because the openai client refuses an
+    # empty key, and an unauthenticated NIM ignores it).
+    nvidia_api_key: str = ""
+    # Nemotron 3 reasoning ("thinking") mode. The models default it ON, which
+    # spends tokens and latency and can wrap the JSON answer contract in a
+    # trace, so DemoBot sends chat_template_kwargs.enable_thinking=False unless
+    # this is turned on.
+    nvidia_reasoning: bool = False
+    # top_p NVIDIA recommends for Nemotron 3 across tasks (temperature stays the
+    # per-agent value each node chooses).
+    nvidia_top_p: float = 0.95
+    # NIM images offered in the model dropdown even before the local NIM is
+    # reachable, each with what it takes to run: "<model id>|<GPU label>|<min
+    # VRAM MB>|<GPU count>". The UI greys out one the detected GPU cannot run
+    # or the running NIM does not serve.
+    nvidia_featured_models: str = (
+        "nvidia/nvidia-nemotron-nano-9b-v2|1x A10G / L4 24 GB|24000|1,"
+        "nvidia/nemotron-3-super-120b-a12b|8x H100-80GB|640000|8"
+    )
 
     # Ollama Configuration (used when ai_provider="ollama")
     # Local, UNCENSORED open-source model served by a local `ollama serve` daemon

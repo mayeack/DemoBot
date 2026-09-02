@@ -73,10 +73,16 @@ class _CredField:
     collector, or run.sh before it re-execs the app), which reads ``.env`` directly.
     Those fields are written to ``.env`` and are NOT mirrored into the settings blob
     — ``.env`` stays their single source of truth. ``restart`` names the process that
-    must be restarted before such a change takes effect ("collector" or "app")."""
+    must be restarted before such a change takes effect ("collector" or "app").
+
+    ``wide`` renders the input across both grid columns, for values too long to read
+    in a half-width box. ``validate`` is an optional callable run on the submitted
+    value before anything is applied; it raises ``ValueError`` to reject the save
+    (the router turns that into a 422 the Settings page shows inline)."""
 
     def __init__(self, key, label, *, secret=False, boolean=False, settings_attr=None,
-                 env=None, env_file=False, restart="", placeholder="", help=""):
+                 env=None, env_file=False, restart="", placeholder="", help="",
+                 wide=False, validate=None):
         self.key = key
         self.label = label
         self.secret = secret
@@ -87,6 +93,17 @@ class _CredField:
         self.restart = restart
         self.placeholder = placeholder
         self.help = help
+        self.wide = wide
+        self.validate = validate
+
+
+def _validate_nim_base_url(value: str) -> None:
+    """provider=nvidia is local inference only: reject a non-loopback NIM URL
+    before it is applied (the same rule backend/agents/llm.py enforces at call
+    time, surfaced here as a 422 with the reason instead of a failed chat turn)."""
+    from backend import nvidia_nim
+
+    nvidia_nim.validate_nim_base_url(value)
 
 
 # Access fields per provider (the "Model" id is handled separately by the dropdown).
@@ -113,11 +130,21 @@ _PROVIDER_FIELDS: Dict[str, List[_CredField]] = {
         _CredField("base_url", "Base URL", settings_attr="ollama_base_url",
                    placeholder="http://localhost:11434"),
     ],
+    # Local NIM container on this host — never the hosted catalog. The URL is
+    # validated as loopback; the key is only for a NIM started behind an
+    # API-key gate; reasoning toggles Nemotron 3 "thinking" (default off).
     "nvidia": [
-        _CredField("api_key", "API key", secret=True, settings_attr="nvidia_api_key",
-                   placeholder="nvapi-…"),
-        _CredField("base_url", "Base URL", settings_attr="nvidia_base_url",
-                   placeholder="https://integrate.api.nvidia.com/v1"),
+        _CredField("base_url", "NIM base URL (this host)", settings_attr="nvidia_base_url",
+                   placeholder="http://localhost:8000/v1", validate=_validate_nim_base_url,
+                   help="A NIM container on loopback. provider=nvidia never calls the "
+                        "cloud API; a remote GPU box runs its own replica."),
+        _CredField("api_key", "NIM API key (optional)", secret=True,
+                   settings_attr="nvidia_api_key",
+                   help="Only if the NIM was started behind an API-key gate."),
+        _CredField("reasoning", "Reasoning (thinking) mode", boolean=True,
+                   settings_attr="nvidia_reasoning",
+                   help="Nemotron 3 defaults this ON; DemoBot keeps it off so the "
+                        "JSON answer contract is not wrapped in a reasoning trace."),
     ],
 }
 
@@ -367,8 +394,10 @@ def get_provider_fields() -> Dict[str, List[Dict[str, Any]]]:
                 "key": f.key,
                 "label": f.label,
                 "secret": f.secret,
+                "boolean": f.boolean,
                 "placeholder": f.placeholder,
-                "present": bool(cur),
+                "help": f.help,
+                "present": bool(cur) if not f.boolean else True,
             }
             if not f.secret:
                 item["value"] = cur
@@ -387,18 +416,32 @@ def set_provider_creds(provider: str, fields: Dict[str, str]) -> None:
     if not specs or not fields:
         return
 
+    # Resolve + validate EVERY submitted field before applying any of them, so a
+    # rejected field (e.g. a non-loopback NIM URL) leaves nothing half-applied.
+    # Booleans are the one exception to blank-keeps-existing: a checkbox always
+    # reports its state (same rule as set_integration_creds).
+    pending: List[tuple] = []
+    for f in specs:
+        if f.key not in fields:
+            continue
+        raw = fields.get(f.key)
+        if f.boolean:
+            val = "true" if _as_bool(raw) else "false"
+        else:
+            val = (raw or "").strip()
+            if not val:  # blank = keep existing (never wipe)
+                continue
+            if f.validate:
+                f.validate(val)  # ValueError -> 422, nothing written
+        pending.append((f, val))
+
     data = load()
     store = dict(data.get("ai_provider_creds") or {})
     pstore = dict(store.get(provider) or {})
     applied: List[str] = []
-    for f in specs:
-        if f.key not in fields:
-            continue
-        val = (fields.get(f.key) or "").strip()
-        if not val:  # blank = keep existing (never wipe)
-            continue
+    for f, val in pending:
         if f.settings_attr:
-            setattr(settings, f.settings_attr, val)
+            setattr(settings, f.settings_attr, _as_bool(val) if f.boolean else val)
         if f.env:
             os.environ[f.env] = val
         pstore[f.key] = val
@@ -428,8 +471,17 @@ def apply_provider_creds_from_store() -> None:
             val = (saved.get(f.key) or "").strip()
             if not val:
                 continue
+            if f.validate:
+                try:
+                    f.validate(val)
+                except ValueError as exc:
+                    # A stored value the current rules reject (e.g. a NIM URL
+                    # saved before the local-only contract) must not win over
+                    # the .env/config default — skip it and say why.
+                    logger.warning("ignoring stored %s.%s: %s", provider, f.key, exc)
+                    continue
             if f.settings_attr:
-                setattr(settings, f.settings_attr, val)
+                setattr(settings, f.settings_attr, _as_bool(val) if f.boolean else val)
             if f.env:
                 os.environ[f.env] = val
 

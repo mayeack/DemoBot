@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Callable, Dict, List
+from typing import Any, Callable, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -79,22 +79,33 @@ def _openai_models(settings) -> List[str]:
     return sorted(m.id for m in client.models.list().data if getattr(m, "id", None))
 
 
-def _nvidia_models(settings) -> List[str]:
-    if not settings.nvidia_api_key:
-        return []
-    from openai import OpenAI
+# Last probe of the local NIM (readiness, served models, featured images) —
+# what GET /api/settings/ai-provider reports under "nvidia" without probing on
+# the request path. Refreshed by _nvidia_models; empty until the first probe.
+_NVIDIA_STATUS: Dict[str, Any] = {}
 
-    # NVIDIA NIM is OpenAI-compatible, so the openai SDK lists its catalog too.
-    # Sorted grouping by publisher prefix (meta/, mistralai/, ...) reads well in
-    # the dropdown; the ~150-model hosted list carries no capability metadata to
-    # filter on reliably, so return it whole.
-    client = OpenAI(
-        api_key=settings.nvidia_api_key,
-        base_url=settings.nvidia_base_url,
-        timeout=_SDK_TIMEOUT,
-        max_retries=0,  # _SDK_TIMEOUT is the real ceiling (see _anthropic_models)
-    )
-    return sorted(m.id for m in client.models.list().data if getattr(m, "id", None))
+
+def nvidia_status() -> Dict[str, Any]:
+    with _lock:
+        return dict(_NVIDIA_STATUS)
+
+
+def _nvidia_models(settings) -> List[str]:
+    from backend import nvidia_nim
+
+    # provider=nvidia is a LOCAL NIM: no API key is needed to list it, and the
+    # list is what the running container serves (one model per NIM). The
+    # featured images come first so Nemotron 3 Super / Nano stay selectable
+    # before a NIM is up; the UI greys out any the host cannot run or the NIM
+    # does not serve (backend/host_capabilities.py).
+    st = nvidia_nim.status(settings)
+    with _lock:
+        _NVIDIA_STATUS.clear()
+        _NVIDIA_STATUS.update(st)
+    if st.get("url_error"):
+        raise ValueError(st["url_error"])
+    ordered = [f["id"] for f in st["featured"]] + list(st["served"])
+    return list(dict.fromkeys(ordered))
 
 
 def _bedrock_models(settings) -> List[str]:

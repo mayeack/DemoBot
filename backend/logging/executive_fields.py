@@ -58,6 +58,9 @@ _PRICES_PER_MTOK: Dict[str, tuple] = {
     "gemini-1.5-pro": (1.25, 5.00),
     "gemini-1.5-flash": (0.075, 0.30),
     "gemini-2.0-flash": (0.10, 0.40),
+    # provider=nvidia is a NIM on the box's own GPU: no per-token bill, so the
+    # executive cost trend must not price it as a Sonnet-class API call.
+    "nvidia/": (0.0, 0.0),
 }
 _DEFAULT_PRICE = (3.00, 15.00)  # fall back to a Sonnet-class estimate
 

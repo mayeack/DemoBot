@@ -105,6 +105,9 @@ def _provider_payload() -> dict:
     payload = settings_store.get_ai_provider()
     payload["available"] = model_catalog.available()
     payload["fields"] = settings_store.get_provider_fields()
+    # Local-NIM status (readiness, served + featured models with GPU needs) from
+    # the last catalog probe — never probed on the request path.
+    payload["nvidia"] = model_catalog.nvidia_status()
     return payload
 
 
