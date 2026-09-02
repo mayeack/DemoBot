@@ -64,12 +64,26 @@ elif [ "$AI_PROVIDER" = "openai" ]; then
         echo ""
     fi
 elif [ "$AI_PROVIDER" = "nvidia" ]; then
-    echo "🔧 AI Provider: NVIDIA NIM (hosted API)"
-    # Warn-only: the nvapi- key may also arrive via the Settings UI store.
-    if ! grep -q "^NVIDIA_API_KEY=nvapi-" .env 2>/dev/null; then
-        echo "⚠️  WARNING: NVIDIA_API_KEY not configured in .env (expected nvapi-… key)"
-        echo "The application will not work without a valid API key"
+    echo "🔧 AI Provider: NVIDIA NIM (local container on this host)"
+    # provider=nvidia is local inference only: preflight the loopback NIM the
+    # same way the ollama branch preflights its daemon. Warn, don't block.
+    NIM_URL=$(grep "^NVIDIA_BASE_URL=" .env 2>/dev/null | cut -d'=' -f2)
+    NIM_URL=${NIM_URL:-http://localhost:8000/v1}
+    NIM_MODEL=$(grep "^NVIDIA_MODEL=" .env 2>/dev/null | cut -d'=' -f2)
+    NIM_MODEL=${NIM_MODEL:-nvidia/nvidia-nemotron-nano-9b-v2}
+    case "$NIM_URL" in
+        http://localhost*|http://127.*|http://\[::1\]*) ;;
+        *)  echo "⚠️  WARNING: NVIDIA_BASE_URL=$NIM_URL is not on this host"
+            echo "    provider=nvidia is local inference only — the app will refuse it."
+            echo "" ;;
+    esac
+    if ! curl -s -o /dev/null -w '%{http_code}' "$NIM_URL/health/ready" 2>/dev/null | grep -q '^200$'; then
+        echo "⚠️  WARNING: no NIM answering $NIM_URL/health/ready"
+        echo "    Start one on this GPU host (deploy/ec2/ec2-bootstrap.sh --with-nim, or"
+        echo "    docker run --gpus all -p 8000:8000 nvcr.io/nim/$NIM_MODEL:latest)"
         echo ""
+    else
+        echo "✅ NIM ready at $NIM_URL (model '$NIM_MODEL')"
     fi
 elif [ "$AI_PROVIDER" = "ollama" ]; then
     echo "🔧 AI Provider: Ollama (local uncensored model)"
@@ -100,6 +114,10 @@ fi
 
 # Create logs directory
 mkdir -p logs
+
+# What this box can run (GPU / container runtime / local NIM / NemoClaw) — the
+# same probe the UI uses to grey out options that cannot work here.
+python -m backend.host_capabilities 2>/dev/null || true
 
 echo ""
 echo "Starting DemoBot v4..."

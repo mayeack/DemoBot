@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Selftest for guard-core.mjs — no OpenClaw SDK required, just `node`.
- * Exercises allow / block / timeout / fail policy against a stubbed fetch.
+ * Exercises allow / block / timeout / fail policy against a stubbed fetch, and
+ * the after_tool_call observer (reports only sandbox policy denials).
  * Invoked by tests/observability/verify_openclaw_observability.sh (Tier 0).
  *
  * It runs from the image, not the working tree: openclaw/ is sparse-excluded
@@ -9,7 +10,13 @@
  *
  *   podman run --rm demobot-openclaw node /opt/demobot-plugins/demobot-toolguard/selftest.mjs
  */
-import { decideFromGuardResponse, inspectToolCall } from "./guard-core.mjs";
+import {
+  agentSurface,
+  decideFromGuardResponse,
+  inspectToolCall,
+  looksPolicyDenied,
+  observeToolResult,
+} from "./guard-core.mjs";
 
 let failures = 0;
 function check(name, cond, detail = "") {
@@ -69,6 +76,25 @@ check("inspect: missing guardUrl fail-closed -> block",
   (await inspectToolCall(EVENT, CTX, { accessKey: "k" }, { fetch: okFetch }))?.block === true);
 check("inspect: never throws on garbage event",
   (await inspectToolCall(null, null, cfg, { fetch: okFetch })) === undefined);
+
+// --- attribution + after_tool_call observer ---
+check("agentSurface defaults to openclaw", agentSurface({}) === "openclaw");
+check("agentSurface honors nemoclaw", agentSurface({ agentSurface: "nemoclaw" }) === "nemoclaw");
+let seen = [];
+const captureFetch = async (url, opts) => { seen.push({ url, body: JSON.parse(opts.body) }); return { status: 200, json: async () => ({ attributed: true }) }; };
+check("looksPolicyDenied recognizes OpenShell's denial",
+  looksPolicyDenied('{"error":"policy_denied","detail":"POST /x not permitted by policy"}') && !looksPolicyDenied("ECONNRESET"));
+const denied = { ...EVENT, error: '{"error":"policy_denied","detail":"POST /collect not permitted by policy"}', durationMs: 12 };
+check("observe: sandbox denial is reported to /api/toolguard/observe",
+  (await observeToolResult(denied, CTX, { ...cfg, agentSurface: "nemoclaw" }, { fetch: captureFetch })) === true
+  && seen[0]?.url.endsWith("/api/toolguard/observe") && seen[0]?.body.agent_surface === "nemoclaw"
+  && seen[0]?.body.tool_name === "web_fetch", JSON.stringify(seen));
+seen = [];
+check("observe: an ordinary result is NOT reported",
+  (await observeToolResult({ ...EVENT, result: "ok" }, CTX, cfg, { fetch: captureFetch })) === false && seen.length === 0);
+check("observe: never throws on garbage event / broken fetch",
+  (await observeToolResult(null, null, cfg, { fetch: brokenFetch })) === false
+  && (await observeToolResult(denied, CTX, cfg, { fetch: brokenFetch })) === false);
 
 console.log();
 if (failures) {

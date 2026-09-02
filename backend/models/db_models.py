@@ -23,6 +23,24 @@ class Conversation(Base):
         Index('idx_escalated', 'escalated'),
     )
 
+class BlueprintAnalytics(Base):
+    """Per-session analytics of the NVIDIA AI Virtual Assistant blueprint
+    (summary + sentiment + per-message sentiment + feedback), generated on
+    demand by /api/analytics like the reference blueprint's analytics service.
+    A separate table (not new Conversation columns) so it needs no migration."""
+
+    __tablename__ = "blueprint_analytics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String, unique=True, index=True, nullable=False)
+    summary = Column(Text, nullable=True)
+    sentiment = Column(String, nullable=True)
+    per_message = Column(JSON, default=list)
+    feedback = Column(JSON, default=dict)
+    generated_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class AIGovernanceLog(Base):
     __tablename__ = "ai_governance_logs"
 

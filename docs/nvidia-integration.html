@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NVIDIA integration — DemoBot</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; color: #1f2937; line-height: 1.55; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.2rem; margin-top: 2rem; border-bottom: 1px solid #e5e7eb; padding-bottom: .25rem; }
+  code { background: #f3f4f6; padding: .1rem .3rem; border-radius: 3px; font-size: .9em; }
+  pre { background: #f3f4f6; padding: .8rem; border-radius: 6px; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .95em; } th, td { border: 1px solid #e5e7eb; padding: .4rem .6rem; text-align: left; vertical-align: top; } th { background: #f9fafb; }
+  li { margin: .25rem 0; }
+</style>
+</head>
+<body>
+<h1>NVIDIA integration: local NIM, NeMo Guardrails, NemoClaw, and the AI Virtual Assistant blueprint</h1>
+<p>DemoBot 4.2 makes NVIDIA's stack a first-class, opt-in part of the governed-AI demo. Nothing that existed before changed its default; every piece below is switched on deliberately.</p>
+<table>
+<tr><th>Piece</th><th>Where you turn it on</th><th>What it needs</th></tr>
+<tr><td><code>provider=nvidia</code> (local NIM)</td><td>header <strong>Provider</strong> dropdown</td><td>an NVIDIA GPU <strong>on this host</strong> + a NIM container on <code>localhost:8000</code></td></tr>
+<tr><td>Nemotron 3 Super / Nano</td><td>header <strong>Model</strong> dropdown (per NIM image)</td><td>the GPU the image documents (Nano: 1× A10G; Super: 8× H100)</td></tr>
+<tr><td><strong>NeMo Guardrails</strong></td><td>Demo Controls drawer toggle</td><td><code>nemoguardrails</code> installed + master switch on the Settings card</td></tr>
+<tr><td><strong>NemoClaw Guardrails</strong></td><td>Demo Controls drawer toggle</td><td>nothing for the policy layer; Docker/Colima + a GPU host for the runtime</td></tr>
+<tr><td><strong>Blueprint</strong> dropdown</td><td>chat header</td><td>nothing — both architectures share every guardrail</td></tr>
+<tr><td>Session analytics</td><td><code>GET /api/analytics/...</code></td><td>nothing (uses the active model on demand)</td></tr>
+</table>
+
+<h2>1. <code>provider=nvidia</code> is local inference, always</h2>
+<p><code>provider=nvidia</code> means a <strong>NIM (NVIDIA Inference Microservice) container running on the same host as the app</strong>, serving an OpenAI-compatible API on <code>http://localhost:8000/v1</code>. It is never the hosted API catalog: a non-loopback <code>NVIDIA_BASE_URL</code> is rejected at every seam (chat-model factory, legacy client, Settings save, startup re-apply) with the reason. <code>NVIDIA_API_KEY</code> is only for a NIM started behind an API-key gate; <code>NGC_API_KEY</code> is the image-pull credential used by the EC2 bootstrap.</p>
+<ul>
+<li><strong>This Mac has no NVIDIA GPU</strong>, so the provider is greyed out in the header with the reason. That is decided server-side (<code>backend/host_capabilities.py</code>, published on <code>GET /api/server-info</code> as <code>gated</code>) — never guessed by the UI.</li>
+<li>On a <strong>GPU replica</strong>: <code>deploy/ec2/ec2-bootstrap.sh --with-nim [model]</code> installs Docker + the NVIDIA Container Toolkit, logs into <code>nvcr.io</code> with <code>NGC_API_KEY</code>, runs <code>demobot-nim.service</code> (loopback <code>:8000</code>) and sets <code>AI_PROVIDER=nvidia</code>, <code>NVIDIA_BASE_URL</code>, <code>NVIDIA_MODEL</code> in that box's <code>.env</code>.</li>
+<li>The <strong>Model</strong> dropdown lists the featured NIM images with their GPU requirement (<code>NVIDIA_FEATURED_MODELS</code>) plus whatever the running NIM serves; an image the detected GPU cannot run, or the NIM does not serve, is disabled with a tooltip. A NIM serves one model, so switching models means running a different image.</li>
+<li><strong>Nemotron 3</strong> models default reasoning ("thinking") <strong>on</strong>. DemoBot sends <code>chat_template_kwargs.enable_thinking=false</code> unless <code>NVIDIA_REASONING=True</code>, because the answer contract is a JSON block; a stray inline <code>&lt;think&gt;</code> trace is stripped for every provider.</li>
+<li><code>nvidia/nemotron-3-super-120b-a12b</code> needs 8× H100-80GB (p5-class). On the <code>g5.xlarge</code> fleet use <code>nvidia/nvidia-nemotron-nano-9b-v2</code> (the default).</li>
+</ul>
+<p>Verify: <code>./run.sh</code> prints the host-capability line and the NIM preflight; <code>curl http://localhost:8000/v1/health/ready</code> → 200; a chat turn's governance event shows <code>provider_name=nvidia</code> and the NIM's model id.</p>
+
+<h2>2. NeMo Guardrails (drawer toggle)</h2>
+<p><code>nemoguardrails</code> 0.24 runs <strong>in-process</strong> (core package only — the <code>[server]</code> extra would break the FastAPI/httpx pins). Input rails run on the prompt after Cisco AI Defense's prompt inspection; output rails run on the answer after Galileo Agent Control and <strong>before</strong> AI Defense's response inspection, so Cisco stays the last word.</p>
+<ul>
+<li>The judge for the self-check rails is the <strong>active chat model</strong>, injected as <code>LLMRails(config, llm=…)</code>, so the toggle works on every provider with no cloud call. NemoGuard content safety is an optional <strong>second local NIM</strong> (<code>NEMO_GUARDRAILS_CONTENT_SAFETY_URL</code>, loopback only).</li>
+<li>Rails live in <code>guardrails/nemo/</code>: <code>self_check_input</code>, <code>self_check_output</code>, and DemoBot's <strong>overreach</strong> output rail (the NeMo counterpart of the AI Defense custom guardrail).</li>
+<li>A fired rail withholds the turn through the shared governance contract: <code>guardrail_ids=["nemo_guardrails"]</code>, the rail names in <code>safety_categories</code>, a <code>⚠️ POLICY BLOCKED (NVIDIA NeMo Guardrails - input|output)</code> banner. Errors honor <code>NEMO_GUARDRAILS_FAIL_OPEN</code> (default open).</li>
+<li>Setup: <code>venv/bin/pip install -r requirements.txt</code> (through Artifactory — see Troubleshooting), then Settings → <strong>NVIDIA NeMo Guardrails</strong> → Enabled, then the drawer toggle. Regression: <code>tests/test_nemo_guardrails.py</code>.</li>
+</ul>
+
+<h2>3. NemoClaw Guardrails (drawer toggle) — policy layer + runtime</h2>
+<p>NVIDIA NemoClaw runs an OpenClaw agent inside an OpenShell sandbox governed by a declarative policy (deny-by-default egress, filesystem scopes, process rules, local-only inference). DemoBot adopts it at two levels.</p>
+<p><strong>Policy layer (works everywhere).</strong> <code>guardrails/nemoclaw/policy.yaml</code> is an OpenShell-shaped policy DemoBot evaluates on every agent tool call the gateway submits to <code>/api/toolguard/inspect</code> — network egress by host/port/path, read/write scopes, denied binaries, the privacy-router rule, and an optional NeMo rail over sensitive calls. Unlike <code>TOOL_GUARD_ENABLED</code>, <strong>the drawer toggle is the enforcement switch</strong>: ON means a NemoClaw policy block denies the call (<code>enforced_by: ["nemoclaw"]</code>), attributed as <code>guardrail_ids=["nemoclaw_guardrails"]</code> with <code>NemoClaw: …</code> rule names.</p>
+<p><strong>Runtime (GPU replica, or a Mac with Colima).</strong> <code>run-nemoclaw.sh</code> builds NemoClaw's sandbox image with the <code>demobot-toolguard</code> plugin baked in (<code>nemoclaw/Dockerfile</code>), onboards the sandbox non-interactively, writes the guard URL + access key inside it, applies the <code>demobot-guard</code> network preset (a real host IP — NemoClaw's docs discourage <code>host.docker.internal</code>), enables OpenShell's OCSF JSON audit log and runs <code>scripts/nemoclaw/ocsf_forwarder.py</code>, which tails the sandbox's denials into <code>/api/toolguard/nemoclaw/events</code>. The plugin's <code>after_tool_call</code> observer reports a <code>policy_denied</code> tool result to <code>/api/toolguard/observe</code> immediately. Both land in Splunk/Galileo as <code>nemoclaw_guardrails</code> governance events with an <code>execute_tool</code> span; the drawer pill reads <strong>RUNTIME</strong> while denials are arriving, <strong>POLICY</strong> otherwise.</p>
+<ul>
+<li>NemoClaw supports Linux with Docker Engine (Ubuntu 24.04 primary), macOS Apple Silicon with Docker Desktop or <strong>Colima</strong>, and WSL2 — <strong>Podman is unsupported</strong>. This Mac runs Mode C on podman, so the primary NemoClaw host is an EC2 replica: <code>deploy/ec2/ec2-bootstrap.sh --with-nemoclaw</code> (adds <code>demobot-nemoclaw</code> + <code>demobot-nemoclaw-forwarder</code> units, since NemoClaw restarts nothing after a reboot). On the Mac: <code>brew install colima docker &amp;&amp; colima start</code>, then <code>./run-nemoclaw.sh</code>.</li>
+<li>The sandboxed agent's own inference provider is NemoClaw's (<code>--provider build</code> = NVIDIA endpoints via <code>NVIDIA_INFERENCE_API_KEY</code>, or <code>--provider nim</code> for a NemoClaw-managed local NIM). DemoBot's <code>provider=nvidia</code> stays local regardless.</li>
+<li>Verify: <code>./tests/observability/verify_nemoclaw_observability.sh</code>.</li>
+</ul>
+
+<h2>4. Blueprints (header dropdown) and the parity rule</h2>
+<p><code>backend/agents/blueprints/</code> holds the selectable architectures:</p>
+<ul>
+<li><strong>DemoBot Multi-Agent</strong> (<code>demobot_multi_agent</code>, default): intake → [coordinator → specialists] → synthesizer.</li>
+<li><strong>NVIDIA AI Virtual Assistant</strong> (<code>nvidia_virtual_assistant</code>): a faithful port of NVIDIA-AI-Blueprints/ai-virtual-assistant — <code>fetch_record → ask_clarification → primary_assistant → sub_assistant → respond</code>. The primary assistant routes by calling a <code>To&lt;Sub&gt;Assistant</code> tool (native tool calling when the provider supports it, a JSON tool-call plan otherwise); the sub-assistant runs with the blueprint's tools applied — <code>retrieve_knowledge</code> (retrieval over <code>blueprint_data/&lt;theme&gt;/docs</code>) and <code>lookup_record</code> (a synthetic per-session record); the responder is the DemoBot synthesizer, so the answer contract is identical. Multi-Agent Mode here = up to two sub-assistants. Session analytics mirror the blueprint's analytics service under <code>/api/analytics</code>.</li>
+</ul>
+<p>Both blueprints are wired into the <strong>same</strong> guardrail chain by <code>blueprints/guardrails.py</code>, so a guardrail, toggle or governance field is implemented once and both architectures get it — parity by construction. Each blueprint names its own workflow and every governance event carries an additive <code>blueprint</code> field. The rule is in <code>CLAUDE.md</code> ("Blueprint feature parity"); the detector is <code>tests/test_blueprint_parity.py</code>, which runs the same scenario matrix through both and fails on any divergence.</p>
+
+<h2>5. Verification</h2>
+<pre>PY=venv/bin/python ./tests/run_all.sh          # every standalone suite
+./tests/observability/verify_observability.sh   # OTel -> Splunk (needs collector + app)
+./tests/observability/verify_openclaw_observability.sh
+./tests/observability/verify_nemoclaw_observability.sh</pre>
+
+<h2>6. Troubleshooting</h2>
+<ul>
+<li><strong><code>pip</code> says "No matching distribution" for everything</strong> (e.g. <code>nemoguardrails</code>): the Artifactory token in <code>~/.pip/pip.conf</code> has expired (they last ~12 h). Run <code>dev-login artifactory</code>, then install again. The EC2 bootstrap installs from public PyPI and is unaffected.</li>
+<li><strong><code>provider=nvidia</code> greyed out / "NIM DOWN"</strong>: the host has no NVIDIA GPU, or no NIM answers <code>http://localhost:8000/v1/health/ready</code>. Settings → Host capabilities → ↻ re-probes after starting one.</li>
+<li><strong>NemoClaw Guardrails pill never says RUNTIME</strong>: the runtime is not on this host (podman-only Mac) — the policy layer still enforces; run the runtime on a replica.</li>
+<li><strong>Nemotron answers wrapped in a reasoning trace</strong>: reasoning was enabled (<code>NVIDIA_REASONING</code>); DemoBot strips a leading <code>&lt;think&gt;</code> block, but the JSON contract is more reliable with it off.</li>
+</ul>
+</body>
+</html>

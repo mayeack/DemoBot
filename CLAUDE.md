@@ -17,6 +17,20 @@ as one list; per-card colors made unrelated controls look like separate widgets
 and made "which of these is a guardrail vs. a load generator" harder to see, not
 easier. A card that needs emphasis earns it from its position in the drawer.
 
+Two kinds of card exist and they look the same:
+
+- **per-request toggles** (Cisco AI Defense, Agent Observability Controls,
+  NeMo Guardrails, Internal Policy Engine, Multi-Agent Mode, the injection
+  toggles) — the toggle's state is sent on every chat request
+  (`chat.js buildChatPayload`);
+- **server-side toggles** (Auto-Generate Sessions, NemoClaw Guardrails, Trigger
+  Demo Incident, Prompt-Injection Spray) — the toggle calls an API and polls its
+  status; the state lives on the server (NemoClaw persists in `settings_store`).
+
+Options a host cannot run are greyed out with the reason as a tooltip, driven by
+`GET /api/server-info` `gated` (`backend/host_capabilities.py`) — never by a
+client-side guess.
+
 Color is reserved for **state**, never identity. These may stay colored:
 
 - the status pill (`#…Status`) — its ON color is set in `frontend/js/chat.js` and
@@ -30,6 +44,37 @@ Dark mode is handled centrally for the neutral classes (`html.dark .bg-gray-50`,
 `.border-gray-200`, `.text-gray-700`, `.text-gray-500`), so a card that follows
 this format needs no dark-mode rule of its own. A card that invents its own
 palette does — which is another reason not to.
+
+## Blueprint feature parity
+
+`backend/agents/blueprints/` holds the selectable agentic architectures
+(`demobot_multi_agent`, `nvidia_virtual_assistant`; the chat header's
+**Blueprint** dropdown). A blueprint contributes only its **generation core**;
+everything else is shared and must behave identically whichever blueprint is
+selected:
+
+- every guardrail node (`blueprints/guardrails.py` `PRE_NODES` / `POST_NODES`),
+- every Demo Controls toggle and `ChatRequest` flag (`force_*_injection`,
+  `ai_defense_review`, `internal_policy_review`, `agent_control_review`,
+  `nemo_guardrails_review`, `multi_agent_mode`),
+- the governance-event contract (`guardrail_ids`, `policy_blocked`,
+  `*_detected`, token sums, `agent_trace`, `workflow_name`/`blueprint`),
+- the SSE stage frames for the guardrail nodes and the OTel workflow/agent spans.
+
+Rules:
+
+- A new guardrail, toggle or governance field goes into the **shared chain**
+  (`blueprints/guardrails.py`, the nodes it wires, `state.py`) — never inside one
+  core. If a feature genuinely needs core work, land it in **both** cores in the
+  same PR.
+- Extend `tests/test_blueprint_parity.py` in that same PR (a scenario for a new
+  guardrail/toggle; a key in `CORE_STATE_CONTRACT` for a new field the POST
+  chain reads). It runs the scenario matrix through every registered blueprint
+  and fails on any divergence; `tests/run_all.sh` runs it with the rest.
+- Keys a core writes to the state must be declared on `DemoBotState` — LangGraph
+  silently drops undeclared keys.
+- Blocked turns carry the same `workflow_name`/`blueprint` identity as the happy
+  path (`governance_identity_overrides`); keep passing it from every block handler.
 
 ## Product naming in user-visible text
 

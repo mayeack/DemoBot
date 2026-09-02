@@ -6,6 +6,7 @@ let hallucinationEnabled = false;
 let boundaryEnabled = false;
 let aiDefenseEnabled = false;
 let agentControlEnabled = false;
+let nemoGuardrailsEnabled = false;
 let internalPolicyEnabled = true;
 let multiAgentEnabled = false;
 let autoPromptEnabled = false;
@@ -384,6 +385,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const savedBoundaryEnabled = localStorage.getItem('medadvice_boundary_enabled');
     const savedAiDefenseEnabled = localStorage.getItem('medadvice_ai_defense_enabled');
     const savedAgentControlEnabled = localStorage.getItem('medadvice_agent_control_enabled');
+    const savedNemoGuardrailsEnabled = localStorage.getItem('medadvice_nemo_guardrails_enabled');
     const savedInternalPolicyEnabled = localStorage.getItem('medadvice_internal_policy_enabled');
     const savedMultiAgentEnabled = localStorage.getItem('medadvice_multi_agent_enabled');
 
@@ -399,6 +401,8 @@ document.addEventListener('DOMContentLoaded', function() {
         aiDefenseEnabled = savedAiDefenseEnabled === 'true';
         // Galileo Agent Control defaults OFF unless explicitly turned on.
         agentControlEnabled = savedAgentControlEnabled === 'true';
+        // NeMo Guardrails defaults OFF unless explicitly turned on.
+        nemoGuardrailsEnabled = savedNemoGuardrailsEnabled === 'true';
         // Internal policy engine defaults ON unless explicitly turned off.
         internalPolicyEnabled = savedInternalPolicyEnabled !== 'false';
         // Multi-agent mode defaults OFF unless explicitly turned on.
@@ -444,6 +448,12 @@ document.addEventListener('DOMContentLoaded', function() {
             updateAgentControlStatus();
         }
 
+        const nemoGuardrailsToggle = document.getElementById('nemoGuardrailsToggle');
+        if (nemoGuardrailsToggle) {
+            nemoGuardrailsToggle.checked = nemoGuardrailsEnabled;
+            updateNemoGuardrailsStatus();
+        }
+
         const internalPolicyToggle = document.getElementById('internalPolicyToggle');
         if (internalPolicyToggle) {
             internalPolicyToggle.checked = internalPolicyEnabled;
@@ -460,6 +470,7 @@ document.addEventListener('DOMContentLoaded', function() {
         checkAutoPromptStatus();
         // Same for the spray campaign, so a refresh mid-run shows it running
         checkSprayStatus();
+        startNemoClawPolling();
     }
     
     // Add event listener to new session button as fallback
@@ -497,19 +508,88 @@ function showMainApp() {
     refreshServerInfo();
 }
 
-// Which box is serving this page — one-shot, since it can't change for the
-// life of the process. Rendered in the footer for multi-server deployments.
+// Which box is serving this page (footer hostname) and what it can run
+// (GET /api/server-info: capabilities + gated rules). Gating is decided
+// server-side (backend/host_capabilities.py); the UI only renders it — a
+// disabled option with the reason as its tooltip, plus the neutral pill by the
+// Model select. Polled with the provider indicators so a NIM that comes up
+// (or a Colima start) is reflected without a reload.
+let _hostGate = { gated: {}, capabilities: {} };
+
+function gateFor(key) { return (_hostGate.gated || {})[key] || null; }
+
 async function refreshServerInfo() {
     const el = document.getElementById('serverHostname');
-    if (!el) return;
     try {
         const res = await fetch('/api/server-info');
-        if (!res.ok) { el.textContent = 'unavailable'; return; }
+        if (!res.ok) { if (el) el.textContent = 'unavailable'; return; }
         const data = await res.json();
-        el.textContent = data.hostname || 'unknown';
+        if (el) el.textContent = data.hostname || 'unknown';
+        _hostGate = { gated: data.gated || {}, capabilities: data.capabilities || {} };
     } catch (e) {
-        el.textContent = 'unavailable';
+        if (el) el.textContent = 'unavailable';
     }
+}
+
+// Grey out a provider this host cannot run (today: nvidia = a local NIM, which
+// needs a local NVIDIA GPU). The ACTIVE provider stays selectable so the
+// operator can move off it; the pill by the Model select carries the reason.
+function applyProviderGating(provSel, active) {
+    Array.from(provSel.options).forEach(o => {
+        const g = o.value === 'nvidia' ? gateFor('provider_nvidia') : null;
+        if (g && !g.enabled && o.value !== active) {
+            o.disabled = true;
+            o.title = g.reason;
+            o.textContent = `${o.value} (unavailable here)`;
+        }
+    });
+}
+
+// provider=nvidia: a NIM serves ONE model, and each featured image needs a GPU
+// this box may not have. Disable what cannot answer a turn here (reason in the
+// tooltip); the configured model stays selectable so it can still be changed.
+function annotateNvidiaModels(sel, selected) {
+    const st = _aiProviderState.nvidia || {};
+    const modelGates = gateFor('nvidia_models') || {};
+    const served = st.served || [];
+    const featured = {};
+    (st.featured || []).forEach(f => { featured[f.id] = f; });
+    Array.from(sel.options).forEach(o => {
+        const g = modelGates[o.value];
+        const f = featured[o.value];
+        let reason = '';
+        if (g && !g.enabled) reason = g.reason;
+        else if (st.ready && served.length && !served.includes(o.value)) {
+            reason = `not served by the running NIM (it serves ${served.join(', ')})`;
+        }
+        if (f && f.gpu) o.textContent = `${o.value}  [${f.gpu}]`;
+        if (reason) {
+            o.title = reason;
+            if (o.value !== selected) o.disabled = true;
+        }
+    });
+}
+
+// Neutral pill by the Model select. Colour is reserved for state: READY is the
+// only coloured value; UNAVAILABLE / NIM DOWN stay grey (CLAUDE.md).
+function renderModelGate(provider) {
+    const pill = document.getElementById('modelGate');
+    if (!pill) return;
+    let text = '', title = '', ready = false;
+    if (provider === 'nvidia') {
+        const p = gateFor('provider_nvidia'), n = gateFor('nim_local');
+        if (p && !p.enabled) { text = 'UNAVAILABLE'; title = p.reason; }
+        else if (n && !n.enabled) { text = 'NIM DOWN'; title = n.reason; }
+        else if (n && n.enabled) {
+            text = 'NIM READY'; ready = true;
+            title = `local NIM at ${(_aiProviderState.nvidia || {}).base_url || ''}`;
+        }
+    }
+    pill.textContent = text;
+    pill.title = title;
+    pill.className = 'px-2 py-0.5 text-[10px] font-semibold rounded-full '
+        + (ready ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600')
+        + (text ? '' : ' hidden');
 }
 
 // ---- Active LLM controls (Provider / Model / Static emission) — interactive ----
@@ -536,23 +616,28 @@ function renderModelOptions(provider, selected) {
     const list = modelsForProvider(provider);
     if (!list.length) {
         sel.innerHTML = '<option value="">(no models — check creds / daemon)</option>';
+        renderModelGate(provider);
         return;
     }
     sel.innerHTML = list.map(m => `<option value="${m}">${m}</option>`).join('');
+    if (provider === 'nvidia') annotateNvidiaModels(sel, selected);
     if (selected && list.includes(selected)) sel.value = selected;
+    renderModelGate(provider);
 }
 
 async function refreshActiveProvider() {
     try {
         const res = await fetch('/api/settings/ai-provider');
         if (!res.ok) return;
-        const data = await res.json();   // {provider, model, choices, available, models, fields}
+        const data = await res.json();   // {provider, model, choices, available, models, fields, nvidia}
         _aiProviderState = {
             choices: data.choices || [], available: data.available || {}, models: data.models || {},
+            nvidia: data.nvidia || {},   // local-NIM status: ready / served / featured (GPU needs)
         };
         const provSel = document.getElementById('providerSelect');
         if (provSel && !_selOpen('providerSelect')) {
             provSel.innerHTML = (data.choices || []).map(p => `<option value="${p}">${p}</option>`).join('');
+            applyProviderGating(provSel, data.provider);
             provSel.value = data.provider || '';
         }
         if (!_selOpen('modelSelect')) renderModelOptions(data.provider, data.model);
@@ -622,8 +707,58 @@ async function onEmissionChange() {
     } catch (e) { /* ignore */ }
 }
 
+// ---- Blueprint (agentic architecture) — the server default lives in
+// settings_store; GET /api/settings/blueprint lists every choice with its
+// stage labels and what Multi-Agent Mode means for it. ----
+let _blueprintState = { active: '', choices: [] };
+
+function activeBlueprint() {
+    return _blueprintState.choices.find(b => b.key === _blueprintState.active) || null;
+}
+
+// Merge the active core's stage labels into STAGE_LABELS and restate the
+// Multi-Agent card for this core (every guardrail runs in both regardless).
+function applyBlueprintLabels() {
+    const bp = activeBlueprint();
+    if (!bp) return;
+    Object.assign(STAGE_LABELS, bp.stage_labels || {});
+    const desc = document.getElementById('multiAgentDesc');
+    if (desc && bp.multi_agent_note) desc.textContent = `${bp.multi_agent_note} (all guardrails still run)`;
+}
+
+async function refreshActiveBlueprint() {
+    try {
+        const res = await fetch('/api/settings/blueprint');
+        if (!res.ok) return;
+        const data = await res.json();   // {active, choices:[{key,label,description,workflow_name,stage_labels,core_nodes,multi_agent_note}]}
+        _blueprintState = { active: data.active || '', choices: data.choices || [] };
+        const sel = document.getElementById('blueprintSelect');
+        if (sel && !_selOpen('blueprintSelect')) {
+            sel.innerHTML = _blueprintState.choices
+                .map(b => `<option value="${b.key}" title="${b.description}">${b.label}</option>`).join('');
+            sel.value = _blueprintState.active;
+            const bp = activeBlueprint();
+            if (bp) sel.title = bp.description;
+        }
+        applyBlueprintLabels();
+    } catch (e) { /* best-effort: never break the chat */ }
+}
+
+async function onBlueprintChange() {
+    const key = document.getElementById('blueprintSelect').value;
+    try {
+        await fetch('/api/settings/blueprint', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key }),
+        });
+    } catch (e) { /* ignore */ }
+    refreshActiveBlueprint();
+}
+
 function refreshIndicators() {
-    refreshActiveProvider();
+    // Capabilities first: the provider/model gating in refreshActiveProvider reads them.
+    refreshServerInfo().then(refreshActiveProvider);
+    refreshActiveBlueprint();
     refreshStaticEmission();
 }
 
@@ -671,6 +806,7 @@ const STAGE_LABELS = {
     router: 'Routing to the right care team…',
     policy: 'Policy screening…',
     prompt_defense: 'Screening your message (AI Defense)…',
+    nemo_input_rails: 'Screening your message (NeMo Guardrails)…',
     intake: 'Reviewing your message…',
     coordinator: 'Coordinator planning specialists…',
     specialists: 'Specialists analyzing…',
@@ -678,6 +814,8 @@ const STAGE_LABELS = {
     safety: 'Running safety checks…',
     injection: 'Running compliance checks…',
     compliance: 'Running compliance checks…',
+    agent_control: 'Evaluating the answer (Agent Observability Controls)…',
+    nemo_output_rails: 'Screening the answer (NeMo Guardrails)…',
     response_defense: 'Screening the answer (AI Defense)…',
     governance: 'Finalizing and logging…'
 };
@@ -701,6 +839,7 @@ function buildChatPayload(message) {
         force_boundary_injection: boundaryEnabled,
         ai_defense_review: aiDefenseEnabled,
         agent_control_review: agentControlEnabled,
+        nemo_guardrails_review: nemoGuardrailsEnabled,
         internal_policy_review: internalPolicyEnabled,
         multi_agent_mode: multiAgentEnabled
     };
@@ -1080,6 +1219,97 @@ function updateAgentControlStatus() {
         statusElement.textContent = 'OFF';
         statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
     }
+}
+
+function toggleNemoGuardrails() {
+    const toggle = document.getElementById('nemoGuardrailsToggle');
+    nemoGuardrailsEnabled = toggle.checked;
+    localStorage.setItem('medadvice_nemo_guardrails_enabled', nemoGuardrailsEnabled);
+    updateNemoGuardrailsStatus();
+    console.log('NVIDIA NeMo Guardrails', nemoGuardrailsEnabled ? 'enabled' : 'disabled');
+}
+
+function updateNemoGuardrailsStatus() {
+    const statusElement = document.getElementById('nemoGuardrailsStatus');
+    if (!statusElement) return;
+    if (nemoGuardrailsEnabled) {
+        statusElement.textContent = 'RAILING';
+        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-700';
+    } else {
+        statusElement.textContent = 'OFF';
+        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
+    }
+}
+
+// ---- NemoClaw Guardrails: a SERVER-SIDE toggle (tool calls are not chat
+// requests). PUT /api/toolguard/nemoclaw persists it; the pill reads POLICY
+// (the policy layer is enforcing) or RUNTIME (the real NemoClaw sandbox has
+// reported denials recently). OFF is always grey (CLAUDE.md).
+let nemoClawPollInterval = null;
+
+async function toggleNemoClaw() {
+    const toggle = document.getElementById('nemoClawToggle');
+    const on = toggle.checked;
+    try {
+        const resp = await fetch('/api/toolguard/nemoclaw', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: on })
+        });
+        if (!resp.ok) throw new Error('nemoclaw toggle failed');
+        updateNemoClawStatus(await resp.json());
+        console.log('NemoClaw Guardrails', on ? 'enabled' : 'disabled');
+    } catch (e) {
+        console.error('Error toggling NemoClaw Guardrails:', e);
+        toggle.checked = !on;
+        alert('Failed to toggle NemoClaw Guardrails. Please try again.');
+    }
+}
+
+function updateNemoClawStatus(data) {
+    const statusElement = document.getElementById('nemoClawStatus');
+    const toggle = document.getElementById('nemoClawToggle');
+    const desc = document.getElementById('nemoClawDesc');
+    if (!statusElement || !data) return;
+    if (toggle && document.activeElement !== toggle) toggle.checked = !!data.enabled;
+    const policy = data.policy || {};
+    const runtime = data.runtime || {};
+    const supported = data.runtime_supported || {};
+    // The toggle only makes sense when the policy layer can run at all.
+    if (toggle) toggle.disabled = policy.loaded === false;
+    let text = 'OFF', cls = 'bg-gray-100 text-gray-600', title = '';
+    if (policy.loaded === false) {
+        text = 'NO POLICY'; title = policy.error || '';
+    } else if (data.enabled) {
+        const runtimeLive = (runtime.events_recent || 0) > 0;
+        text = runtimeLive ? 'RUNTIME' : 'POLICY';
+        cls = 'bg-lime-100 text-lime-700';
+        title = runtimeLive
+            ? `${runtime.events_recent} sandbox denial(s) in the last ${Math.round((runtime.window_s || 300) / 60)} min`
+            : `policy layer enforcing (${policy.endpoints || 0} endpoint rule(s))`
+              + (supported.enabled === false ? ` — runtime unavailable here: ${supported.reason || ''}` : '');
+    }
+    statusElement.textContent = text;
+    statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full ' + cls;
+    statusElement.title = title;
+    if (desc && supported.enabled === false && supported.reason) {
+        desc.title = supported.reason;
+    }
+}
+
+async function checkNemoClawStatus() {
+    try {
+        const resp = await fetch('/api/toolguard/nemoclaw');
+        if (!resp.ok) return;
+        updateNemoClawStatus(await resp.json());
+    } catch (e) { /* best-effort: never break the chat */ }
+}
+
+function startNemoClawPolling() {
+    checkNemoClawStatus();
+    if (nemoClawPollInterval) clearInterval(nemoClawPollInterval);
+    // Poll so a runtime denial (RUNTIME) or a toggle flipped elsewhere reflects here.
+    nemoClawPollInterval = setInterval(checkNemoClawStatus, 10000);
 }
 
 function toggleInternalPolicy() {

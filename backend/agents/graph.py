@@ -1,4 +1,4 @@
-"""LangGraph assembly: supervisor + per-theme decomposed subgraphs.
+"""LangGraph assembly: supervisor + per-theme subgraphs, per selected BLUEPRINT.
 
 Workshop sections 4.4 ("Defining the Graph") and 4.8 ("Decomposition Pattern").
 
@@ -6,51 +6,43 @@ Topology:
 
     START -> router -> {theme}_subgraph -> END
 
-Each ``{theme}_subgraph`` is the decomposed pipeline (default path):
+Each ``{theme}_subgraph`` is the shared guardrail chain wired around the active
+blueprint's generation core (backend/agents/blueprints):
 
-    policy -> prompt_defense -> intake -> synthesizer -> safety
-          -> injection -> compliance -> agent_control -> response_defense
-          -> governance
+    policy -> prompt_defense -> nemo_input_rails -> <core> -> safety
+          -> injection -> compliance -> agent_control -> nemo_output_rails
+          -> response_defense -> governance
 
-By default the edge after ``intake`` routes straight to the synthesizer, which
-answers alone as the theme's ``*_domain_agent`` (one LLM call per turn).
-
-When the request sets ``multi_agent_mode`` to True (the sidecar "Multi-Agent
-Mode" toggle turned on), that edge instead runs the multi-agent core
-coordinator -> specialists -> synthesizer: the coordinator selects 1-N themed
-specialists for the query, each specialist runs as its own themed agent, and
-the synthesizer fuses their findings into the final answer. Every agent emits
-its own GenAI AgentInvocation span, so the turn produces a multi-agent trace.
-Every guardrail node still runs in both modes.
+For the shipped ``demobot_multi_agent`` blueprint the core is
+``intake -> synthesizer`` (one LLM call as the theme's ``*_domain_agent``), or
+``intake -> coordinator -> specialists -> synthesizer`` when the request sets
+``multi_agent_mode`` True. The ``nvidia_virtual_assistant`` blueprint swaps in
+the NVIDIA AI Virtual Assistant core (primary assistant, sub-assistants,
+retrieval, analytics). Every guardrail node runs in both — that is enforced
+structurally by ``blueprints.guardrails.wire_guardrails`` and asserted by
+tests/test_blueprint_parity.py.
 
 There are conditional short-circuits to END whenever a node sets ``terminal``
-(policy block, AI Defense block, Galileo Agent Control deny, clarifying
-question, agent generation error).
+(policy block, AI Defense block, NeMo rail, Galileo Agent Control deny,
+clarifying question, agent generation error).
 
-The compiled workflow is tagged with ``workflow_name`` metadata so Splunk AI
-Agent Monitoring promotes it to a recognized workflow.
+Each compiled workflow is tagged with the blueprint's ``workflow_name`` so
+Splunk AI Agent Monitoring promotes it to a recognized workflow, and the two
+architectures show up as distinct workflows.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
 import uuid
 from typing import Any, Dict, Iterator, Optional
 
 from langgraph.graph import END, START, StateGraph
 
-from backend.agents.nodes.agent_control import agent_control_node
-from backend.agents.nodes.clarify import intake_node
-from backend.agents.nodes.compliance import compliance_node
-from backend.agents.nodes.coordinator import make_coordinator_agent
-from backend.agents.nodes.defense import prompt_defense_node, response_defense_node
-from backend.agents.nodes.governance import governance_node
-from backend.agents.nodes.specialists import make_specialists_agent
-from backend.agents.nodes.synthesizer import make_synthesizer_agent
-from backend.agents.nodes.injection import injection_node
-from backend.agents.nodes.policy import policy_block_node
-from backend.agents.nodes.safety import safety_node
+from backend.agents.blueprints import DEFAULT_BLUEPRINT, get_blueprint
+from backend.agents.blueprints.guardrails import wire_guardrails
 from backend.agents.state import DemoBotState, build_initial_state
 from backend.agents.supervisor import route_to_theme, router_node
 from backend.agents.themes import THEMES
@@ -62,74 +54,28 @@ from backend.telemetry import otel
 logger = logging.getLogger(__name__)
 
 
-def _terminal_router(state: Dict[str, Any]) -> str:
-    """Conditional-edge function: end the subgraph if a node short-circuited."""
-    return "end" if state.get("terminal") else "next"
+def active_blueprint_key() -> str:
+    """The server-default blueprint (header dropdown / ACTIVE_BLUEPRINT)."""
+    return (getattr(settings, "active_blueprint", "") or "").strip() or DEFAULT_BLUEPRINT
 
 
-def _route_after_intake(state: Dict[str, Any]) -> str:
-    """End if short-circuited; else route straight to the synthesizer (default)
-    or run the multi-agent core when ``multi_agent_mode`` is explicitly True.
-
-    None/absent/False defaults to single-agent here — the single place the
-    default is applied (mirrors ``internal_policy_review`` in nodes/policy.py).
-    """
-    if state.get("terminal"):
-        return "end"
-    return "coordinator" if state.get("multi_agent_mode") is True else "synthesizer"
+def build_theme_subgraph(theme_config, blueprint=None):
+    """Build and compile one theme's subgraph for a blueprint (default: the
+    active one). Kept as the public name tests and tooling use."""
+    bp = blueprint if blueprint is not None else get_blueprint(active_blueprint_key())
+    return wire_guardrails(theme_config, bp)
 
 
-def build_theme_subgraph(theme_config):
-    """Build and compile one theme's decomposed agent subgraph."""
-    g = StateGraph(DemoBotState)
-
-    g.add_node("policy", policy_block_node)
-    g.add_node("prompt_defense", prompt_defense_node)
-    g.add_node("intake", intake_node)
-    g.add_node("coordinator", make_coordinator_agent(theme_config))
-    g.add_node("specialists", make_specialists_agent(theme_config))
-    g.add_node("synthesizer", make_synthesizer_agent(theme_config))
-    g.add_node("safety", safety_node)
-    g.add_node("injection", injection_node)
-    g.add_node("compliance", compliance_node)
-    g.add_node("agent_control", agent_control_node)
-    g.add_node("response_defense", response_defense_node)
-    g.add_node("governance", governance_node)
-
-    g.add_edge(START, "policy")
-    g.add_conditional_edges("policy", _terminal_router, {"end": END, "next": "prompt_defense"})
-    g.add_conditional_edges("prompt_defense", _terminal_router, {"end": END, "next": "intake"})
-    g.add_conditional_edges(
-        "intake",
-        _route_after_intake,
-        {"end": END, "coordinator": "coordinator", "synthesizer": "synthesizer"},
-    )
-    g.add_conditional_edges("coordinator", _terminal_router, {"end": END, "next": "specialists"})
-    g.add_conditional_edges("specialists", _terminal_router, {"end": END, "next": "synthesizer"})
-    g.add_conditional_edges("synthesizer", _terminal_router, {"end": END, "next": "safety"})
-    g.add_edge("safety", "injection")
-    g.add_edge("injection", "compliance")
-    g.add_edge("compliance", "agent_control")
-    g.add_conditional_edges(
-        "agent_control", _terminal_router, {"end": END, "next": "response_defense"}
-    )
-    g.add_conditional_edges(
-        "response_defense", _terminal_router, {"end": END, "next": "governance"}
-    )
-    g.add_edge("governance", END)
-
-    return g.compile()
-
-
-def build_workflow_graph():
-    """Build and compile the supervisor-routed multi-agent workflow."""
+def build_workflow_graph(blueprint_key: Optional[str] = None):
+    """Build and compile the supervisor-routed workflow for one blueprint."""
+    bp = get_blueprint(blueprint_key or active_blueprint_key())
     g = StateGraph(DemoBotState)
     g.add_node("router", router_node)
 
     route_map: Dict[str, str] = {}
     for key, theme_config in THEMES.items():
         node_name = f"{key}_subgraph"
-        g.add_node(node_name, build_theme_subgraph(theme_config))
+        g.add_node(node_name, build_theme_subgraph(theme_config, bp))
         g.add_edge(node_name, END)
         route_map[node_name] = node_name
 
@@ -137,26 +83,38 @@ def build_workflow_graph():
     g.add_conditional_edges("router", route_to_theme, route_map)
 
     compiled = g.compile().with_config(
-        metadata={"workflow_name": settings.agentic_workflow_name}
+        metadata={"workflow_name": bp.workflow_name, "blueprint": bp.key}
     )
     logger.info(
-        "Agentic workflow compiled with %d theme subgraphs: %s",
-        len(THEMES),
-        ", ".join(THEMES.keys()),
+        "Agentic workflow '%s' (blueprint %s) compiled with %d theme subgraphs: %s",
+        bp.workflow_name, bp.key, len(THEMES), ", ".join(THEMES.keys()),
     )
     return compiled
 
 
-# Lazily-built, cached compiled workflow.
-_COMPILED_WORKFLOW = None
+# Lazily-built compiled workflows, one per blueprint (both can be live at once:
+# the header dropdown picks the default, a request may override).
+_COMPILED: Dict[str, Any] = {}
+_COMPILE_LOCK = threading.Lock()
 
 
-def get_agentic_runner():
-    """Return the compiled workflow, building it once on first use."""
-    global _COMPILED_WORKFLOW
-    if _COMPILED_WORKFLOW is None:
-        _COMPILED_WORKFLOW = build_workflow_graph()
-    return _COMPILED_WORKFLOW
+def get_agentic_runner(blueprint_key: Optional[str] = None):
+    """Return the compiled workflow for a blueprint, building it once on first use."""
+    key = get_blueprint(blueprint_key or active_blueprint_key()).key
+    runner = _COMPILED.get(key)
+    if runner is None:
+        with _COMPILE_LOCK:
+            runner = _COMPILED.get(key)
+            if runner is None:
+                runner = build_workflow_graph(key)
+                _COMPILED[key] = runner
+    return runner
+
+
+def clear_compiled() -> None:
+    """Drop every compiled workflow (a code/theme change; a blueprint switch
+    does not need this — the cache is keyed by blueprint)."""
+    _COMPILED.clear()
 
 
 def _generic_error_result() -> Dict[str, Any]:
@@ -186,11 +144,14 @@ def _build_turn_state(
     internal_policy_review: Optional[bool] = None,
     multi_agent_mode: Optional[bool] = None,
     agent_control_review: Optional[bool] = None,
+    nemo_guardrails_review: Optional[bool] = None,
     enduser_id: Optional[str] = None,
     service_name: Optional[str] = None,
     deployment_id: Optional[str] = None,
+    blueprint: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build the initial workflow state shared by run_turn / run_turn_stream."""
+    bp = get_blueprint(blueprint or active_blueprint_key())
     state = build_initial_state(
         session_id=session_id,
         user_message=user_message,
@@ -206,12 +167,17 @@ def _build_turn_state(
         internal_policy_review=internal_policy_review,
         multi_agent_mode=multi_agent_mode,
         agent_control_review=agent_control_review,
+        nemo_guardrails_review=nemo_guardrails_review,
         service_name=service_name,
         deployment_id=deployment_id,
     )
     state["request_id"] = str(uuid.uuid4())
     state["trace_id"] = str(uuid.uuid4())
     state["start_time"] = time.time()
+    # Which architecture serves this turn: read by governance (workflow_name +
+    # the additive `blueprint` field) and the OTel workflow span.
+    state["blueprint"] = bp.key
+    state["workflow_name"] = bp.workflow_name
     return state
 
 
@@ -230,9 +196,11 @@ def run_turn(
     internal_policy_review: Optional[bool] = None,
     multi_agent_mode: Optional[bool] = None,
     agent_control_review: Optional[bool] = None,
+    nemo_guardrails_review: Optional[bool] = None,
     enduser_id: Optional[str] = None,
     service_name: Optional[str] = None,
     deployment_id: Optional[str] = None,
+    blueprint: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run one chat turn through the multi-agent workflow.
 
@@ -240,8 +208,6 @@ def run_turn(
     dict with the same shape: {message, type, severity, escalated, [policy_blocked],
     metadata}. The whole invocation is wrapped in a GenAI Workflow span.
     """
-    runner = get_agentic_runner()
-
     state = _build_turn_state(
         session_id=session_id,
         user_message=user_message,
@@ -257,19 +223,23 @@ def run_turn(
         internal_policy_review=internal_policy_review,
         multi_agent_mode=multi_agent_mode,
         agent_control_review=agent_control_review,
+        nemo_guardrails_review=nemo_guardrails_review,
         service_name=service_name,
         deployment_id=deployment_id,
+        blueprint=blueprint,
     )
+    runner = get_agentic_runner(state["blueprint"])
     request_id = state["request_id"]
     trace_id = state["trace_id"]
 
     try:
         with otel.workflow_span(
-            workflow_name=settings.agentic_workflow_name,
+            workflow_name=state["workflow_name"],
             theme=theme,
             session_id=session_id,
             request_id=request_id,
             trace_id=trace_id,
+            blueprint=state["blueprint"],
         ):
             final_state = runner.invoke(state)
         result = final_state.get("result")
@@ -303,9 +273,8 @@ def run_turn_stream(**kwargs: Any) -> Iterator[Dict[str, Any]]:
     response_defense output guardrail) has finished — stage events carry node
     names only, so nothing bypasses governance.
     """
-    runner = get_agentic_runner()
-
     state = _build_turn_state(**kwargs)
+    runner = get_agentic_runner(state["blueprint"])
     request_id = state["request_id"]
     trace_id = state["trace_id"]
     turn_start = state["start_time"]
@@ -313,11 +282,12 @@ def run_turn_stream(**kwargs: Any) -> Iterator[Dict[str, Any]]:
     result: Optional[Dict[str, Any]] = None
     try:
         with otel.workflow_span(
-            workflow_name=settings.agentic_workflow_name,
+            workflow_name=state["workflow_name"],
             theme=kwargs.get("theme"),
             session_id=kwargs.get("session_id"),
             request_id=request_id,
             trace_id=trace_id,
+            blueprint=state["blueprint"],
         ):
             # subgraphs=True surfaces the theme subgraph's inner nodes
             # (policy, coordinator, specialists, ...) as they complete; chunks

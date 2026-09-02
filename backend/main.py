@@ -11,7 +11,7 @@ from backend.database.db import init_db
 from backend.logging.log_handlers import setup_logging
 from backend.middleware.request_logging import RequestLoggingMiddleware
 from backend.middleware.access_key import AccessKeyMiddleware
-from backend.routers import chat, admin, auth, settings as settings_routes, incident, spray, toolguard
+from backend.routers import chat, admin, auth, settings as settings_routes, incident, spray, toolguard, analytics
 from backend.telemetry import otel
 
 # Setup logging
@@ -69,6 +69,7 @@ app.include_router(settings_routes.router)
 app.include_router(incident.router)
 app.include_router(spray.router)
 app.include_router(toolguard.router)
+app.include_router(analytics.router)
 
 def _prewarm_llm_stack() -> None:
     """Absorb the first-turn cold start off the request path.
@@ -140,10 +141,18 @@ async def startup_event():
         # Same for the AI Defense / Splunk Agent Observability integration creds.
         # (Collector-consumed keys are .env-owned and already loaded by config.)
         settings_store.apply_integration_creds_from_store()
+        # The NemoClaw Guardrails drawer toggle is server-side state: restore it.
+        settings_store.apply_nemoclaw_guardrails_from_store()
+        # Same for the Blueprint dropdown (which agentic architecture is default).
+        settings_store.apply_blueprint_from_store()
         # Discover which models each provider currently offers (background thread so
         # startup isn't blocked) — populates the Settings "Model" dropdown.
         from backend import model_catalog
         model_catalog.refresh_async()
+        # Probe what this host can run (GPU, container runtime, local NIM) so the
+        # UI can grey out options that cannot work here. Background, best-effort.
+        from backend import host_capabilities
+        host_capabilities.refresh_async()
         await hec_runtime.start()
         logger.info("Settings loaded; HEC forwarders started")
     except Exception as e:

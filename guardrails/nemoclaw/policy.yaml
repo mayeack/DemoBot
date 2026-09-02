@@ -1,0 +1,82 @@
+# NemoClaw / OpenShell-style sandbox policy for the DemoBot agentic surface.
+#
+# This is the "NemoClaw Guardrails" drawer toggle's policy. DemoBot evaluates it
+# on EVERY agent tool call submitted to /api/toolguard/inspect (the policy layer,
+# backend/services/nemoclaw_guard.py), using the same vocabulary NemoClaw's own
+# sandbox policy uses (nemoclaw-blueprint/policies/openclaw-sandbox.yaml), so the
+# policy an EC2 replica applies to its real NemoClaw/OpenShell sandbox
+# (run-nemoclaw.sh) and the one this guard enforces stay one artifact.
+#
+# Deny by default: a network destination, filesystem scope or binary that is not
+# listed here is a violation. Hosts and paths are container-side, exactly as the
+# gateway sees them.
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  # Read-only system scopes (the sandbox image itself).
+  read_only:
+    - /usr
+    - /lib
+    - /etc
+    - /proc
+    - /opt/demobot-plugins
+  # Writable scopes: the agent workspace (both the podman Mode-C layout and the
+  # NemoClaw sandbox layout) and scratch space.
+  read_write:
+    - /home/node/.openclaw/workspace
+    - /sandbox/.openclaw/workspace
+    - /tmp
+
+process:
+  run_as: sandbox
+  # Binaries an autonomous agent has no business running (privilege escalation,
+  # raw sockets, remote shells). Matched against exec/bash tool commands.
+  deny_binaries:
+    - sudo
+    - su
+    - nc
+    - ncat
+    - socat
+    - ssh
+    - scp
+    - sftp
+    - telnet
+    - nmap
+
+network_policies:
+  # DemoBot's governance seat: the tool-guard plugin (node) POSTs every tool
+  # call here before it runs.
+  - name: demobot-guard
+    endpoints:
+      - host: 127.0.0.1
+        port: 8001
+        protocol: tcp
+        methods: [POST, GET]
+        paths: ["/api/toolguard/**", "/health"]
+      - host: localhost
+        port: 8001
+        protocol: tcp
+        methods: [POST, GET]
+        paths: ["/api/toolguard/**", "/health"]
+    binaries: ["/usr/bin/node", "/usr/local/bin/node"]
+  # Local inference only (the privacy-router posture): the NIM / Ollama on this
+  # host. A model API on any other host is an inference violation.
+  - name: local-inference
+    endpoints:
+      - host: localhost
+        port: 8000
+        protocol: tcp
+        methods: [POST, GET]
+        paths: ["/v1/**"]
+      - host: host.containers.internal
+        port: 11434
+        protocol: tcp
+        methods: [POST, GET]
+        paths: ["/api/**", "/v1/**"]
+    binaries: ["/usr/bin/node", "/usr/local/bin/node", "/usr/bin/curl"]
+
+inference:
+  # Managed/privacy routing: model calls may only go to the local endpoints above.
+  local_only: true
+  api_paths: ["/v1/chat/completions", "/v1/completions", "/v1/embeddings", "/api/generate", "/api/chat"]

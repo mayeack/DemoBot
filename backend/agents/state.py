@@ -34,6 +34,7 @@ class DemoBotState(TypedDict, total=False):
     internal_policy_review: Optional[bool]
     multi_agent_mode: Optional[bool]
     agent_control_review: Optional[bool]
+    nemo_guardrails_review: Optional[bool]
     # Per-turn governance identity overrides. Unset on ordinary chat (the
     # governance log then falls back to its own "demobot-v3" defaults); the
     # prompt-injection spray campaign sets them so one process can emit turns
@@ -46,6 +47,10 @@ class DemoBotState(TypedDict, total=False):
     request_id: str
     trace_id: str
     start_time: float
+    # Which agentic architecture serves this turn (backend/agents/blueprints):
+    # its key, and the workflow_name governance + the OTel workflow span carry.
+    blueprint: str
+    workflow_name: str
     # Wall-clock per non-LLM stage (e.g. AI Defense inspections), reported in
     # the governance event's performance_data for latency triage. Keys are
     # ``{stage}_ms``. Per-agent LLM timing lives in agent_trace.duration_ms.
@@ -59,6 +64,13 @@ class DemoBotState(TypedDict, total=False):
     # hallucination / authority). Set PRE-LLM so the input directive and the
     # post-LLM injection fallback agree on a single decision.
     requested_categories: Dict[str, bool]
+
+    # ---- NVIDIA AI Virtual Assistant blueprint (blueprints/nvidia_virtual_assistant.py) ----
+    # LangGraph only carries keys declared here: a node's undeclared return key
+    # is silently dropped, so every blueprint's core keys must be listed.
+    blueprint_record: Dict[str, Any]      # lookup_record: the session's synthetic record
+    blueprint_route: Dict[str, Any]       # the primary assistant's tool call(s) + routing mode
+    blueprint_tools: List[Dict[str, Any]] # tools the sub-assistants ran (retrieve_knowledge, lookup_record)
 
     # ---- Multi-agent stage (coordinator -> specialists -> synthesizer) ----
     # The coordinator picks 1-N specialists per query; the specialists node runs
@@ -120,6 +132,12 @@ class DemoBotState(TypedDict, total=False):
     # the governance event can record an observe/steer match that did not block.
     agent_control: Any  # ControlVerdict
 
+    # ---- NVIDIA NeMo Guardrails verdicts (nemo_input_rails / nemo_output_rails) ----
+    # Present for allowed turns too (a fail-open error is recorded), so the
+    # governance event can attribute a non-blocking rail outcome.
+    nemo_guardrails_input: Any  # RailVerdict
+    nemo_guardrails_output: Any  # RailVerdict
+
     # ---- Short-circuit + final result ----
     # ``terminal`` is set by any node that fully handled the turn (policy block,
     # AI Defense block, clarifying question). ``result`` is the
@@ -146,6 +164,7 @@ def build_initial_state(
     internal_policy_review: Optional[bool] = None,
     multi_agent_mode: Optional[bool] = None,
     agent_control_review: Optional[bool] = None,
+    nemo_guardrails_review: Optional[bool] = None,
     service_name: Optional[str] = None,
     deployment_id: Optional[str] = None,
 ) -> DemoBotState:
@@ -170,6 +189,7 @@ def build_initial_state(
         internal_policy_review=internal_policy_review,
         multi_agent_mode=multi_agent_mode,
         agent_control_review=agent_control_review,
+        nemo_guardrails_review=nemo_guardrails_review,
         service_name=service_name,
         deployment_id=deployment_id,
         terminal=False,
@@ -185,7 +205,10 @@ def governance_identity_overrides(state: Dict[str, Any]) -> Dict[str, str]:
     splat this dict so unset overrides contribute no key at all.
     """
     overrides: Dict[str, str] = {}
-    for key in ("service_name", "deployment_id"):
+    # workflow_name / blueprint: which architecture served the turn. Carried by
+    # EVERY governance event of the turn — blocked ones included — so a block is
+    # attributable to the blueprint it happened under (parity contract).
+    for key in ("service_name", "deployment_id", "workflow_name", "blueprint"):
         value = state.get(key)
         if value:
             overrides[key] = value

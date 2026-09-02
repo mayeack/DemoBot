@@ -58,6 +58,9 @@ _PRICES_PER_MTOK: Dict[str, tuple] = {
     "gemini-1.5-pro": (1.25, 5.00),
     "gemini-1.5-flash": (0.075, 0.30),
     "gemini-2.0-flash": (0.10, 0.40),
+    # provider=nvidia is a NIM on the box's own GPU: no per-token bill, so the
+    # executive cost trend must not price it as a Sonnet-class API call.
+    "nvidia/": (0.0, 0.0),
 }
 _DEFAULT_PRICE = (3.00, 15.00)  # fall back to a Sonnet-class estimate
 
@@ -67,6 +70,8 @@ _BLOCK_GUARDRAILS = {
     "policy_block": ("Self-harm safety policy", "blocked_unsafe"),
     "tool_policy": ("Agentic tool policy", "blocked_tool_call"),
     "openclaw_tool_guard": ("OpenClaw tool guard", "blocked_tool_call"),
+    "nemo_guardrails": ("NVIDIA NeMo Guardrails policy", "blocked_by_nemo_guardrails"),
+    "nemoclaw_guardrails": ("NVIDIA NemoClaw guardrails", "blocked_tool_call"),
 }
 
 # PII types that are also Protected Health Information in a medical context.

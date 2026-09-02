@@ -7,6 +7,7 @@
 #   ./start-all.sh                     # collector + app
 #   ./start-all.sh --tunnel            # + public tunnel
 #   ./start-all.sh --agentic           # + OpenClaw gateway (agentic surface)
+#   ./start-all.sh --nemoclaw          # + NVIDIA NemoClaw sandbox (alternative agentic surface)
 #   ./start-all.sh --tunnel --agentic  # everything
 #
 # Each service runs in the background; logs go to /tmp/medadvice_*.log.
@@ -14,11 +15,13 @@ cd "$(dirname "$0")" || exit 1
 
 WITH_TUNNEL=false
 WITH_AGENTIC=false
+WITH_NEMOCLAW=false
 for arg in "$@"; do
   case "$arg" in
-    --tunnel)  WITH_TUNNEL=true ;;
-    --agentic) WITH_AGENTIC=true ;;
-    -h|--help) echo "Usage: start-all.sh [--tunnel] [--agentic]"; exit 0 ;;
+    --tunnel)   WITH_TUNNEL=true ;;
+    --agentic)  WITH_AGENTIC=true ;;
+    --nemoclaw) WITH_NEMOCLAW=true ;;
+    -h|--help) echo "Usage: start-all.sh [--tunnel] [--agentic] [--nemoclaw]"; exit 0 ;;
     *) echo "Unknown option: $arg (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -52,6 +55,17 @@ if [ "$WITH_AGENTIC" = true ]; then
   echo "  -> gateway http://127.0.0.1:18789 ; token: cat ~/.demobot-openclaw/gateway-token"
 fi
 
+# 3b) optional NVIDIA NemoClaw runtime (OpenClaw inside an OpenShell sandbox,
+#     governed by the same /api/toolguard seat). Needs Docker/Colima — not
+#     podman — so on this Mac it is normally an EC2-replica service; the script
+#     refuses with the reason when the host cannot run it.
+if [ "$WITH_NEMOCLAW" = true ]; then
+  echo "  starting NemoClaw sandbox (run-nemoclaw.sh) -> /tmp/medadvice_nemoclaw.log"
+  install -m 600 /dev/null /tmp/medadvice_nemoclaw.log
+  nohup ./run-nemoclaw.sh >/tmp/medadvice_nemoclaw.log 2>&1 &
+  echo "  -> dashboard: nemoclaw demobot-nemoclaw dashboard-url --quiet"
+fi
+
 # 4) optional public tunnel
 if [ "$WITH_TUNNEL" = true ]; then
   echo "  starting public tunnel (tunnel.sh) -> /tmp/medadvice_tunnel.log"
@@ -63,4 +77,5 @@ echo
 echo "Done. Verify the full pipeline with:  ./tests/observability/verify_observability.sh"
 STOP="lsof -ti:8001 -ti:4317 | xargs kill ; pkill -f cloudflared"
 [ "$WITH_AGENTIC" = true ] && STOP="$STOP ; podman stop demobot-openclaw"
+[ "$WITH_NEMOCLAW" = true ] && STOP="$STOP ; nemoclaw demobot-nemoclaw stop ; pkill -f ocsf_forwarder.py"
 echo "Stop everything with:  $STOP"

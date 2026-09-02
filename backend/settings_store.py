@@ -43,6 +43,12 @@ _DEFAULTS: Dict[str, Any] = {
     # (SPLUNK_REALM/O11Y_INGEST/...) are deliberately NOT kept here — they
     # live in .env only, so the two planes can't diverge.
     "integration_creds": {},
+    # The "NemoClaw Guardrails" drawer toggle (server-side: tool calls are not
+    # chat requests). Persisted so the demo posture survives a restart.
+    "nemoclaw_guardrails": {"enabled": False},
+    # Runtime override of the default agentic architecture (the chat header's
+    # "Blueprint" dropdown). Empty = the ACTIVE_BLUEPRINT config default.
+    "blueprint": {"key": ""},
 }
 _ID_RE = re.compile(r"[^a-z0-9-]+")
 
@@ -97,6 +103,15 @@ class _CredField:
         self.validate = validate
 
 
+def _validate_nim_base_url(value: str) -> None:
+    """provider=nvidia is local inference only: reject a non-loopback NIM URL
+    before it is applied (the same rule backend/agents/llm.py enforces at call
+    time, surfaced here as a 422 with the reason instead of a failed chat turn)."""
+    from backend import nvidia_nim
+
+    nvidia_nim.validate_nim_base_url(value)
+
+
 # Access fields per provider (the "Model" id is handled separately by the dropdown).
 _PROVIDER_FIELDS: Dict[str, List[_CredField]] = {
     "anthropic": [
@@ -121,11 +136,21 @@ _PROVIDER_FIELDS: Dict[str, List[_CredField]] = {
         _CredField("base_url", "Base URL", settings_attr="ollama_base_url",
                    placeholder="http://localhost:11434"),
     ],
+    # Local NIM container on this host — never the hosted catalog. The URL is
+    # validated as loopback; the key is only for a NIM started behind an
+    # API-key gate; reasoning toggles Nemotron 3 "thinking" (default off).
     "nvidia": [
-        _CredField("api_key", "API key", secret=True, settings_attr="nvidia_api_key",
-                   placeholder="nvapi-…"),
-        _CredField("base_url", "Base URL", settings_attr="nvidia_base_url",
-                   placeholder="https://integrate.api.nvidia.com/v1"),
+        _CredField("base_url", "NIM base URL (this host)", settings_attr="nvidia_base_url",
+                   placeholder="http://localhost:8000/v1", validate=_validate_nim_base_url,
+                   help="A NIM container on loopback. provider=nvidia never calls the "
+                        "cloud API; a remote GPU box runs its own replica."),
+        _CredField("api_key", "NIM API key (optional)", secret=True,
+                   settings_attr="nvidia_api_key",
+                   help="Only if the NIM was started behind an API-key gate."),
+        _CredField("reasoning", "Reasoning (thinking) mode", boolean=True,
+                   settings_attr="nvidia_reasoning",
+                   help="Nemotron 3 defaults this ON; DemoBot keeps it off so the "
+                        "JSON answer contract is not wrapped in a reasoning trace."),
     ],
 }
 
@@ -137,7 +162,13 @@ _PROVIDER_FIELDS: Dict[str, List[_CredField]] = {
 # group. Scope is deliberately CREDENTIALS + IDENTITY only: timeouts, fail-open
 # posture, enabled-rule lists and Agent Control tuning stay in .env, where they
 # are annotated and rarely change per-demo.
-INTEGRATION_CHOICES: List[str] = ["ai_defense", "splunk_o11y", "agent_observability"]
+INTEGRATION_CHOICES: List[str] = ["ai_defense", "splunk_o11y", "agent_observability", "nemo_guardrails"]
+
+
+def _validate_optional_nim_url(value: str) -> None:
+    """An optional second local NIM (NemoGuard content safety) obeys the same
+    local-only rule as the inference NIM. Blank never reaches here."""
+    _validate_nim_base_url(value)
 
 
 def _validate_resource_attributes(value: str) -> None:
@@ -220,6 +251,24 @@ _INTEGRATION_FIELDS: Dict[str, List[_CredField]] = {
                    placeholder="https://console.multitenant.galileocloud.io"),
         _CredField("project", "Project", env="GALILEO_PROJECT", placeholder="YeackBot"),
         _CredField("log_stream", "Log stream", env="GALILEO_LOG_STREAM", placeholder="default"),
+    ],
+    # Applies live: NemoGuardrailsClient.reconfigure() drops the built rails so
+    # the next chat turn rebuilds them from the settings singleton.
+    "nemo_guardrails": [
+        _CredField("enabled", "Enabled", boolean=True, settings_attr="nemo_guardrails_enabled",
+                   help="Master switch. The per-chat NeMo Guardrails toggle is ignored when this is off."),
+        _CredField("rails", "Rails", settings_attr="nemo_guardrails_rails", wide=True,
+                   placeholder="self_check_input,self_check_output,overreach",
+                   help="Comma-separated: self_check_input, self_check_output (NeMo's LLM "
+                        "self-checks on the active chat model) and overreach (DemoBot's "
+                        "prescriptive-overreach output rail)."),
+        _CredField("content_safety_url", "NemoGuard content-safety NIM (this host)",
+                   settings_attr="nemo_guardrails_content_safety_url",
+                   placeholder="http://localhost:8001/v1", validate=_validate_optional_nim_url,
+                   help="Optional SECOND local NIM serving llama-3.1-nemoguard-8b-content-safety. "
+                        "Leave empty to skip the content-safety rails."),
+        _CredField("fail_open", "Fail open", boolean=True, settings_attr="nemo_guardrails_fail_open",
+                   help="True releases the turn when the rails error; False withholds it."),
     ],
 }
 
@@ -318,6 +367,75 @@ def set_ai_defense_enabled_rules_supported(supported: bool) -> bool:
     data["ai_defense_enabled_rules_supported"] = bool(supported)
     _persist(data)
     return bool(supported)
+
+
+# ---------------------------------------------------------------------------
+# Active blueprint (which agentic architecture serves chat turns by default)
+# ---------------------------------------------------------------------------
+def get_blueprint_setting() -> Dict[str, Any]:
+    from backend.agents.blueprints import get_blueprint, list_blueprints
+    from backend.config import settings
+
+    active = get_blueprint(settings.active_blueprint)
+    return {
+        "active": active.key,
+        "choices": [bp.to_public() for bp in list_blueprints()],
+    }
+
+
+def set_blueprint(key: str) -> Dict[str, Any]:
+    from backend.agents.blueprints import BLUEPRINTS
+    from backend.config import settings
+
+    key = (key or "").strip()
+    if key not in BLUEPRINTS:
+        raise ValueError(f"unknown blueprint: {key}. Valid: {', '.join(BLUEPRINTS)}")
+    data = load()
+    data["blueprint"] = {"key": key}
+    _persist(data)
+    settings.active_blueprint = key   # compiled workflows are cached per key: no rebuild needed
+    return get_blueprint_setting()
+
+
+def apply_blueprint_from_store() -> None:
+    """Startup hook: the persisted dropdown choice wins over the .env default."""
+    from backend.agents.blueprints import BLUEPRINTS
+    from backend.config import settings
+
+    key = ((load().get("blueprint") or {}).get("key") or "").strip()
+    if key in BLUEPRINTS:
+        settings.active_blueprint = key
+    elif key:
+        logger.warning("ignoring stored blueprint %r (unknown); keeping %s", key, settings.active_blueprint)
+
+
+# ---------------------------------------------------------------------------
+# NemoClaw Guardrails toggle (enforcement switch for the NemoClaw policy layer)
+# ---------------------------------------------------------------------------
+def get_nemoclaw_guardrails() -> Dict[str, Any]:
+    from backend.config import settings
+
+    # The live setting is the truth (startup applies the stored value over .env).
+    return {"enabled": bool(settings.nemoclaw_guardrails_enabled)}
+
+
+def set_nemoclaw_guardrails(enabled: bool) -> Dict[str, Any]:
+    from backend.config import settings
+
+    data = load()
+    data["nemoclaw_guardrails"] = {"enabled": bool(enabled)}
+    _persist(data)
+    settings.nemoclaw_guardrails_enabled = bool(enabled)
+    return get_nemoclaw_guardrails()
+
+
+def apply_nemoclaw_guardrails_from_store() -> None:
+    """Startup hook: the persisted toggle wins over the .env default."""
+    from backend.config import settings
+
+    cfg = load().get("nemoclaw_guardrails")
+    if isinstance(cfg, dict) and "enabled" in cfg:
+        settings.nemoclaw_guardrails_enabled = bool(cfg["enabled"])
 
 
 # ---------------------------------------------------------------------------
@@ -425,8 +543,10 @@ def get_provider_fields() -> Dict[str, List[Dict[str, Any]]]:
                 "key": f.key,
                 "label": f.label,
                 "secret": f.secret,
+                "boolean": f.boolean,
                 "placeholder": f.placeholder,
-                "present": bool(cur),
+                "help": f.help,
+                "present": bool(cur) if not f.boolean else True,
             }
             if not f.secret:
                 item["value"] = cur
@@ -445,18 +565,32 @@ def set_provider_creds(provider: str, fields: Dict[str, str]) -> None:
     if not specs or not fields:
         return
 
+    # Resolve + validate EVERY submitted field before applying any of them, so a
+    # rejected field (e.g. a non-loopback NIM URL) leaves nothing half-applied.
+    # Booleans are the one exception to blank-keeps-existing: a checkbox always
+    # reports its state (same rule as set_integration_creds).
+    pending: List[tuple] = []
+    for f in specs:
+        if f.key not in fields:
+            continue
+        raw = fields.get(f.key)
+        if f.boolean:
+            val = "true" if _as_bool(raw) else "false"
+        else:
+            val = (raw or "").strip()
+            if not val:  # blank = keep existing (never wipe)
+                continue
+            if f.validate:
+                f.validate(val)  # ValueError -> 422, nothing written
+        pending.append((f, val))
+
     data = load()
     store = dict(data.get("ai_provider_creds") or {})
     pstore = dict(store.get(provider) or {})
     applied: List[str] = []
-    for f in specs:
-        if f.key not in fields:
-            continue
-        val = (fields.get(f.key) or "").strip()
-        if not val:  # blank = keep existing (never wipe)
-            continue
+    for f, val in pending:
         if f.settings_attr:
-            setattr(settings, f.settings_attr, val)
+            setattr(settings, f.settings_attr, _as_bool(val) if f.boolean else val)
         if f.env:
             os.environ[f.env] = val
         pstore[f.key] = val
@@ -486,8 +620,17 @@ def apply_provider_creds_from_store() -> None:
             val = (saved.get(f.key) or "").strip()
             if not val:
                 continue
+            if f.validate:
+                try:
+                    f.validate(val)
+                except ValueError as exc:
+                    # A stored value the current rules reject (e.g. a NIM URL
+                    # saved before the local-only contract) must not win over
+                    # the .env/config default — skip it and say why.
+                    logger.warning("ignoring stored %s.%s: %s", provider, f.key, exc)
+                    continue
             if f.settings_attr:
-                setattr(settings, f.settings_attr, val)
+                setattr(settings, f.settings_attr, _as_bool(val) if f.boolean else val)
             if f.env:
                 os.environ[f.env] = val
 
@@ -614,6 +757,9 @@ def _reconfigure_integration(integration: str) -> None:
     elif integration == "agent_observability":
         from backend.services.agent_control import agent_control_client
         agent_control_client.reconfigure()
+    elif integration == "nemo_guardrails":
+        from backend.services.nemo_guardrails import nemo_guardrails_client
+        nemo_guardrails_client.reconfigure()
 
 
 def set_integration_creds(integration: str, fields: Dict[str, str]) -> List[str]:

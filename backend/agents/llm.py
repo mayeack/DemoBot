@@ -10,7 +10,7 @@ configuration is required:
     anthropic -> ChatAnthropic            (local development)
     bedrock   -> ChatBedrockConverse      (AWS production)
     openai    -> ChatOpenAI               (OpenAI-compatible APIs)
-    nvidia    -> ChatOpenAI               (NVIDIA NIM, OpenAI-compatible)
+    nvidia    -> ChatOpenAI               (local NVIDIA NIM container, OpenAI-compatible)
 
 ``invoke_chat`` normalizes the LangChain response into a small dataclass with the
 same fields the governance contract needs (id, model, token usage, stop reason),
@@ -23,6 +23,7 @@ fails when the optional agentic dependencies are not installed.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -70,6 +71,15 @@ def clear_caches() -> None:
     """
     _MODEL_CACHE.clear()
     _AGENT_CACHE.clear()
+    # The NeMo rails are bound to the active chat model (their judge), so a
+    # provider/model change must rebuild them too. Lazy import: services ->
+    # llm is the normal direction.
+    try:
+        from backend.services.nemo_guardrails import nemo_guardrails_client
+
+        nemo_guardrails_client.reconfigure()
+    except Exception:  # noqa: BLE001 - never let the optional layer break a switch
+        logger.debug("NeMo Guardrails reconfigure skipped", exc_info=True)
 
 
 def get_chat_model(settings, *, max_tokens: int = 2048, temperature: float = 0.7,
@@ -89,6 +99,11 @@ def get_chat_model(settings, *, max_tokens: int = 2048, temperature: float = 0.7
     # The model name MUST be in the key: without it, an override (or a runtime
     # model switch) would be served a stale client built for a different model.
     cache_key = f"{provider}:{model_override or '-'}:{max_tokens}:{temperature}"
+    if provider == "nvidia":
+        # The reasoning switch rides in extra_body on the client, so it must be
+        # part of the key or flipping it in Settings would keep serving the old
+        # client until the next full cache clear.
+        cache_key += f":think={int(bool(getattr(settings, 'nvidia_reasoning', False)))}"
     cached = _MODEL_CACHE.get(cache_key)
     if cached is not None:
         return cached
@@ -125,15 +140,31 @@ def get_chat_model(settings, *, max_tokens: int = 2048, temperature: float = 0.7
         elif provider == "nvidia":
             from langchain_openai import ChatOpenAI
 
-            # NVIDIA NIM (hosted integrate.api.nvidia.com or a self-hosted
-            # container) speaks the OpenAI chat-completions protocol, so
-            # ChatOpenAI is reused with the NVIDIA base_url + nvapi- bearer key.
+            from backend import nvidia_nim
+
+            # provider=nvidia is a LOCAL NIM container (OpenAI-compatible) on
+            # this host — never the hosted API catalog. The loopback check runs
+            # here as well as in Settings so a hand-edited .env cannot quietly
+            # turn the provider into a cloud call.
+            try:
+                base_url = nvidia_nim.validate_nim_base_url(settings.nvidia_base_url)
+            except ValueError as exc:
+                raise ChatModelError(str(exc)) from exc
             model = ChatOpenAI(
                 model=model_override or settings.nvidia_model,
-                api_key=settings.nvidia_api_key,
-                base_url=settings.nvidia_base_url,
+                # An unauthenticated NIM ignores the key; the SDK refuses an empty one.
+                api_key=settings.nvidia_api_key or nvidia_nim.PLACEHOLDER_API_KEY,
+                base_url=base_url,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                top_p=getattr(settings, "nvidia_top_p", 0.95),
+                # Nemotron 3 defaults reasoning ON; DemoBot's answer contract is
+                # a JSON block, so thinking is opt-in (settings.nvidia_reasoning).
+                extra_body={
+                    "chat_template_kwargs": {
+                        "enable_thinking": bool(getattr(settings, "nvidia_reasoning", False))
+                    }
+                },
             )
         elif provider == "ollama":
             from langchain_ollama import ChatOllama
@@ -188,11 +219,26 @@ def _to_langchain_messages(system: str, messages: List[Dict[str, Any]]):
     return lc_messages
 
 
+_THINK_RE = re.compile(r"^\s*<think>.*?</think>\s*", re.DOTALL)
+
+
+def _strip_reasoning(text: str) -> str:
+    """Drop a leading ``<think>…</think>`` block.
+
+    A reasoning model whose server has no reasoning parser (a NIM started
+    without one, or Ollama serving a Nemotron/Qwen-style model) returns the
+    trace inline in ``content``; downstream parsing expects the answer only.
+    Defensive for every provider: an answer that does not start with the tag
+    is returned untouched.
+    """
+    return _THINK_RE.sub("", text, count=1) if text and "<think>" in text else text
+
+
 def _extract_text(ai_message) -> str:
     """Pull plain text out of a LangChain AIMessage (content may be a list)."""
     content = getattr(ai_message, "content", "")
     if isinstance(content, str):
-        return content
+        return _strip_reasoning(content)
     if isinstance(content, list):
         parts: List[str] = []
         for block in content:
@@ -200,7 +246,7 @@ def _extract_text(ai_message) -> str:
                 parts.append(block.get("text", "") or "")
             else:
                 parts.append(str(block))
-        return "".join(parts)
+        return _strip_reasoning("".join(parts))
     return str(content)
 
 

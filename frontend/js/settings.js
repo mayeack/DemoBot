@@ -27,7 +27,7 @@ async function api(method, url, body) {
 // Each top-level card (logs / creds / hec) collapses via a chevron in its header.
 // State persists per-section in localStorage so it survives reloads.
 const COLLAPSE_KEY = 'medadvice.settings.collapsed';
-const SECTIONS = ['logs', 'creds', 'aidefense', 'o11y', 'hec'];
+const SECTIONS = ['logs', 'creds', 'aidefense', 'nemo', 'o11y', 'hec'];
 
 function _readCollapsed() {
   try { return JSON.parse(localStorage.getItem(COLLAPSE_KEY)) || {}; } catch (_) { return {}; }
@@ -219,17 +219,20 @@ let _integrations = {};   // integration id -> field metadata from the server
 // Which container each integration renders into, in display order.
 const INTEGRATION_GROUPS = [
   { box: 'aiDefenseFields', ids: ['ai_defense'] },
+  { box: 'nemoFields', ids: ['nemo_guardrails'] },
   { box: 'o11yFields', ids: ['splunk_o11y', 'agent_observability'] },
 ];
 // A title turns the group into a bordered sub-card. The AI Defense group has no
 // title because it is alone in its card and would just repeat the heading.
 const INTEGRATION_TITLES = {
   ai_defense: '',
+  nemo_guardrails: '',
   splunk_o11y: 'Splunk Observability Cloud',
   agent_observability: 'Splunk Agent Observability',
 };
 const INTEGRATION_NOTES = {
   ai_defense: '',
+  nemo_guardrails: 'Applies on the next chat turn — no restart. Rails are rebuilt automatically when the active provider/model changes.',
   splunk_o11y: 'Read by a separate process \u2014 the collector (realm, ingest token) or the app at startup (OTLP endpoint, resource attributes). Saving writes .env; the save message names which process to restart. On a fleet replica these are replaced by the next deploy.',
   agent_observability: 'Applies on the next chat turn \u2014 no restart.',
 };
@@ -488,8 +491,49 @@ async function loadStats() {
   }
 }
 
+// ------------------------------------------------------------ host capabilities
+// What this box can run (GET /api/server-info). Chips are neutral; the reason an
+// option is unavailable is the chip tooltip. The rules themselves live server-side
+// (backend/host_capabilities.py) — this only renders them.
+function capChip(label, ok, title) {
+  const cls = ok ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600';
+  return `<span class="px-2 py-0.5 rounded-full font-semibold ${cls}" title="${attr(title || '')}">${esc(label)}</span>`;
+}
+
+function renderHostCaps(d) {
+  const box = document.getElementById('hostCaps');
+  if (!box) return;
+  const c = d.capabilities || {}, g = d.gated || {};
+  const gpu = c.nvidia_gpu || {}, rt = c.container_runtime || {}, nim = c.nim || {};
+  const nimGate = g.nim_local || {}, clawGate = g.nemoclaw_runtime || {};
+  box.innerHTML = [
+    capChip(gpu.present ? `GPU: ${gpu.count}x ${gpu.name} (${gpu.vram_mb} MB)` : 'GPU: none', !!gpu.present,
+            gpu.present ? `driver ${gpu.driver || '?'} via ${gpu.source}` : (g.provider_nvidia || {}).reason),
+    capChip(`runtime: ${rt.name || 'none'}${rt.available ? '' : ' (down)'}`, !!rt.available,
+            rt.version ? `version ${rt.version}` : ''),
+    capChip(`NIM: ${nimGate.enabled ? 'ready' : 'unavailable'}`, !!nimGate.enabled,
+            nimGate.enabled ? nim.base_url : nimGate.reason),
+    capChip(`NemoClaw runtime: ${clawGate.enabled ? 'supported' : 'unsupported'}`, !!clawGate.enabled,
+            clawGate.reason),
+  ].join('');
+}
+
+async function loadHostCaps() {
+  try { renderHostCaps(await api('GET', '/api/server-info')); }
+  catch (e) {
+    const box = document.getElementById('hostCaps');
+    if (box) box.innerHTML = `<span class="text-red-600">unavailable: ${esc(e.message)}</span>`;
+  }
+}
+
+async function refreshHostCaps() {
+  try { renderHostCaps(await api('POST', '/api/server-info/refresh', {})); }
+  catch (e) { /* keep the last render */ }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   initSections();
+  loadHostCaps();   // independent of the cards below; never blocks them
   // Mark the creds form dirty on the first keystroke so a background refresh never
   // wipes unsaved input. The listener is delegated on the static container, so it
   // survives the innerHTML re-renders of its child inputs.

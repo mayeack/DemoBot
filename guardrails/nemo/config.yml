@@ -1,0 +1,31 @@
+# NVIDIA NeMo Guardrails configuration for DemoBot.
+#
+# Loaded by backend/services/nemo_guardrails.py with RailsConfig.from_path and
+# then adjusted at build time:
+#   - the `main` model below is a PLACEHOLDER. The client injects DemoBot's
+#     active chat model (LLMRails(config, llm=...)), so the self-check judge is
+#     whatever provider/model the demo is running on — no cloud call.
+#   - rails.input / rails.output flows are re-derived from NEMO_GUARDRAILS_RAILS
+#     (self_check_input, self_check_output, overreach).
+#   - a `content_safety` model + its flows are appended only when
+#     NEMO_GUARDRAILS_CONTENT_SAFETY_URL points at a local NemoGuard NIM.
+# Prompts for every task live in prompts.yml next to this file.
+models:
+  - type: main
+    engine: nim
+    model: nvidia/nvidia-nemotron-nano-9b-v2
+
+instructions:
+  - type: general
+    content: |
+      You are the safety reviewer for DemoBot, a governed advice assistant
+      (medical, tax, benefits, legal, finance and telecom support themes).
+      You only classify messages; you never answer the user yourself.
+
+rails:
+  input:
+    flows:
+      - self check input
+  output:
+    flows:
+      - self check output

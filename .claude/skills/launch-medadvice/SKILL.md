@@ -149,6 +149,36 @@ Gateway port **18789**.
 
 ---
 
+## Mode D — NemoClaw runtime (alternative agentic surface, GPU replica / Colima)
+
+NVIDIA NemoClaw = OpenClaw inside an OpenShell sandbox. DemoBot's governance
+seat (the `demobot-toolguard` plugin) is baked into the sandbox image, so its
+tool calls hit `/api/toolguard/inspect` like Mode C, and the sandbox's own
+denials are forwarded (`scripts/nemoclaw/ocsf_forwarder.py`) as
+`nemoclaw_guardrails` governance events. **NemoClaw does not support podman**,
+so on this Mac it needs `brew install colima docker && colima start`; the
+normal host is an EC2 replica (`deploy/ec2/ec2-bootstrap.sh --with-nemoclaw`).
+
+```bash
+./run-nemoclaw.sh                # onboard / start (refuses with the reason if the host cannot run it)
+./start-all.sh --nemoclaw        # collector + app + NemoClaw
+nemoclaw demobot-nemoclaw stop ; pkill -f ocsf_forwarder.py   # stop
+```
+
+The drawer's **NemoClaw Guardrails** toggle is the enforcement switch for the
+policy layer (works without the runtime); the pill reads RUNTIME once the
+sandbox reports denials. Verify: `./tests/observability/verify_nemoclaw_observability.sh`.
+
+## provider=nvidia (local NIM) and the NVIDIA toggles
+
+- `provider=nvidia` is a NIM container on **this host** (`localhost:8000`) —
+  never a cloud API. This Mac has no NVIDIA GPU, so it is greyed out here; on a
+  GPU replica `ec2-bootstrap.sh --with-nim [model]` runs `demobot-nim.service`.
+- **NeMo Guardrails** (drawer toggle) needs `nemoguardrails` installed (core
+  only) and the Settings card's master switch. Judge = the active chat model.
+- **Blueprint** dropdown (header) switches the agentic architecture; every
+  guardrail runs in both. Details: `docs/nvidia-integration.md`.
+
 ## Verify it's serving
 
 ```bash

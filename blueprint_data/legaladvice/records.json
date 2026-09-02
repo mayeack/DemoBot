@@ -1,0 +1,38 @@
+{
+  "_note": "SYNTHETIC demo data \u2014 no real people",
+  "records": [
+    {
+      "record_id": "LG-3011",
+      "name": "Jordan Rivera (synthetic)",
+      "state": "CA",
+      "matters": [
+        {
+          "type": "tenant dispute",
+          "status": "gathering documents",
+          "opened": "2026-08-01"
+        }
+      ],
+      "notes": "security deposit not returned after 21 days"
+    },
+    {
+      "record_id": "LG-3145",
+      "name": "Sam Okafor (synthetic)",
+      "state": "TX",
+      "matters": [
+        {
+          "type": "small claims",
+          "status": "hearing scheduled 2026-09-20",
+          "opened": "2026-06-11"
+        }
+      ],
+      "notes": "contractor non-completion, $3,400"
+    },
+    {
+      "record_id": "LG-3290",
+      "name": "Priya Natarajan (synthetic)",
+      "state": "NY",
+      "matters": [],
+      "notes": ""
+    }
+  ]
+}

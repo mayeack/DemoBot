@@ -59,7 +59,8 @@ Off by default; see [Agentic Surface](#agentic-surface-openclaw-optional) below.
 - **FastAPI**: REST API framework
 - **LangChain + LangGraph**: multi-agent orchestration (supervisor + per-theme decomposed subgraphs)
 - **OpenTelemetry GenAI**: code-based Workflow / Agent / LLM span instrumentation exported over OTLP
-- **Configurable AI Providers**: Ollama (local, the workshop default), Anthropic, AWS Bedrock, NVIDIA NIM, or any OpenAI-compatible API
+- **Configurable AI Providers**: Ollama (local, the workshop default), Anthropic, AWS Bedrock, a **local NVIDIA NIM** (`provider=nvidia` — Nemotron 3 on this host's GPU, never a cloud API), or any OpenAI-compatible API
+- **NVIDIA governance stack** (all opt-in): NeMo Guardrails and NemoClaw Guardrails drawer toggles, a selectable **Blueprint** (DemoBot Multi-Agent or NVIDIA AI Virtual Assistant) with a feature-parity rule — see [docs/nvidia-integration.md](docs/nvidia-integration.md)
 - **SQLAlchemy**: ORM for database management
 - **SQLite**: Embedded database
 
@@ -71,21 +72,30 @@ START -> router -> {theme}_subgraph -> END
 ```
 
 The supervisor (`router`) resolves the Application Theme and routes to that theme's
-decomposed agent pipeline:
+subgraph: the shared guardrail chain wired around the selected **blueprint**'s
+generation core (`backend/agents/blueprints/`):
 
 ```
-policy -> prompt_defense -> intake -> domain(theme) -> safety
-      -> injection -> compliance -> response_defense -> governance
+policy -> prompt_defense -> nemo_input_rails -> <blueprint core> -> safety
+      -> injection -> compliance -> agent_control -> nemo_output_rails
+      -> response_defense -> governance
 ```
 
-The `domain(theme)` step is the single-agent default: the theme's domain agent
-answers directly (one LLM call). Toggling **Multi-Agent Mode** ON in the chat
-drawer (per-request `multi_agent_mode: true`) expands that step to
-`coordinator -> specialists -> synthesizer` for the turn; every guardrail node
-runs in both modes.
+Blueprints (chat header **Blueprint** dropdown, `ACTIVE_BLUEPRINT`, or per request):
 
-Any node can short-circuit to the end of the pipeline (policy block, AI Defense
-block, clarifying question, or generation error). Specialist nodes
+- **DemoBot Multi-Agent** (default): `intake -> synthesizer` — the theme's domain
+  agent answers directly (one LLM call). Toggling **Multi-Agent Mode** ON expands
+  it to `intake -> coordinator -> specialists -> synthesizer`.
+- **NVIDIA AI Virtual Assistant**: `fetch_record -> ask_clarification ->
+  primary_assistant -> sub_assistant -> respond` — the primary assistant routes by
+  tool call to a specialized assistant that uses knowledge retrieval and a
+  structured record lookup; Multi-Agent Mode allows two sub-assistants.
+
+Every guardrail node runs for every blueprint — that is enforced structurally
+(`blueprints/guardrails.py`) and by `tests/test_blueprint_parity.py` (see
+CLAUDE.md "Blueprint feature parity"). Any node can short-circuit to the end of
+the pipeline (policy block, AI Defense block, NeMo rail, Agent Control deny,
+clarifying question, or generation error). Guardrail nodes
 (`backend/agents/nodes/`) wrap the existing services so business logic and the
 Splunk governance-log contract are preserved unchanged.
 

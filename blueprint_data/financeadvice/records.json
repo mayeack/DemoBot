@@ -1,0 +1,50 @@
+{
+  "_note": "SYNTHETIC demo data \u2014 no real people",
+  "records": [
+    {
+      "record_id": "FN-7001",
+      "name": "Jordan Rivera (synthetic)",
+      "monthly_take_home": 4200,
+      "fixed_expenses": 2650,
+      "emergency_fund": 1800,
+      "debts": [
+        {
+          "type": "credit card",
+          "balance": 2400,
+          "apr": 24.9
+        }
+      ],
+      "goals": [
+        "3-month emergency fund"
+      ]
+    },
+    {
+      "record_id": "FN-7130",
+      "name": "Sam Okafor (synthetic)",
+      "monthly_take_home": 6100,
+      "fixed_expenses": 3900,
+      "emergency_fund": 15000,
+      "debts": [],
+      "goals": [
+        "retire at 67"
+      ]
+    },
+    {
+      "record_id": "FN-7288",
+      "name": "Priya Natarajan (synthetic)",
+      "monthly_take_home": 3300,
+      "fixed_expenses": 2500,
+      "emergency_fund": 300,
+      "debts": [
+        {
+          "type": "student loan",
+          "balance": 18000,
+          "apr": 5.5
+        }
+      ],
+      "goals": [
+        "start an emergency fund"
+      ]
+    }
+  ]
+}
