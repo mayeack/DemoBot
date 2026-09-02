@@ -447,6 +447,53 @@ count and prints the exact increase request.</p>
 <li><strong>OpenClaw is not deployed here.</strong> <code>run-openclaw.sh</code> needs podman, which these
   boxes do not have. It runs on the Mac only.</li>
 </ul>
+<h2 id="nvidia-options-local-nim-and-the-nemoclaw-runtime">NVIDIA options: local NIM and the NemoClaw runtime</h2>
+<pre><code class="language-bash"># provider=nvidia = a NIM on THIS box (loopback :8000). Default image fits one A10G.
+./ec2-bootstrap.sh --with-nim                                   # nvidia/nvidia-nemotron-nano-9b-v2
+./ec2-bootstrap.sh --with-nim nvidia/nemotron-3-super-120b-a12b # needs 8x H100 (p5-class), not g5
+# NemoClaw runtime (OpenClaw in an OpenShell sandbox, governed by /api/toolguard)
+./ec2-bootstrap.sh --with-nemoclaw
+</code></pre>
+<p><code>--with-nim</code> installs Docker + the NVIDIA Container Toolkit (the DL base AMI has
+both), logs into <code>nvcr.io</code> with <code>NGC_API_KEY</code> (from <code>.env</code> or the payload
+overrides), runs <code>demobot-nim.service</code> and sets <code>AI_PROVIDER=nvidia</code>,
+<code>NVIDIA_BASE_URL</code>, <code>NVIDIA_MODEL</code> (an explicit <code>--set</code> still wins). First start
+pulls the image + weights (minutes). <code>--with-nemoclaw</code> runs <code>run-nemoclaw.sh</code>
+once (needs <code>NVIDIA_INFERENCE_API_KEY</code> in <code>.env</code> for the sandbox's provider) and
+installs <code>demobot-nemoclaw</code> + <code>demobot-nemoclaw-forwarder</code> units — NemoClaw
+restarts nothing after a reboot by itself. Units: <code>demobot-nim</code>,
+<code>demobot-nemoclaw</code>, <code>demobot-nemoclaw-forwarder</code>. Details: <code>docs/nvidia-integration.md</code>.</p>
+<h3 id="fleet-path-the-normal-way">Fleet path (the normal way)</h3>
+<pre><code class="language-bash">export FLEET_NIM=1 FLEET_NEMOCLAW=1 FLEET_VOLUME_GB=150   # + the usual FLEET_* config
+./deploy/ec2/fleet.sh preflight     # confirms NGC_API_KEY / NVIDIA_INFERENCE_API_KEY are in this Mac's .env
+./deploy/ec2/fleet.sh provision &amp;&amp; ./deploy/ec2/fleet.sh deploy
+</code></pre>
+<p><code>fleet.sh deploy</code> forwards <code>--with-nim [FLEET_NIM_MODEL]</code> and <code>--with-nemoclaw</code> to
+<code>push-replica.sh</code>, which refuses to ship without the matching <code>nvapi-</code> key in
+<code>.env</code> (the keys ride in the payload, never on argv). Expect 25-45 minutes: the
+NIM image (~10 GB) and weights (~18 GB) are pulled on first start, so the box
+wants a 150 GB volume.</p>
+<h3 id="what-a-nim-box-does-differently-fixed-in-421">What a NIM box does differently (fixed in 4.2.1)</h3>
+<ul>
+<li><strong>The provider decision is made in step 3, before step 8 rewrites <code>.env</code>.</strong> In
+  4.2.0 the <code>AI_PROVIDER=nvidia</code> override was prepended <em>after</em> the rewrite, so a
+  <code>--with-nim</code> box quietly booted on whatever <code>AI_PROVIDER</code> the Mac shipped.
+  <code>tests/test_ec2_scripts.py</code> asserts the order.</li>
+<li><strong>Ollama holds no VRAM.</strong> The Nemotron Nano NIM needs ~20 GB of the A10G's
+  23 GB, and the standard fleet drop-in keeps ~11 GB of Ollama models resident.
+  A NIM box gets <code>OLLAMA_MAX_LOADED_MODELS=1</code>, <code>OLLAMA_KEEP_ALIVE=0</code>; the GPU
+  warm-up check still runs (with its own 5-minute <code>keep_alive</code>), then the model
+  is unloaded and <code>ollama ps</code> must be empty before <code>demobot-nim</code> starts. Ollama
+  stays installed with every model pulled, so the box can switch back — <strong>stop
+  <code>demobot-nim</code> first</strong>, or the Ollama model lands split CPU/GPU.</li>
+<li><strong>The NIM starts before the app</strong> and is waited for (up to 40 minutes, progress
+  every 30 s), so the app's startup catalog probe sees NIM READY. The final
+  health gate includes <code>/v1/health/ready</code> and <code>/v1/models</code>: <code>BOOTSTRAP_OK</code> on a
+  NIM box means the NIM is serving.</li>
+<li><strong>NemoClaw prerequisites</strong> (<code>binutils</code> for the installer's <code>strings</code> check,
+  Node ≥ 22.19 from NodeSource) are installed by <code>--with-nemoclaw</code>; both keys are
+  checked in the payload preflight (step 0), not twenty minutes in.</li>
+</ul>
 </main>
 <h2>NVIDIA options: local NIM and the NemoClaw runtime</h2>
 <pre># provider=nvidia = a NIM on THIS box (loopback :8000). Default image fits one A10G.

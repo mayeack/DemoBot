@@ -113,6 +113,15 @@ export FLEET_COUNT=N          # <- the user's answer, never a guess
 ./deploy/ec2/fleet.sh deploy
 #    single box:  ./deploy/ec2/fleet.sh deploy 3
 
+# 4b. NVIDIA variant — a box whose chat provider is a LOCAL NIM, plus the NemoClaw runtime.
+#     Set BEFORE preflight/provision/deploy (deploy forwards --with-nim/--with-nemoclaw):
+#       export FLEET_NIM=1 FLEET_NEMOCLAW=1 FLEET_VOLUME_GB=150
+#     Needs NGC_API_KEY=nvapi-… (nvcr.io image pull) and NVIDIA_INFERENCE_API_KEY=nvapi-…
+#     (the NemoClaw sandbox's own inference) in this Mac's .env — they ride in the
+#     payload; push-replica refuses without them. Deploy takes 25-45 min (NIM pull).
+#     Every agent then runs on nvidia/nvidia-nemotron-nano-9b-v2; Ollama stays installed
+#     but holds no VRAM. Details: deploy/ec2/README.md "NVIDIA options".
+
 # 5. start/stop schedule — Los Angeles time, NOT the script default (New York)
 SCHED_TZ=America/Los_Angeles ./deploy/ec2/schedule.sh install
 
@@ -213,6 +222,22 @@ used means a third model, or a much larger context, fits without swapping.
   every browser session on that box (cookie = sha256 of key).
 - **Never copy `~/.cloudflared/cert.pem` to a box.** It is the Cloudflare
   account credential. `push-replica.sh` refuses; don't bypass it.
+- **A NIM box cannot also keep Ollama models resident.** The Nemotron Nano NIM
+  takes ~20 GB of the A10G's 23 GB; the fleet drop-in's 60-minute keep-alive
+  leaves ~11 GB of Ollama in VRAM and the NIM fails to allocate. `--with-nim`
+  sets `OLLAMA_KEEP_ALIVE=0` and unloads after the GPU check. Switching a NIM box
+  back to `provider=ollama` in the UI while `demobot-nim` runs gives a slow
+  CPU/GPU split, not a crash — `sudo systemctl stop demobot-nim` first.
+- **`--with-nim` on 4.2.0 never set `AI_PROVIDER=nvidia`.** The override was
+  prepended after the `.env` rewrite, so the box booted on the Mac's Ollama
+  provider while the NIM sat idle. Fixed in 4.2.1 (decided in step 3);
+  `tests/test_ec2_scripts.py` guards the order. If a NIM box answers with
+  `provider_name=ollama`, check `grep ^AI_PROVIDER ~/DemoBot/.env` on the box.
+- **First NIM start is a 30-40 GB download** (image + weights into
+  `/opt/nim-cache`). `/v1/health/ready` stays non-200 until the engine is
+  loaded; the bootstrap waits up to 40 min and prints the container's last log
+  line every 30 s. A `BOOTSTRAP_INCOMPLETE` from the NIM check is re-runnable —
+  the cache persists, the second run is fast.
 
 ## Teardown
 

@@ -325,6 +325,12 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
 - Secrets live only in `.env` + `medadvice.db` (both gitignored). Never commit them.
 
 ## NVIDIA stack (provider=nvidia, NeMo/NemoClaw toggles, blueprints) — 2026-09
+- **EC2 `--with-nim` needs its `.env` override decided BEFORE step 8's rewrite.**
+  4.2.0 prepended `AI_PROVIDER=nvidia` in step 9c, after the rewrite, so a NIM box
+  booted on the Mac's Ollama provider with the NIM idle. Also: a NIM (~20 GB) and
+  the fleet's resident Ollama models (~11 GB) don't both fit an A10G — a NIM box
+  runs `OLLAMA_KEEP_ALIVE=0` and unloads after the GPU check. Order + VRAM rules
+  are asserted by `tests/test_ec2_scripts.py` (in `run_all.sh`).
 - **`provider=nvidia` is a LOCAL NIM, never the cloud catalog.** `backend/nvidia_nim.py`
   rejects a non-loopback `NVIDIA_BASE_URL` at every seam (llm factory, legacy client,
   Settings save, startup re-apply). This Mac has no NVIDIA GPU → the provider is

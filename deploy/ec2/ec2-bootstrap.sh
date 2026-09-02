@@ -11,6 +11,8 @@
 #   ./ec2-bootstrap.sh --num-parallel 4     # Ollama concurrent request slots
 #   ./ec2-bootstrap.sh --set OLLAMA_MODEL=mistral-nemo:12b-poisoned   # .env override
 #   ./ec2-bootstrap.sh --no-start           # install everything, don't start
+#   ./ec2-bootstrap.sh --with-nim [model]   # + a LOCAL NVIDIA NIM on :8000, provider=nvidia
+#   ./ec2-bootstrap.sh --with-nemoclaw      # + the NVIDIA NemoClaw sandbox runtime
 #
 # PER-REPLICA .env OVERRIDES: the .env shipped from the Mac is identical on every
 # box; a few keys must differ. Overrides come from $PAYLOAD/overrides.env (one
@@ -98,6 +100,16 @@ done
 TUNNEL_ID=$(awk '/^tunnel:/{print $2; exit}' "$PAYLOAD/config.yml")
 [ -n "$TUNNEL_ID" ] || die "no 'tunnel:' line in $PAYLOAD/config.yml"
 [ -f "$PAYLOAD/$TUNNEL_ID.json" ] || die "payload incomplete: tunnel credentials $TUNNEL_ID.json missing"
+# NVIDIA credentials travel inside the payload (.env or overrides.env), never
+# argv. Check them here so a missing key fails before the 10-minute install.
+if [ "$WITH_NIM" = true ]; then
+  grep -qsE '^NGC_API_KEY=nvapi-' "$PAYLOAD/.env" "$PAYLOAD/overrides.env" \
+    || die "--with-nim needs NGC_API_KEY=nvapi-… in the payload .env (image pull from nvcr.io)"
+fi
+if [ "$WITH_NEMOCLAW" = true ]; then
+  grep -qsE '^NVIDIA_INFERENCE_API_KEY=nvapi-' "$PAYLOAD/.env" "$PAYLOAD/overrides.env" \
+    || die "--with-nemoclaw needs NVIDIA_INFERENCE_API_KEY=nvapi-… in the payload .env (the sandbox's own inference provider)"
+fi
 
 # --- 1. base packages + Python 3.11 ---------------------------------------
 # 3.11 from deadsnakes: Ubuntu 22.04 ships 3.10, on which LangChain 1.x fails.
@@ -136,6 +148,16 @@ if [ "$GPU_MODE" = "require" ] && [ "$GPU" != true ]; then
 fi
 log "GPU: $([ "$GPU" = true ] && echo yes || echo 'no — CPU inference')"
 
+# provider=nvidia on this replica = the local NIM. This MUST be decided before
+# step 8 rewrites .env: a prepend after that point never lands, and the box
+# silently boots on whatever AI_PROVIDER the Mac shipped (seen 2026-09-02).
+# Prepended so an explicit --set still wins.
+if [ "$WITH_NIM" = true ]; then
+  [ "$GPU" = true ] || die "--with-nim needs an NVIDIA GPU on this host (a NIM cannot run on CPU)"
+  SETS=("AI_PROVIDER=nvidia" "NVIDIA_BASE_URL=http://localhost:8000/v1" "NVIDIA_MODEL=$NIM_MODEL" "${SETS[@]}")
+  log "provider=nvidia -> local NIM $NIM_MODEL"
+fi
+
 # --- 4. Ollama daemon ------------------------------------------------------
 log "Ollama daemon"
 if ! command -v ollama >/dev/null; then
@@ -144,7 +166,13 @@ fi
 # Keep the 3B internal model and the 8B synthesizer resident so a turn never
 # pays a cold reload. On GPU there is VRAM for all three models at once and
 # concurrency is cheap; on CPU, extra parallelism only causes core contention.
-if [ "$GPU" = true ]; then
+if [ "$WITH_NIM" = true ]; then
+  # The NIM needs ~20 GB of the A10G's 23 GB. Ollama stays installed (models
+  # pulled, provider switch-back possible) but must hold NO VRAM: one model at a
+  # time, unloaded as soon as a request finishes. Stop demobot-nim before
+  # switching this box back to provider=ollama.
+  LOADED=1; KEEP="0"; PARALLEL="${NUM_PARALLEL:-1}"
+elif [ "$GPU" = true ]; then
   LOADED=3; KEEP="60m"; PARALLEL="${NUM_PARALLEL:-4}"
 else
   LOADED=2; KEEP="30m"; PARALLEL="${NUM_PARALLEL:-1}"
@@ -383,7 +411,7 @@ if [ "$GPU" = true ]; then
   WARM="${WANTED[0]:-$BASE}"
   log "warming $WARM to confirm GPU placement"
   curl -sf http://localhost:11434/api/generate \
-       -d "{\"model\":\"$WARM\",\"prompt\":\"hi\",\"stream\":false}" >/dev/null || \
+       -d "{\"model\":\"$WARM\",\"prompt\":\"hi\",\"stream\":false,\"keep_alive\":\"5m\"}" >/dev/null || \
     warn "warm-up request failed for $WARM"
   PLACEMENT=$(ollama ps 2>/dev/null | awk 'NR==2{for(i=1;i<=NF;i++) if($i ~ /%$/) {print $i" "$(i+1); exit}}')
   echo "  placement: ${PLACEMENT:-unknown}"
@@ -405,6 +433,23 @@ if [ "$GPU" = true ]; then
     *) warn "could not read model placement from 'ollama ps' — verify manually with: ollama ps" ;;
   esac
   nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader || true
+  if [ "$WITH_NIM" = true ]; then
+    # Hand the GPU back: the NIM starts in step 11 and cannot allocate next to
+    # a resident 12B model. keep_alive=0 with an empty prompt unloads now.
+    log "unloading $WARM so the NIM gets the GPU"
+    curl -sf http://localhost:11434/api/generate \
+         -d "{\"model\":\"$WARM\",\"keep_alive\":0}" >/dev/null || true
+    for _ in $(seq 1 30); do
+      [ "$(ollama ps 2>/dev/null | wc -l)" -le 1 ] && break
+      sleep 1
+    done
+    if [ "$(ollama ps 2>/dev/null | wc -l)" -gt 1 ]; then
+      MSG="Ollama still holds a model after unload; the NIM will not fit in VRAM. ollama ps:
+$(ollama ps 2>/dev/null)"
+      [ "$GPU_MODE" = "require" ] && die "$MSG" || warn "$MSG"
+    fi
+    echo "  VRAM after unload: $(nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader 2>/dev/null || echo unknown)"
+  fi
 fi
 
 # --- 9b. Docker + NVIDIA Container Toolkit (local NIM and/or NemoClaw) ------
@@ -426,11 +471,26 @@ if [ "$WITH_NIM" = true ] || [ "$WITH_NEMOCLAW" = true ]; then
   fi
   sudo docker info >/dev/null || die "docker is not running"
 fi
+if [ "$WITH_NEMOCLAW" = true ]; then
+  # NemoClaw's installer verifies the OpenShell binary with `strings` (binutils)
+  # and needs Node >= 22.19 on PATH; the Deep Learning AMI ships neither.
+  sudo -E apt-get install -y binutils
+  NODE_OK=false
+  if command -v node >/dev/null; then
+    NODE_V=$(node --version | sed 's/^v//'); NODE_MAJ=${NODE_V%%.*}; NODE_MIN=${NODE_V#*.}; NODE_MIN=${NODE_MIN%%.*}
+    { [ "$NODE_MAJ" -gt 22 ] || { [ "$NODE_MAJ" -eq 22 ] && [ "$NODE_MIN" -ge 19 ]; }; } 2>/dev/null && NODE_OK=true
+  fi
+  if [ "$NODE_OK" != true ]; then
+    log "Node.js 22 (NemoClaw needs >= 22.19; found ${NODE_V:-none})"
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+    sudo -E apt-get install -y nodejs
+  fi
+  node --version
+fi
 
 # --- 9c. local NVIDIA NIM (provider=nvidia = inference on THIS host) --------
 if [ "$WITH_NIM" = true ]; then
   log "local NIM: $NIM_MODEL"
-  [ "$GPU" = true ] || die "--with-nim needs an NVIDIA GPU on this host (a NIM cannot run on CPU)"
   # nvcr.io image pull needs an NGC key: from the installed .env (NGC_API_KEY=)
   # or the payload overrides — never from argv.
   NGC_API_KEY=$(grep -E '^NGC_API_KEY=' "$REPO/.env" "$PAYLOAD/overrides.env" 2>/dev/null | head -1 | cut -d= -f2- || true)
@@ -441,8 +501,7 @@ if [ "$WITH_NIM" = true ]; then
   sudo mkdir -p /opt/nim-cache && sudo chown "$(id -u):$(id -g)" /opt/nim-cache
   printf '%s' "$NGC_API_KEY" | sg docker -c "docker login nvcr.io -u '\$oauthtoken' --password-stdin" >/dev/null \
     || die "docker login nvcr.io failed — is NGC_API_KEY valid?"
-  # provider=nvidia on this replica = this NIM. Prepended so an explicit --set wins.
-  SETS=("AI_PROVIDER=nvidia" "NVIDIA_BASE_URL=http://localhost:8000/v1" "NVIDIA_MODEL=$NIM_MODEL" "${SETS[@]}")
+  # (AI_PROVIDER/NVIDIA_* were applied to .env in step 3/8 — see step 3.)
 fi
 
 # --- 10. systemd units ------------------------------------------------------
@@ -575,23 +634,32 @@ if [ "$START" != true ]; then
   exit 0
 fi
 
+if [ "$WITH_NIM" = true ]; then
+  # The NIM is this box's chat provider, so it comes up BEFORE the app: the
+  # app's startup catalog probe then sees a ready NIM instead of "NIM DOWN".
+  # First start pulls the image (~10 GB) and the weights (~18 GB): allow 40 min.
+  log "starting the local NIM (first start pulls the image + weights — 10-25 min)"
+  sudo systemctl enable --now demobot-nim
+  NIM_READY=false
+  for i in $(seq 1 240); do
+    if curl -sf -o /dev/null http://localhost:8000/v1/health/ready; then NIM_READY=true; break; fi
+    [ $((i % 3)) -eq 0 ] && echo "  waiting for NIM ($((i * 10)) s) — $(sudo docker logs --tail 1 demobot-nim 2>/dev/null | cut -c1-110)"
+    sleep 10
+  done
+  if [ "$NIM_READY" = true ]; then
+    echo "NIM ready: $(curl -s http://localhost:8000/v1/models | head -c 200)"
+  else
+    warn "NIM not ready after 40 min — the stack starts anyway; the final verify will FAIL.
+      Inspect: sudo journalctl -u demobot-nim -n 50 --no-pager ; sudo docker logs --tail 50 demobot-nim
+      Re-run this bootstrap once the pull completes (idempotent; /opt/nim-cache persists)."
+  fi
+fi
+
 log "starting services"
 sudo systemctl enable --now demobot-collector demobot-app demobot-tunnel
 # Collector must own :4317 before the app's first spans; units encode the
 # ordering, this is just the settling time.
 sleep 10
-
-if [ "$WITH_NIM" = true ]; then
-  log "starting the local NIM (first start pulls the image + weights — minutes)"
-  sudo systemctl enable --now demobot-nim
-  for _ in $(seq 1 90); do
-    curl -sf -o /dev/null http://localhost:8000/v1/health/ready && break
-    sleep 10
-  done
-  curl -sf -o /dev/null http://localhost:8000/v1/health/ready \
-    && echo "NIM ready: $(curl -s http://localhost:8000/v1/models | head -c 200)" \
-    || warn "NIM not ready after 15 min — check: sudo journalctl -u demobot-nim -n 50 --no-pager"
-fi
 
 if [ "$WITH_NEMOCLAW" = true ]; then
   log "onboarding the NemoClaw sandbox (first run installs NemoClaw + builds the image)"
@@ -611,8 +679,20 @@ check() { c=$(curl -s -o /dev/null -w '%{http_code}' "$2" 2>/dev/null || echo 00
 check "app      /health"        http://localhost:8001/health
 check "ollama   /api/tags"      http://localhost:11434/api/tags
 check "otelcol  :8888/metrics"  http://localhost:8888/metrics
+if [ "$WITH_NIM" = true ]; then
+  check "nim      /v1/health/ready" http://localhost:8000/v1/health/ready
+  check "nim      /v1/models"       http://localhost:8000/v1/models
+fi
+if [ "$WITH_NEMOCLAW" = true ]; then
+  # Onboarding is best-effort by design (the policy layer works without the
+  # runtime), so these are informational, not gating.
+  for u in demobot-nemoclaw demobot-nemoclaw-forwarder; do
+    printf '  %-34s %s\n' "$u" "$(systemctl is-active "$u" 2>/dev/null || true)"
+  done
+fi
 HOSTN=$(awk '/hostname:/{print $3; exit}' "$HOME/.cloudflared/config.yml")
 [ -n "$HOSTN" ] && check "public   https://$HOSTN" "https://$HOSTN/health"
+[ "$GPU" = true ] && echo "  GPU memory: $(nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader 2>/dev/null || echo unknown)"
 
 echo
 if [ $rc -eq 0 ]; then
@@ -624,6 +704,6 @@ if [ $rc -eq 0 ]; then
   echo "  (verify_observability.sh hard-codes demobot-local, so it is wrong on a replica)"
 else
   echo "BOOTSTRAP_INCOMPLETE — a health check failed. Logs:"
-  echo "  journalctl -u demobot-app -u demobot-collector -u demobot-tunnel -n 50 --no-pager"
+  echo "  journalctl -u demobot-app -u demobot-collector -u demobot-tunnel$([ "$WITH_NIM" = true ] && echo ' -u demobot-nim') -n 50 --no-pager"
   exit 1
 fi

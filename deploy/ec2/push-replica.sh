@@ -10,6 +10,13 @@
 #   ./deploy/ec2/push-replica.sh --host 1.2.3.4 --replica 3 --own-tunnel \
 #       --user ubuntu --port 22 --gpu require
 #
+#   # NVIDIA options (GPU box): a LOCAL NIM as provider=nvidia, the NemoClaw runtime
+#   ./deploy/ec2/push-replica.sh --host 1.2.3.4 --replica 3 --own-tunnel --gpu require \
+#       --with-nim [nvidia/nvidia-nemotron-nano-9b-v2] --with-nemoclaw
+#   The keys ride in this Mac's .env (shipped in the payload, never argv):
+#   NGC_API_KEY (nvcr.io image pull) and NVIDIA_INFERENCE_API_KEY (the sandbox's
+#   own inference). This script refuses to push without them.
+#
 # TUNNEL MODES
 #   default      all hosts run replicas of the ONE tunnel in ~/.cloudflared/
 #                config.yml. Fine for a single host. Cloudflare treats every
@@ -48,6 +55,8 @@ BASE_TAG="mistral-nemo:12b"
 TUNNEL_NAME=""; OWN_TUNNEL=false; HOSTNAME_=""; GPU_MODE="auto"; NUM_PARALLEL=""
 BOX_HOST=""            # this replica's own subdomain; derived from --hostname
 NO_DNS=false           # skip the CNAME (record already managed elsewhere)
+WITH_NIM=false; NIM_MODEL=""   # --with-nim [model]: local NIM, provider=nvidia on the box
+WITH_NEMOCLAW=false            # --with-nemoclaw: NemoClaw sandbox runtime + units
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -67,6 +76,9 @@ while [ $# -gt 0 ]; do
     --poisoned-tag) POISONED_TAG="$2"; shift 2 ;;
     --stage-only) STAGE_ONLY=true; shift ;;
     --no-start)   NO_START=true; shift ;;
+    --with-nim)   WITH_NIM=true
+                  if [ $# -gt 1 ] && [ "${2#-}" = "$2" ]; then NIM_MODEL="$2"; shift 2; else shift; fi ;;
+    --with-nemoclaw) WITH_NEMOCLAW=true; shift ;;
     -h|--help)    sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown option: $1 (try --help)" >&2; exit 2 ;;
   esac
@@ -92,6 +104,14 @@ SCP=(scp "${SSH_OPTS[@]}" -i "$KEY" -P "$PORT")
 
 # --- preflight -------------------------------------------------------------
 [ -f "$REPO/.env" ]                 || die "$REPO/.env not found"
+if [ "$WITH_NIM" = true ]; then
+  grep -qE '^NGC_API_KEY=nvapi-' "$REPO/.env" \
+    || die "--with-nim needs NGC_API_KEY=nvapi-… in $REPO/.env (free key: https://org.ngc.nvidia.com/setup/api-key); it ships in the payload"
+fi
+if [ "$WITH_NEMOCLAW" = true ]; then
+  grep -qE '^NVIDIA_INFERENCE_API_KEY=nvapi-' "$REPO/.env" \
+    || die "--with-nemoclaw needs NVIDIA_INFERENCE_API_KEY=nvapi-… in $REPO/.env (the sandbox's inference provider)"
+fi
 CF="$HOME/.cloudflared/config.yml"
 [ -f "$CF" ]                        || die "$CF not found — set up the named tunnel first (./setup-named-tunnel.sh)"
 "${SSH[@]}" true || die "cannot ssh to $USER_@$HOST:$PORT with $KEY"
@@ -291,7 +311,7 @@ if [ "$STAGE_ONLY" = true ]; then
   # follow-up command below dies at ec2-bootstrap.sh's payload preflight.
   trap 'rm -rf "$STAGE"' EXIT
   echo; echo "Staged. Finish on the target with:"
-  echo "  ssh -i $KEY -p $PORT $USER_@$HOST '~/ec2-bootstrap.sh'"
+  echo "  ssh -i $KEY -p $PORT $USER_@$HOST '~/ec2-bootstrap.sh$([ "$WITH_NIM" = true ] && printf ' --with-nim %s' "$NIM_MODEL")$([ "$WITH_NEMOCLAW" = true ] && echo ' --with-nemoclaw')'"
   exit 0
 fi
 
@@ -302,6 +322,10 @@ ARGS=()
 [ -n "$GPU_MODE" ] && ARGS+=(--gpu "$GPU_MODE")
 [ -n "$NUM_PARALLEL" ] && ARGS+=(--num-parallel "$NUM_PARALLEL")
 [ "$NO_START" = true ] && ARGS+=(--no-start)
+if [ "$WITH_NIM" = true ]; then
+  ARGS+=(--with-nim); [ -n "$NIM_MODEL" ] && ARGS+=("$NIM_MODEL")
+fi
+[ "$WITH_NEMOCLAW" = true ] && ARGS+=(--with-nemoclaw)
 
 log "running bootstrap on $HOST"
 "${SSH[@]}" "~/ec2-bootstrap.sh ${ARGS[*]}"
