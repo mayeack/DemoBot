@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NVIDIA stack test report — DemoBot 4.2.1 on a g5.xlarge EC2 box (+ Mac baseline)</title>
+<style>
+:root{--bg:#ffffff;--fg:#1c1e21;--muted:#5c6370;--border:#d7dbe0;--accent:#0b6bcb;--code-bg:#f5f7f9;--th:#eef2f6;--warn:#8a5a00}
+@media (prefers-color-scheme: dark){:root{--bg:#14171a;--fg:#e6e8ea;--muted:#9aa3ad;--border:#2c3238;--accent:#63a9f0;--code-bg:#1c2126;--th:#1f252b;--warn:#e0b050}}
+*{box-sizing:border-box}
+body{margin:0;padding:2.5rem 1.5rem 5rem;background:var(--bg);color:var(--fg);
+ font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+ -webkit-font-smoothing:antialiased}
+main{max-width:60rem;margin:0 auto}
+h1{font-size:2rem;line-height:1.25;margin:0 0 .5rem;letter-spacing:-.02em}
+h2{font-size:1.4rem;margin:3rem 0 .75rem;padding-bottom:.4rem;border-bottom:1px solid var(--border);letter-spacing:-.01em}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+h4{font-size:1rem;margin:1.5rem 0 .4rem;color:var(--muted)}
+p,li{margin:.6rem 0}
+a{color:var(--accent)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.875em;
+ background:var(--code-bg);padding:.15em .4em;border-radius:4px;border:1px solid var(--border)}
+pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:1rem;
+ overflow-x:auto;line-height:1.5}
+pre code{background:none;border:none;padding:0;font-size:.85rem}
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--th);font-weight:600}
+tbody tr:nth-child(even){background:color-mix(in srgb,var(--th) 45%,transparent)}
+blockquote{margin:1.2rem 0;padding:.6rem 1rem;border-left:3px solid var(--warn);
+ background:color-mix(in srgb,var(--warn) 8%,transparent);color:var(--fg)}
+blockquote p{margin:.3rem 0}
+hr{border:none;border-top:1px solid var(--border);margin:2.5rem 0}
+strong{font-weight:650}
+ul,ol{padding-left:1.4rem}
+@media print{body{padding:0}pre,table{page-break-inside:avoid}}
+</style></head>
+<body><main>
+<h1 id="nvidia-stack-test-report-demobot-421-on-a-g5xlarge-ec2-box-mac-baseline">NVIDIA stack test report — DemoBot 4.2.1 on a g5.xlarge EC2 box (+ Mac baseline)</h1>
+<p><strong>Date:</strong> 2026-09-02 · <strong>Branch:</strong> <code>fix/ec2-nim-nemoclaw-bootstrap</code> (from <code>main</code> 112708a, PR #55) ·
+<strong>Account:</strong> personal AWS 177835492378, us-east-1 · <strong>Box:</strong> 1 × g5.xlarge (A10G 24 GB), 150 GB gp3 ·
+<strong>Stack under test:</strong> <code>provider=nvidia</code> local NIM (<code>nvidia/nvidia-nemotron-nano-9b-v2</code>), host-capability
+gating, NeMo Guardrails, NemoClaw (policy layer + sandbox runtime), NVIDIA AI Virtual Assistant blueprint,
+plus the prior-version (Ollama) regression on the same box.</p>
+<h2 id="0-defects-found-before-any-gpu-time-was-spent">0. Defects found before any GPU time was spent</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Where</th>
+<th>Defect</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>deploy/ec2/ec2-bootstrap.sh</code></td>
+<td><code>--with-nim</code> prepended <code>AI_PROVIDER=nvidia</code> to <code>SETS</code> in step 9c, <strong>after</strong> step 8 had rewritten <code>.env</code>; a NIM box booted on the Mac's <code>AI_PROVIDER=ollama</code> with the NIM idle</td>
+<td>decision moved to step 3 (right after GPU detection); <code>tests/test_ec2_scripts.py</code> asserts the order</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>deploy/ec2/ec2-bootstrap.sh</code></td>
+<td>fleet drop-in kept ~11 GB of Ollama models resident (<code>OLLAMA_KEEP_ALIVE=60m</code>); the NIM needs ~20 GB of the A10G's 23 GB</td>
+<td>NIM box: <code>OLLAMA_MAX_LOADED_MODELS=1</code>, <code>OLLAMA_KEEP_ALIVE=0</code>, warm-up keeps its own 5-min keep_alive for the placement check, then explicit unload + <code>ollama ps</code> must be empty</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>deploy/ec2/fleet.sh</code>, <code>push-replica.sh</code></td>
+<td>no way to pass <code>--with-nim</code> / <code>--with-nemoclaw</code> through the fleet driver</td>
+<td><code>FLEET_NIM</code>, <code>FLEET_NIM_MODEL</code>, <code>FLEET_NEMOCLAW</code>; push-replica <code>--with-nim [model]</code>, <code>--with-nemoclaw</code>, refusing without the <code>nvapi-</code> key in <code>.env</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>deploy/ec2/ec2-bootstrap.sh</code></td>
+<td>NemoClaw prerequisites missing (Node ≥ 22.19, <code>binutils</code>); NIM readiness wait 15 min; NIM absent from the final health gate; keys checked 20 min in</td>
+<td>Node 22 + binutils installed; NIM starts <strong>before</strong> the app with a 40-min wait; <code>/v1/health/ready</code> + <code>/v1/models</code> gate <code>BOOTSTRAP_OK</code>; both keys checked in step 0</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>deploy/ec2/fleet.sh</code></td>
+<td><code>next-replica</code> and <code>provision</code> died silently (exit 1, no output) when nothing was claimed yet — empty <code>grep</code> under <code>pipefail</code></td>
+<td><code>\|\| true</code> on the claimed-replicas pipeline; regression test runs the function with stubbed <code>aws</code>/<code>cloudflared</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="1-mac-baseline-no-nvidia-gpu-proves-42-is-inert-without-a-gpu-and-41-flows-still-work">1. Mac baseline (no NVIDIA GPU) — proves 4.2 is inert without a GPU and 4.1 flows still work</h2>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Result</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tests/run_all.sh</code> (24 suites incl. <code>test_api.py</code>, new <code>test_ec2_scripts.py</code>)</td>
+<td><strong>PASS</strong> 24/24</td>
+<td><code>RESULT: 24 passed, 0 failed</code></td>
+</tr>
+<tr>
+<td><code>verify_observability.sh</code> Tier 0-2 (span content, collector, spans + metrics forwarded, 0 export failures)</td>
+<td><strong>PASS</strong> 8/8</td>
+<td>spans 12349→12487, metric points 58881→59598</td>
+</tr>
+<tr>
+<td><code>verify_observability.sh</code> Tier 3 (gen_ai metric MTS in O11y)</td>
+<td><strong>FAIL — pre-existing, org-side</strong></td>
+<td><code>gen_ai.client.token.usage MTS: 0</code>, "org is refusing new gen_ai.client.* MTS creation"; known since 2026-07-29 (metric cardinality cap), span-fed views unaffected</td>
+</tr>
+<tr>
+<td><code>verify_nemoclaw_observability.sh</code></td>
+<td><strong>PASS</strong> 10/10, Tier 2 SKIP</td>
+<td>sandbox not on a podman Mac, by design</td>
+</tr>
+<tr>
+<td><code>GET /api/server-info</code> gating on a GPU-less host</td>
+<td><strong>PASS</strong></td>
+<td><code>provider_nvidia</code> and <code>nim_local</code> disabled with "no NVIDIA GPU on this host" reasons; <code>nemoclaw_runtime</code> disabled (podman)</td>
+</tr>
+<tr>
+<td>Ollama chat turn, default blueprint</td>
+<td><strong>PASS</strong></td>
+<td><code>recommendation</code>, 581 chars; governance <code>provider=ollama model=mistral-nemo:12b blueprint=demobot_multi_agent policy_action=allow</code></td>
+</tr>
+<tr>
+<td>NeMo Guardrails with the Ollama judge (master switch on, drawer toggle on)</td>
+<td><strong>PASS</strong></td>
+<td>benign turn passes (31 s with rails); jailbreak → <code>safety_warning</code> in 4 s, governance <code>guardrail_ids=['nemo_guardrails'] safety_categories=['self check input']</code>; master switch restored</td>
+</tr>
+<tr>
+<td>NVIDIA AI Virtual Assistant blueprint on Ollama (per-request <code>blueprint</code>)</td>
+<td><strong>PASS</strong></td>
+<td>record-lookup turn 642 chars, knowledge-retrieval turn 717 chars; governance <code>blueprint=nvidia_virtual_assistant workflow=demobot_nvidia_virtual_assistant</code>; <code>GET /api/analytics/sessions</code> lists the session; server default unchanged</td>
+</tr>
+</tbody>
+</table>
+<p>Mac manual checks: <code>RESULT: 12 passed, 0 failed</code> (script: <code>mac-checks.sh</code>, restores every setting it flips).</p>
+</main>
+<h2>NVIDIA options: local NIM and the NemoClaw runtime</h2>
+<pre># provider=nvidia = a NIM on THIS box (loopback :8000). Default image fits one A10G.
+./ec2-bootstrap.sh --with-nim                                   # nvidia/nvidia-nemotron-nano-9b-v2
+./ec2-bootstrap.sh --with-nim nvidia/nemotron-3-super-120b-a12b # needs 8x H100 (p5-class), not g5
+# NemoClaw runtime (OpenClaw in an OpenShell sandbox, governed by /api/toolguard)
+./ec2-bootstrap.sh --with-nemoclaw</pre>
+<p><code>--with-nim</code> installs Docker + the NVIDIA Container Toolkit (the DL base AMI has both), logs into <code>nvcr.io</code> with <code>NGC_API_KEY</code> (from <code>.env</code> or the payload overrides), runs <code>demobot-nim.service</code> and sets <code>AI_PROVIDER=nvidia</code>, <code>NVIDIA_BASE_URL</code>, <code>NVIDIA_MODEL</code> (an explicit <code>--set</code> still wins). First start pulls the image + weights (minutes). <code>--with-nemoclaw</code> runs <code>run-nemoclaw.sh</code> once (needs <code>NVIDIA_INFERENCE_API_KEY</code> in <code>.env</code> for the sandbox's provider) and installs <code>demobot-nemoclaw</code> + <code>demobot-nemoclaw-forwarder</code> units — NemoClaw restarts nothing after a reboot by itself. Details: <code>docs/nvidia-integration.md</code>.</p>
+</body></html>
