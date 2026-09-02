@@ -148,9 +148,9 @@ as <code>guardrail_ids=["nemoclaw_guardrails"]</code> with <code>NemoClaw: …</
 NemoClaw's sandbox image with the <code>demobot-toolguard</code> plugin baked in
 (<code>nemoclaw/Dockerfile</code>), onboards the sandbox non-interactively, writes the
 guard URL + access key inside it, applies the <code>demobot-guard</code> network preset (the
-sandbox reaches the host as <code>host.openshell.internal</code>, the name NemoClaw's own
-presets use; <code>127.0.0.1</code> is the sandbox itself and <code>host.docker.internal</code>
-bypasses the policy path), enables
+sandbox reaches the host at its private IP, trusted via <code>--trusted-private-host</code>;
+NemoClaw's validator refuses loopback — inside the sandbox <code>127.0.0.1</code> is the
+sandbox — its managed aliases and <code>allowed_ips</code> for user presets), enables
 OpenShell's OCSF JSON audit log and runs <code>scripts/nemoclaw/ocsf_forwarder.py</code>,
 which tails the sandbox's denials into <code>/api/toolguard/nemoclaw/events</code>. The
 plugin's <code>after_tool_call</code> observer reports a <code>policy_denied</code> tool result to

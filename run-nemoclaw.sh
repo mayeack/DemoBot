@@ -21,8 +21,8 @@
 # (backend/host_capabilities.py) says whether this box qualifies.
 #
 #   ./run-nemoclaw.sh                       # onboard (first run) / start, provider = NVIDIA endpoints
-#   ./run-nemoclaw.sh --host 10.0.1.5       # DemoBot reachable at that host IP from the sandbox
-#                                           # (default host.openshell.internal = this host, via OpenShell's gateway)
+#   ./run-nemoclaw.sh --host 10.0.1.5       # DemoBot reachable at that private IP from the sandbox
+#                                           # (default: this host's own private IP; never 127.0.0.1)
 #   ./run-nemoclaw.sh --provider nim        # NemoClaw-managed local NIM (experimental; needs a GPU)
 #   ./run-nemoclaw.sh --foreground          # keep the OCSF forwarder attached (systemd / launchd)
 #
@@ -34,7 +34,7 @@ umask 077
 
 SANDBOX="${NEMOCLAW_SANDBOX_NAME:-demobot-nemoclaw}"
 PROVIDER="build"                 # build = NVIDIA endpoints (NVIDIA_INFERENCE_API_KEY) | nim = NemoClaw-managed local NIM
-HOST=""                          # how the SANDBOX reaches DemoBot; default host.openshell.internal (OpenShell's host gateway)
+HOST=""                          # how the SANDBOX reaches DemoBot; default: this host's private IP
 FOREGROUND=false
 FORWARDER=true
 # Pin NemoClaw to a reviewed commit (alpha project). Override with NEMOCLAW_INSTALL_REF.
@@ -81,11 +81,15 @@ command -v node >/dev/null || die "node >= 22.19 is required"
 
 # ---------- DemoBot reachability ----------
 if [ -z "$HOST" ]; then
-  # The sandbox reaches this machine as host.openshell.internal — the name
-  # NemoClaw's own local-inference/OTLP presets use. NOT 127.0.0.1: inside the
-  # sandbox that is the sandbox itself (every guard call refused, seen on EC2
-  # 2026-09-02); not host.docker.internal either (bypasses the policy path).
-  HOST=host.openshell.internal
+  # The sandbox must reach DemoBot at THIS HOST'S PRIVATE IP. NemoClaw's
+  # validator for user-supplied presets refuses loopback (inside the sandbox
+  # 127.0.0.1 is the sandbox — every guard call refused, seen on EC2
+  # 2026-09-02), refuses its managed aliases (host.openshell.internal,
+  # host.docker.internal) and refuses allowed_ips in the file; a private IP
+  # literal is accepted only with --trusted-private-host, which pins it.
+  HOST=$(hostname -I 2>/dev/null | awk '{print $1}')                 # Linux
+  [ -n "$HOST" ] || HOST=$(ipconfig getifaddr en0 2>/dev/null || true) # macOS
+  [ -n "$HOST" ] || die "could not determine this host's private IP — pass --host=<ip>"
 fi
 GUARD="http://$HOST:8001"            # what the sandbox's plugin calls
 LOCAL_GUARD="http://127.0.0.1:8001"  # the same app, seen from this host
@@ -139,10 +143,12 @@ fi
 
 # ---------- plugin config (guard URL + access key), never baked into an image layer ----------
 log "configuring the governance seat inside the sandbox"
-# A freshly (re)started sandbox refuses exec for a few seconds ("Connection
-# refused"); the config write then silently kept the image's loopback URL.
-for _ in $(seq 1 18); do
-  openshell sandbox exec --name "$SANDBOX" -- true >/dev/null 2>&1 && break
+# A (re)started sandbox sits in phase Provisioning for a minute or more and
+# refuses exec meanwhile ("Connection refused"); the config write then silently
+# kept the image's loopback URL. Wait for phase Ready (up to 5 min), then exec.
+for _ in $(seq 1 60); do
+  openshell sandbox list 2>/dev/null | grep -E "^$SANDBOX[[:space:]]" | grep -q "Ready" \
+    && openshell sandbox exec --name "$SANDBOX" -- true >/dev/null 2>&1 && break
   sleep 5
 done
 openshell sandbox exec --name "$SANDBOX" -- env \

@@ -562,9 +562,9 @@ UNIT
 fi
 
 if [ "$WITH_NEMOCLAW" = true ]; then
-  # The sandbox reaches DemoBot as host.openshell.internal (run-nemoclaw.sh's
-  # default; NemoClaw's own presets use it). Never 127.0.0.1 — inside the
-  # sandbox that is the sandbox (every guard call refused, 2026-09-02).
+  # The sandbox reaches DemoBot at this host's private IP (run-nemoclaw.sh
+  # derives it and trusts it with --trusted-private-host). Never 127.0.0.1 —
+  # inside the sandbox that is the sandbox (every guard call refused, 2026-09-02).
   # NemoClaw guarantees nothing restarts after a reboot: this unit re-runs the
   # (idempotent) launcher, which starts the existing sandbox and re-applies the
   # guard policy; the forwarder unit tails the sandbox's OCSF denials.

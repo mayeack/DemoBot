@@ -8,11 +8,13 @@
 # predated it and was rejected with "Preset must declare preset.name", so the
 # sandbox could never reach the guard (seen on EC2, 2026-09-02).
 #
-# Host: NemoClaw reaches the host machine as host.openshell.internal (what its
-# local-inference and OTLP presets do), never 127.0.0.1 (that is the sandbox
-# itself) and not host.docker.internal (bypasses OpenShell's policy path).
-# OpenShell's SSRF guard rejects private resolutions unless allowed_ips lists
-# them, hence the RFC 1918 ranges. run-nemoclaw.sh substitutes __DEMOBOT_HOST__.
+# Host: a user-supplied preset may target a PRIVATE IP LITERAL only, and only
+# when `--trusted-private-host <that ip>` is passed — NemoClaw then pins the
+# address itself. Its validator refuses loopback (inside the sandbox 127.0.0.1
+# is the sandbox), refuses its managed aliases (host.openshell.internal,
+# host.docker.internal) for user presets, and refuses `allowed_ips` in a
+# user-supplied file. So run-nemoclaw.sh substitutes __DEMOBOT_HOST__ with this
+# host's private IP (hostname -I / ipconfig getifaddr en0) and trusts it.
 preset:
   name: demobot-guard
   description: "DemoBot governance seat: the tool guard on the host, port 8001"
@@ -25,10 +27,6 @@ network_policies:
         port: 8001
         protocol: rest
         enforcement: enforce
-        allowed_ips:
-          - 10.0.0.0/8
-          - 172.16.0.0/12
-          - 192.168.0.0/16
         rules:
           - allow: { method: POST, path: "/api/toolguard/**" }
           - allow: { method: GET, path: "/api/toolguard/**" }
