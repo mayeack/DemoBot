@@ -21,7 +21,8 @@
 # (backend/host_capabilities.py) says whether this box qualifies.
 #
 #   ./run-nemoclaw.sh                       # onboard (first run) / start, provider = NVIDIA endpoints
-#   ./run-nemoclaw.sh --host 10.0.1.5       # DemoBot reachable at that host IP (default: this host)
+#   ./run-nemoclaw.sh --host 10.0.1.5       # DemoBot reachable at that host IP from the sandbox
+#                                           # (default host.openshell.internal = this host, via OpenShell's gateway)
 #   ./run-nemoclaw.sh --provider nim        # NemoClaw-managed local NIM (experimental; needs a GPU)
 #   ./run-nemoclaw.sh --foreground          # keep the OCSF forwarder attached (systemd / launchd)
 #
@@ -33,7 +34,7 @@ umask 077
 
 SANDBOX="${NEMOCLAW_SANDBOX_NAME:-demobot-nemoclaw}"
 PROVIDER="build"                 # build = NVIDIA endpoints (NVIDIA_INFERENCE_API_KEY) | nim = NemoClaw-managed local NIM
-HOST=""                          # host IP the sandbox uses to reach DemoBot (never host.docker.internal)
+HOST=""                          # how the SANDBOX reaches DemoBot; default host.openshell.internal (OpenShell's host gateway)
 FOREGROUND=false
 FORWARDER=true
 # Pin NemoClaw to a reviewed commit (alpha project). Override with NEMOCLAW_INSTALL_REF.
@@ -80,14 +81,16 @@ command -v node >/dev/null || die "node >= 22.19 is required"
 
 # ---------- DemoBot reachability ----------
 if [ -z "$HOST" ]; then
-  # A real host IP (NemoClaw's docs: host.docker.internal bypasses the OpenShell
-  # policy path). Loopback works when DemoBot runs on this very host — the
-  # gateway forwards to a trusted private host.
-  HOST=127.0.0.1
+  # The sandbox reaches this machine as host.openshell.internal — the name
+  # NemoClaw's own local-inference/OTLP presets use. NOT 127.0.0.1: inside the
+  # sandbox that is the sandbox itself (every guard call refused, seen on EC2
+  # 2026-09-02); not host.docker.internal either (bypasses the policy path).
+  HOST=host.openshell.internal
 fi
-GUARD="http://$HOST:8001"
-curl -s --max-time 3 "$GUARD/health" >/dev/null \
-  || warn "DemoBot is not answering at $GUARD — the tool guard is FAIL-CLOSED, so every sandbox tool call is denied until ./run.sh is up"
+GUARD="http://$HOST:8001"            # what the sandbox's plugin calls
+LOCAL_GUARD="http://127.0.0.1:8001"  # the same app, seen from this host
+curl -s --max-time 3 "$LOCAL_GUARD/health" >/dev/null \
+  || warn "DemoBot is not answering at $LOCAL_GUARD — the tool guard is FAIL-CLOSED, so every sandbox tool call is denied until ./run.sh is up"
 
 # ---------- NemoClaw CLI ----------
 if ! command -v nemoclaw >/dev/null; then
@@ -136,6 +139,12 @@ fi
 
 # ---------- plugin config (guard URL + access key), never baked into an image layer ----------
 log "configuring the governance seat inside the sandbox"
+# A freshly (re)started sandbox refuses exec for a few seconds ("Connection
+# refused"); the config write then silently kept the image's loopback URL.
+for _ in $(seq 1 18); do
+  openshell sandbox exec --name "$SANDBOX" -- true >/dev/null 2>&1 && break
+  sleep 5
+done
 openshell sandbox exec --name "$SANDBOX" -- env \
     DEMOBOT_GUARD_URL="$GUARD" DEMOBOT_ACCESS_KEY="$ACCESS_KEY" \
     node -e '
@@ -161,7 +170,7 @@ nemoclaw gateway restart >/dev/null 2>&1 || true
 # ---------- OCSF denial forwarder ----------
 if [ "$FORWARDER" = true ]; then
   pkill -f "ocsf_forwarder.py --sandbox $SANDBOX" 2>/dev/null || true
-  FWD=(python3 scripts/nemoclaw/ocsf_forwarder.py --sandbox "$SANDBOX" --guard "$GUARD" --access-key "$ACCESS_KEY" --state "$STATE_DIR")
+  FWD=(python3 scripts/nemoclaw/ocsf_forwarder.py --sandbox "$SANDBOX" --guard "$LOCAL_GUARD" --access-key "$ACCESS_KEY" --state "$STATE_DIR")
   [ -x venv/bin/python ] && FWD[0]=venv/bin/python
   if [ "$FOREGROUND" = true ]; then
     log "NemoClaw sandbox $SANDBOX up; forwarding OCSF denials (foreground)"

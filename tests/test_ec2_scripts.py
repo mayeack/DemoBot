@@ -104,8 +104,14 @@ def test_bootstrap_start_order_and_gate() -> None:
           "--with-nemoclaw installs Node 22 + binutils (NemoClaw prerequisites)")
     # The sandbox's guard URL must be the host's IP, never loopback (inside the
     # sandbox 127.0.0.1 is the container — verified live 2026-09-02).
-    check("run-nemoclaw.sh --host=127.0.0.1" not in text and "--host=$NEMOCLAW_HOST" in text
-          and "hostname -I" in text, "NemoClaw runs with --host=<this host's IP>, not 127.0.0.1")
+    check("run-nemoclaw.sh --host=127.0.0.1" not in text,
+          "NemoClaw never runs with --host=127.0.0.1 (the sandbox reaches the host as host.openshell.internal)")
+    rn = (ROOT / "run-nemoclaw.sh").read_text()
+    check("HOST=host.openshell.internal" in rn and 'LOCAL_GUARD="http://127.0.0.1:8001"' in rn,
+          "run-nemoclaw.sh defaults the sandbox's guard host to host.openshell.internal and checks the app locally")
+    pr = (ROOT / "nemoclaw/policies/demobot-guard.yaml").read_text()
+    check("preset:" in pr and "network_policies:" in pr and "allowed_ips:" in pr and "__DEMOBOT_HOST__" in pr,
+          "demobot-guard preset uses NemoClaw's preset schema (preset header, network_policies, allowed_ips)")
     # NemoClaw onboarding needs the app up and the inference key in its env.
     onb = text[text.find('onboarding the NemoClaw sandbox'):text.find('sudo systemctl enable demobot-nemoclaw')]
     check("localhost:8001/health" in onb and "/etc/demobot-nemoclaw.env" in onb and "set -a" in onb,
