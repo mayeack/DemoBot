@@ -110,7 +110,8 @@ def test_bootstrap_start_order_and_gate() -> None:
     check("hostname -I" in rn and "HOST=127.0.0.1" not in rn and 'LOCAL_GUARD="http://127.0.0.1:8001"' in rn,
           "run-nemoclaw.sh defaults the sandbox's guard host to this host's private IP and checks the app locally")
     check("openshell sandbox list" in rn and "Ready" in rn, "run-nemoclaw.sh waits for the sandbox phase Ready before writing the plugin config")
-    pr = (ROOT / "nemoclaw/policies/demobot-guard.yaml").read_text()
+    pr = "\n".join(l for l in (ROOT / "nemoclaw/policies/demobot-guard.yaml").read_text().splitlines()
+                   if not l.lstrip().startswith("#"))     # YAML keys only, not the commentary
     check("preset:" in pr and "network_policies:" in pr and "allowed_ips" not in pr and "__DEMOBOT_HOST__" in pr,
           "demobot-guard preset uses NemoClaw's preset schema (preset header, network_policies) without allowed_ips")
     # NemoClaw onboarding needs the app up and the inference key in its env.
