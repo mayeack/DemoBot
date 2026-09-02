@@ -312,14 +312,35 @@ async def hec_stats_for(dest_id: str):
 # ---------------------------------------------------------------------------
 # Server identity
 # ---------------------------------------------------------------------------
+def _server_info() -> dict:
+    from backend import host_capabilities
+
+    caps = host_capabilities.current()
+    return {
+        "hostname": settings.server_hostname or socket.gethostname(),
+        "environment": settings.environment,
+        # What this box can run + the gating rules the UI applies (greying out
+        # provider=nvidia / NIM images / the NemoClaw runtime with a reason).
+        # Read from the cache — never probed on the request path.
+        "capabilities": caps.get("capabilities", {}),
+        "gated": caps.get("gated", {}),
+    }
+
+
 @router.get("/server-info")
 async def get_server_info():
-    """Identity of the host serving this process, for the UI footer.
+    """Identity + capabilities of the host serving this process, for the UI.
 
     Lives behind the access-key gate rather than on the public /health so a
     tunnelled deployment doesn't hand out its hostname unauthenticated.
     """
-    return {
-        "hostname": settings.server_hostname or socket.gethostname(),
-        "environment": settings.environment,
-    }
+    return _server_info()
+
+
+@router.post("/server-info/refresh")
+async def refresh_server_info():
+    """Re-probe host capabilities now (after starting a NIM, Colima, …)."""
+    from backend import host_capabilities
+
+    await asyncio.to_thread(host_capabilities.detect, True)
+    return _server_info()

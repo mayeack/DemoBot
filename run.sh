@@ -115,6 +115,10 @@ fi
 # Create logs directory
 mkdir -p logs
 
+# What this box can run (GPU / container runtime / local NIM / NemoClaw) — the
+# same probe the UI uses to grey out options that cannot work here.
+python -m backend.host_capabilities 2>/dev/null || true
+
 echo ""
 echo "Starting DemoBot v4..."
 echo ""

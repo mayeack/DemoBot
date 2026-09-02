@@ -677,9 +677,13 @@ check(
 graph_src = (ROOT / "backend/agents/graph.py").read_text()
 check("node registered on the theme subgraph", 'g.add_node("agent_control", agent_control_node)' in graph_src)
 check("compliance routes into agent_control", 'g.add_edge("compliance", "agent_control")' in graph_src)
+# NeMo Guardrails' output rails sit between Agent Control and AI Defense, so the
+# chain is agent_control -> nemo_output_rails -> response_defense: Cisco is still
+# the last word on output.
 check(
-    "agent_control routes into response_defense (AI Defense stays the last word)",
-    '"agent_control", _terminal_router, {"end": END, "next": "response_defense"}' in graph_src,
+    "agent_control routes into nemo_output_rails, which routes into response_defense (AI Defense stays the last word)",
+    '"agent_control", _terminal_router, {"end": END, "next": "nemo_output_rails"}' in graph_src
+    and '"nemo_output_rails", _terminal_router, {"end": END, "next": "response_defense"}' in graph_src,
 )
 
 chat_src = (ROOT / "backend/routers/chat.py").read_text()

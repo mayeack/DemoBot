@@ -67,6 +67,16 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
     guardrail_ids = ["escalation_rules"] if should_escalate else []
     if matched_controls:
         guardrail_ids.append("galileo_agent_control")
+    # Same for NeMo Guardrails: a rail that fired without withholding the turn
+    # (a MODIFIED verdict, or a fail-open error) is attributed, not claimed as a
+    # violation. A blocking rail short-circuits in nodes/nemo_rails.py.
+    nemo_rails = [
+        name
+        for verdict in (state.get("nemo_guardrails_input"), state.get("nemo_guardrails_output"))
+        for name in (getattr(verdict, "rule_names", None) or [])
+    ]
+    if nemo_rails:
+        guardrail_ids.append("nemo_guardrails")
 
     workflow_name = settings.agentic_workflow_name
     duration = time.time() - state["start_time"]
@@ -96,7 +106,7 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
             response_finish_reasons=[state.get("llm_stop_reason", "end_turn")],
             safety_violated=should_escalate,
             safety_categories=escalation_reasons if should_escalate else None,
-            guardrail_triggered=should_escalate or bool(matched_controls),
+            guardrail_triggered=should_escalate or bool(matched_controls) or bool(nemo_rails),
             guardrail_ids=guardrail_ids or None,
             pii_detected=pii_detected,
             pii_types=pii_types if pii_detected else None,

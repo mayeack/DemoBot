@@ -8,9 +8,9 @@ Topology:
 
 Each ``{theme}_subgraph`` is the decomposed pipeline (default path):
 
-    policy -> prompt_defense -> intake -> synthesizer -> safety
-          -> injection -> compliance -> agent_control -> response_defense
-          -> governance
+    policy -> prompt_defense -> nemo_input_rails -> intake -> synthesizer -> safety
+          -> injection -> compliance -> agent_control -> nemo_output_rails
+          -> response_defense -> governance
 
 By default the edge after ``intake`` routes straight to the synthesizer, which
 answers alone as the theme's ``*_domain_agent`` (one LLM call per turn).
@@ -49,6 +49,7 @@ from backend.agents.nodes.governance import governance_node
 from backend.agents.nodes.specialists import make_specialists_agent
 from backend.agents.nodes.synthesizer import make_synthesizer_agent
 from backend.agents.nodes.injection import injection_node
+from backend.agents.nodes.nemo_rails import nemo_input_rails_node, nemo_output_rails_node
 from backend.agents.nodes.policy import policy_block_node
 from backend.agents.nodes.safety import safety_node
 from backend.agents.state import DemoBotState, build_initial_state
@@ -85,6 +86,7 @@ def build_theme_subgraph(theme_config):
 
     g.add_node("policy", policy_block_node)
     g.add_node("prompt_defense", prompt_defense_node)
+    g.add_node("nemo_input_rails", nemo_input_rails_node)
     g.add_node("intake", intake_node)
     g.add_node("coordinator", make_coordinator_agent(theme_config))
     g.add_node("specialists", make_specialists_agent(theme_config))
@@ -93,12 +95,17 @@ def build_theme_subgraph(theme_config):
     g.add_node("injection", injection_node)
     g.add_node("compliance", compliance_node)
     g.add_node("agent_control", agent_control_node)
+    g.add_node("nemo_output_rails", nemo_output_rails_node)
     g.add_node("response_defense", response_defense_node)
     g.add_node("governance", governance_node)
 
     g.add_edge(START, "policy")
     g.add_conditional_edges("policy", _terminal_router, {"end": END, "next": "prompt_defense"})
-    g.add_conditional_edges("prompt_defense", _terminal_router, {"end": END, "next": "intake"})
+    # NeMo input rails run AFTER Cisco AI Defense's prompt inspection; the NeMo
+    # output rails run after Agent Control and BEFORE AI Defense's response
+    # inspection, so Cisco stays the last word on output (nodes/nemo_rails.py).
+    g.add_conditional_edges("prompt_defense", _terminal_router, {"end": END, "next": "nemo_input_rails"})
+    g.add_conditional_edges("nemo_input_rails", _terminal_router, {"end": END, "next": "intake"})
     g.add_conditional_edges(
         "intake",
         _route_after_intake,
@@ -111,7 +118,10 @@ def build_theme_subgraph(theme_config):
     g.add_edge("injection", "compliance")
     g.add_edge("compliance", "agent_control")
     g.add_conditional_edges(
-        "agent_control", _terminal_router, {"end": END, "next": "response_defense"}
+        "agent_control", _terminal_router, {"end": END, "next": "nemo_output_rails"}
+    )
+    g.add_conditional_edges(
+        "nemo_output_rails", _terminal_router, {"end": END, "next": "response_defense"}
     )
     g.add_conditional_edges(
         "response_defense", _terminal_router, {"end": END, "next": "governance"}
@@ -186,6 +196,7 @@ def _build_turn_state(
     internal_policy_review: Optional[bool] = None,
     multi_agent_mode: Optional[bool] = None,
     agent_control_review: Optional[bool] = None,
+    nemo_guardrails_review: Optional[bool] = None,
     enduser_id: Optional[str] = None,
     service_name: Optional[str] = None,
     deployment_id: Optional[str] = None,
@@ -206,6 +217,7 @@ def _build_turn_state(
         internal_policy_review=internal_policy_review,
         multi_agent_mode=multi_agent_mode,
         agent_control_review=agent_control_review,
+        nemo_guardrails_review=nemo_guardrails_review,
         service_name=service_name,
         deployment_id=deployment_id,
     )
@@ -230,6 +242,7 @@ def run_turn(
     internal_policy_review: Optional[bool] = None,
     multi_agent_mode: Optional[bool] = None,
     agent_control_review: Optional[bool] = None,
+    nemo_guardrails_review: Optional[bool] = None,
     enduser_id: Optional[str] = None,
     service_name: Optional[str] = None,
     deployment_id: Optional[str] = None,
@@ -257,6 +270,7 @@ def run_turn(
         internal_policy_review=internal_policy_review,
         multi_agent_mode=multi_agent_mode,
         agent_control_review=agent_control_review,
+        nemo_guardrails_review=nemo_guardrails_review,
         service_name=service_name,
         deployment_id=deployment_id,
     )

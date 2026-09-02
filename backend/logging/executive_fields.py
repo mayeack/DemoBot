@@ -70,6 +70,8 @@ _BLOCK_GUARDRAILS = {
     "policy_block": ("Self-harm safety policy", "blocked_unsafe"),
     "tool_policy": ("Agentic tool policy", "blocked_tool_call"),
     "openclaw_tool_guard": ("OpenClaw tool guard", "blocked_tool_call"),
+    "nemo_guardrails": ("NVIDIA NeMo Guardrails policy", "blocked_by_nemo_guardrails"),
+    "nemoclaw_guardrails": ("NVIDIA NemoClaw guardrails", "blocked_tool_call"),
 }
 
 # PII types that are also Protected Health Information in a medical context.

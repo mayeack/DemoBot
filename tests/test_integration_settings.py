@@ -95,9 +95,9 @@ def _value(path: Path, key: str) -> str:
 
 # ---------------------------------------------------------------------------
 def test_choices_and_field_shape() -> None:
-    check("INTEGRATION_CHOICES == the 3 Settings groups",
+    check("INTEGRATION_CHOICES == the 4 Settings groups",
           settings_store.INTEGRATION_CHOICES
-          == ["ai_defense", "splunk_o11y", "agent_observability"])
+          == ["ai_defense", "splunk_o11y", "agent_observability", "nemo_guardrails"])
     fields = settings_store.get_integration_fields()
     check("get_integration_fields covers every choice",
           set(fields) == set(settings_store.INTEGRATION_CHOICES))

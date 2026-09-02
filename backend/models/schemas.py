@@ -41,6 +41,7 @@ class ChatRequest(BaseModel):
     internal_policy_review: Optional[bool] = None  # Run the built-in internal policy engine (default on)
     multi_agent_mode: Optional[bool] = None  # True = coordinator/specialists/synthesizer pipeline; None/False (default) = the domain agent answers directly
     agent_control_review: Optional[bool] = None  # Submit the response to Galileo Agent Control for evaluation against the console's Controls
+    nemo_guardrails_review: Optional[bool] = None  # Run NVIDIA NeMo Guardrails input rails on the prompt and output rails on the answer
 
 class ChatResponse(BaseModel):
     session_id: str

@@ -34,6 +34,7 @@ class DemoBotState(TypedDict, total=False):
     internal_policy_review: Optional[bool]
     multi_agent_mode: Optional[bool]
     agent_control_review: Optional[bool]
+    nemo_guardrails_review: Optional[bool]
     # Per-turn governance identity overrides. Unset on ordinary chat (the
     # governance log then falls back to its own "demobot-v3" defaults); the
     # prompt-injection spray campaign sets them so one process can emit turns
@@ -120,6 +121,12 @@ class DemoBotState(TypedDict, total=False):
     # the governance event can record an observe/steer match that did not block.
     agent_control: Any  # ControlVerdict
 
+    # ---- NVIDIA NeMo Guardrails verdicts (nemo_input_rails / nemo_output_rails) ----
+    # Present for allowed turns too (a fail-open error is recorded), so the
+    # governance event can attribute a non-blocking rail outcome.
+    nemo_guardrails_input: Any  # RailVerdict
+    nemo_guardrails_output: Any  # RailVerdict
+
     # ---- Short-circuit + final result ----
     # ``terminal`` is set by any node that fully handled the turn (policy block,
     # AI Defense block, clarifying question). ``result`` is the
@@ -146,6 +153,7 @@ def build_initial_state(
     internal_policy_review: Optional[bool] = None,
     multi_agent_mode: Optional[bool] = None,
     agent_control_review: Optional[bool] = None,
+    nemo_guardrails_review: Optional[bool] = None,
     service_name: Optional[str] = None,
     deployment_id: Optional[str] = None,
 ) -> DemoBotState:
@@ -170,6 +178,7 @@ def build_initial_state(
         internal_policy_review=internal_policy_review,
         multi_agent_mode=multi_agent_mode,
         agent_control_review=agent_control_review,
+        nemo_guardrails_review=nemo_guardrails_review,
         service_name=service_name,
         deployment_id=deployment_id,
         terminal=False,

@@ -275,6 +275,46 @@
                     </div>
                 </div>
 
+                <!-- NeMo Guardrails (NVIDIA NeMo Guardrails, in-process: input rails on the
+                     prompt after AI Defense, output rails on the answer before AI Defense) -->
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="nemoGuardrailsToggle" class="sr-only peer" onchange="toggleNemoGuardrails()">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-emerald-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                            </label>
+                            <div>
+                                <span class="text-sm font-semibold text-gray-700">NeMo Guardrails</span>
+                                <p class="text-xs text-gray-500">Runs NVIDIA NeMo Guardrails input rails on each prompt and output rails on each answer (self-check on the active model, optional NemoGuard content safety); a fired rail withholds the turn</p>
+                            </div>
+                        </div>
+                        <div id="nemoGuardrailsStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
+                            OFF
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NemoClaw Guardrails (server-side toggle: governs the OpenClaw agent's tool
+                     calls in Mode C via the NemoClaw/OpenShell sandbox policy — not a chat field) -->
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="nemoClawToggle" class="sr-only peer" onchange="toggleNemoClaw()">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-lime-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-lime-600"></div>
+                            </label>
+                            <div>
+                                <span class="text-sm font-semibold text-gray-700">NemoClaw Guardrails</span>
+                                <p id="nemoClawDesc" class="text-xs text-gray-500">Governs the OpenClaw agent's tool calls (Mode C) with the NemoClaw/OpenShell sandbox policy — deny-by-default egress, filesystem scopes, denied binaries, local-only inference; ON enforces a block</p>
+                            </div>
+                        </div>
+                        <div id="nemoClawStatus" class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600">
+                            OFF
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Internal Policy Engine (built-in, separate from Cisco AI Defense) -->
                 <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
                     <div class="flex items-center justify-between">
@@ -519,6 +559,9 @@
                                 <span class="text-slate-500 font-semibold uppercase tracking-wide text-[10px]">Model</span>
                                 <select id="modelSelect" onchange="onModelChange()" class="text-xs font-mono border border-slate-200 bg-slate-50 text-slate-800 rounded-md px-2 py-1 max-w-[18rem] focus:outline-none focus:ring-2 focus:ring-slate-300"></select>
                                 <button id="refreshModelsBtn" type="button" onclick="refreshModels()" title="Re-scan the provider for available models" class="text-xs text-slate-500 border border-slate-200 bg-slate-50 rounded-md px-1.5 py-1 hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:opacity-50">↻</button>
+                                <!-- Host-capability state for the selected provider (UNAVAILABLE / NIM DOWN / NIM READY);
+                                     the reason is the tooltip. Hidden unless there is something to say. -->
+                                <span id="modelGate" class="hidden px-2 py-0.5 text-[10px] font-semibold rounded-full bg-gray-100 text-gray-600"></span>
                             </label>
                             <label class="inline-flex items-center gap-1.5" title="Demo: report a static model name in telemetry instead of the real one. 'Emit Actual' = report the real model.">
                                 <span class="text-amber-500 font-semibold uppercase tracking-wide text-[10px]">Static emission</span>

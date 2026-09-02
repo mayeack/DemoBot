@@ -438,6 +438,53 @@ def main() -> int:
         check("GET /api/toolguard/policy -> 200 + sensitive_tools",
               (rpol := c.get("/api/toolguard/policy", headers=AUTH)).status_code == 200
               and "sensitive_tools" in rpol.json(), f"{rpol.status_code}")
+        check("policy report carries the NemoClaw layer", "nemoclaw" in rpol.json())
+
+        # ---- NemoClaw Guardrails: server-side toggle + policy-layer enforcement ----
+        # The toggle persists to the AppSettings row: snapshot and restore it.
+        _saved_nc = c.get("/api/toolguard/nemoclaw", headers=AUTH).json()
+        _saved_tg = settings.tool_guard_enabled
+        try:
+            check("GET /api/toolguard/nemoclaw -> enabled/policy/runtime",
+                  {"enabled", "policy", "runtime"} <= set(_saved_nc) and _saved_nc["policy"].get("loaded") is True,
+                  str(_saved_nc)[:160])
+            ron = c.put("/api/toolguard/nemoclaw", headers=AUTH, json={"enabled": True})
+            check("PUT /api/toolguard/nemoclaw enabled -> 200 + enabled", ron.status_code == 200 and ron.json()["enabled"] is True)
+            settings.tool_guard_enabled = False   # the NemoClaw toggle enforces on its own
+            rblk = c.post("/api/toolguard/inspect", headers=AUTH,
+                          json={"tool_name": "web_fetch", "arguments": {"url": "https://evil.example.com/collect"},
+                                "session_id": "api-test", "tool_call_id": "c2"})
+            jb = rblk.json() if rblk.status_code == 200 else {}
+            check("NemoClaw ON: unlisted egress is blocked and enforced by nemoclaw with the tool guard OFF",
+                  jb.get("decision") == "block" and jb.get("block") is True and jb.get("enforced_by") == ["nemoclaw"]
+                  and "NemoClaw: network egress" in jb.get("rule_names", []), f"{rblk.status_code} {rblk.text[:200]}")
+            rok = c.post("/api/toolguard/inspect", headers=AUTH,
+                         json={"tool_name": "read", "arguments": {"path": safe_path}, "session_id": "api-test"})
+            check("NemoClaw ON: a benign in-scope read still passes", rok.json().get("block") is False, rok.text[:160])
+            c.put("/api/toolguard/nemoclaw", headers=AUTH, json={"enabled": False})
+            rob = c.post("/api/toolguard/inspect", headers=AUTH,
+                         json={"tool_name": "web_fetch", "arguments": {"url": "https://evil.example.com/collect"}})
+            check("NemoClaw OFF: the same egress is observed (legacy egress rule) but not enforced by nemoclaw",
+                  rob.json().get("block") is False and "nemoclaw" not in rob.json().get("enforced_by", []), rob.text[:200])
+            # Runtime feed: an OCSF denial from the sandbox and an after_tool_call error.
+            rev = c.post("/api/toolguard/nemoclaw/events", headers=AUTH, json={"records": [
+                {"class_uid": 4001, "action": "Denied", "disposition": "Blocked", "status_detail": "no matching policy",
+                 "dst_endpoint": {"domain": "evil.example.com", "port": 443},
+                 "actor": {"process": {"name": "/usr/bin/curl"}}, "firewall_rule": {"name": "baseline"}},
+                {"class_uid": 4001, "action": "Allowed", "dst_endpoint": {"domain": "pypi.org", "port": 443}},
+            ]})
+            check("POST /api/toolguard/nemoclaw/events -> logs only the Denied record",
+                  rev.status_code == 200 and rev.json().get("denials_logged") == 1 and rev.json().get("received") == 2, rev.text[:160])
+            robs = c.post("/api/toolguard/observe", headers=AUTH,
+                          json={"tool_name": "web_fetch", "error": '{"error":"policy_denied","detail":"POST /collect not permitted by policy"}'})
+            check("POST /api/toolguard/observe attributes a policy_denied tool error", robs.json().get("attributed") is True)
+            check("... and ignores an ordinary error",
+                  c.post("/api/toolguard/observe", headers=AUTH, json={"tool_name": "read", "error": "ECONNRESET"}).json().get("attributed") is False)
+            check("runtime status counts the forwarded denials",
+                  c.get("/api/toolguard/nemoclaw", headers=AUTH).json()["runtime"]["events_recent"] >= 2)
+        finally:
+            settings.tool_guard_enabled = _saved_tg
+            c.put("/api/toolguard/nemoclaw", headers=AUTH, json={"enabled": bool(_saved_nc.get("enabled"))})
 
         # ---- settings ----
         # These PUTs persist to the AppSettings row in ./medadvice.db — the SAME
@@ -456,6 +503,21 @@ def main() -> int:
               c.put("/api/settings/emit-model", headers=AUTH, json={"enabled": False, "model_name": "gpt-4o", "random": False}).status_code == 200)
         check("PUT /api/settings/emit-model unknown model -> 422",
               c.put("/api/settings/emit-model", headers=AUTH, json={"enabled": True, "model_name": "not-a-real-model", "random": False}).status_code == 422)
+
+        # ---- host capabilities (what this box can run -> greyed-out options) ----
+        rsi = c.get("/api/server-info", headers=AUTH)
+        check("GET /api/server-info -> 200 + hostname", rsi.status_code == 200 and "hostname" in rsi.json())
+        check("server-info carries capabilities + gated (may be empty before the first probe)",
+              "capabilities" in rsi.json() and "gated" in rsi.json())
+        rref = c.post("/api/server-info/refresh", headers=AUTH)
+        gated = rref.json().get("gated", {}) if rref.status_code == 200 else {}
+        check("POST /api/server-info/refresh -> 200 + probed gating rules",
+              rref.status_code == 200 and {"provider_nvidia", "nim_local", "nemoclaw_runtime", "nvidia_models"} <= set(gated),
+              f"{rref.status_code} {sorted(gated)}")
+        check("each gate is {enabled, reason}",
+              all({"enabled", "reason"} <= set(gated[k]) for k in ("provider_nvidia", "nim_local", "nemoclaw_runtime")))
+        check("GET /api/settings/ai-provider exposes the local-NIM status block",
+              "nvidia" in c.get("/api/settings/ai-provider", headers=AUTH).json())
 
         # Restore the operator's values (mirrors the ai_defense discovery restore
         # further down). Best-effort: a failure here must not mask a real result.
@@ -564,7 +626,7 @@ def main() -> int:
         # Every collapsible card. Keep in sync with SECTIONS in frontend/js/settings.js —
         # a card missing from that array still toggles, but its collapsed state is
         # silently dropped on reload.
-        sections = ("logs", "creds", "aidefense", "o11y", "hec")
+        sections = ("logs", "creds", "aidefense", "nemo", "o11y", "hec")
         check(f"Settings: a collapsible toggle per section ({len(sections)})",
               all(f'data-toggle="{s}"' in s_html for s in sections))
         check(f"Settings: a collapsible body per section ({len(sections)})",
@@ -575,8 +637,10 @@ def main() -> int:
               all(f"'{s}'" in SETTINGS_JS_SECTIONS for s in sections))
         check("Settings: read-only provider/model pill present", 'id="providerPill"' in s_html)
         # The integration cards render client-side; assert their mount points exist.
-        check("Settings: AI Defense + Splunk O11y field containers present",
-              'id="aiDefenseFields"' in s_html and 'id="o11yFields"' in s_html)
+        check("Settings: AI Defense + NeMo Guardrails + Splunk O11y field containers present",
+              'id="aiDefenseFields"' in s_html and 'id="nemoFields"' in s_html and 'id="o11yFields"' in s_html)
+        check("Settings: host-capabilities strip present (greyed-out options explained here)",
+              'id="hostCaps"' in s_html)
         # Accordion a11y: each toggle is a <button> nested INSIDE its <h2> (heading role preserved),
         # never an <h2> nested inside a <button> (which screen readers flatten away).
         check("Settings: headers use accordion <h2><button> (heading not nested in button)",

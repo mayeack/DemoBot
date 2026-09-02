@@ -90,11 +90,12 @@ class Settings(BaseSettings):
     nvidia_top_p: float = 0.95
     # NIM images offered in the model dropdown even before the local NIM is
     # reachable, each with what it takes to run: "<model id>|<GPU label>|<min
-    # VRAM MB>|<GPU count>". The UI greys out one the detected GPU cannot run
-    # or the running NIM does not serve.
+    # VRAM MB per GPU>|<GPU count>". The per-GPU floor is what the card
+    # REPORTS (an A10G/L4 "24 GB" reports ~23 GB; an H100-80GB ~81.5 GB), not
+    # its marketing size, so a matching box is not greyed out by rounding.
     nvidia_featured_models: str = (
-        "nvidia/nvidia-nemotron-nano-9b-v2|1x A10G / L4 24 GB|24000|1,"
-        "nvidia/nemotron-3-super-120b-a12b|8x H100-80GB|640000|8"
+        "nvidia/nvidia-nemotron-nano-9b-v2|1x A10G / L4 24 GB|22000|1,"
+        "nvidia/nemotron-3-super-120b-a12b|8x H100-80GB|76000|8"
     )
 
     # Ollama Configuration (used when ai_provider="ollama")
@@ -284,6 +285,25 @@ class Settings(BaseSettings):
     tool_guard_max_arg_chars: int = 4000
 
     # -------------------------------------------------------------------------
+    # NemoClaw Guardrails (the "NemoClaw Guardrails" drawer toggle)
+    # -------------------------------------------------------------------------
+    # NVIDIA NemoClaw governs an OpenClaw agent with an OpenShell sandbox policy
+    # (deny-by-default network egress, filesystem scopes, process rules, local-
+    # only inference routing). DemoBot evaluates its copy of that policy
+    # (guardrails/nemoclaw/policy.yaml) on every agent tool call the gateway
+    # submits to /api/toolguard/inspect — the policy layer — and, on a host that
+    # runs the real NemoClaw runtime (run-nemoclaw.sh), also ingests the
+    # sandbox's own OCSF denials. Unlike tool_guard_enabled, this toggle IS the
+    # enforcement switch: ON = a NemoClaw policy block denies the call. Persisted
+    # by the drawer toggle (settings_store), so .env only seeds the default.
+    nemoclaw_guardrails_enabled: bool = False
+    nemoclaw_policy_path: str = "guardrails/nemoclaw/policy.yaml"
+    # Also run a NeMo Guardrails input rail over sensitive/suspicious tool calls
+    # (NemoClaw pairs OpenShell policy with NeMo rails). Needs the NeMo master
+    # switch on; otherwise silently skipped.
+    nemoclaw_use_nemo_rails: bool = True
+
+    # -------------------------------------------------------------------------
     # Galileo Agent Control ("Agent Observability Controls" -> runtime guardrail)
     # -------------------------------------------------------------------------
     # Galileo's Agent Control server evaluates each agent step against the
@@ -334,6 +354,39 @@ class Settings(BaseSettings):
     # False = fail closed (withhold the response), matching AI Defense's
     # posture; only sensible once runtime enforcement is verified working.
     galileo_agent_control_fail_open: bool = True
+
+    # -------------------------------------------------------------------------
+    # NVIDIA NeMo Guardrails (the "NeMo Guardrails" drawer toggle)
+    # -------------------------------------------------------------------------
+    # In-process nemoguardrails (core package only — never the [server] extra,
+    # which drags starlette past the fastapi 0.109 pin). Input rails run after
+    # Cisco AI Defense's prompt inspection; output rails run after Galileo
+    # Agent Control and BEFORE AI Defense's response inspection, so Cisco stays
+    # the last word on output. The judge is DemoBot's ACTIVE chat model
+    # (self-check rails), so this works on every provider with no cloud call;
+    # NemoGuard content-safety is an optional SECOND local NIM.
+    #
+    # Master switch: when False the per-request toggle is ignored and no rail
+    # ever runs, regardless of the UI toggle state.
+    nemo_guardrails_enabled: bool = False
+    # Which rails to activate, comma-separated. self_check_input /
+    # self_check_output are NeMo's built-in LLM self-checks (prompts in
+    # guardrails/nemo/prompts.yml); overreach is DemoBot's prescriptive-
+    # overreach output rail, the NeMo counterpart of the AI Defense custom
+    # guardrail (a prescription-only drug / dosage / binding position).
+    nemo_guardrails_rails: str = "self_check_input,self_check_output,overreach"
+    # Optional NemoGuard content-safety NIM on THIS host (loopback, like the
+    # inference NIM), e.g. http://localhost:8001/v1. Empty = the content-safety
+    # rails are not loaded (an 8B guard NIM does not co-reside with the 9B
+    # inference NIM on one A10G).
+    nemo_guardrails_content_safety_url: str = ""
+    nemo_guardrails_content_safety_model: str = "nvidia/llama-3.1-nemoguard-8b-content-safety"
+    # Behavior when the rails cannot produce a verdict (judge error, bad
+    # config). True = fail open (release the turn, log) — the default, because
+    # this layer sits between the internal policy engine and Cisco AI Defense.
+    nemo_guardrails_fail_open: bool = True
+    # Output cap for the judge calls (a Yes/No answer needs very few tokens).
+    nemo_guardrails_judge_max_tokens: int = 64
 
     # -------------------------------------------------------------------------
     # Agentic orchestration (LangChain + LangGraph)

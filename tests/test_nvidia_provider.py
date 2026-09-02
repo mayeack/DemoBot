@@ -51,8 +51,8 @@ class _Stub:
     nvidia_reasoning = False
     nvidia_top_p = 0.95
     nvidia_featured_models = (
-        "nvidia/nvidia-nemotron-nano-9b-v2|1x A10G / L4 24 GB|24000|1,"
-        "nvidia/nemotron-3-super-120b-a12b|8x H100-80GB|640000|8"
+        "nvidia/nvidia-nemotron-nano-9b-v2|1x A10G / L4 24 GB|22000|1,"
+        "nvidia/nemotron-3-super-120b-a12b|8x H100-80GB|76000|8"
     )
     # Fields the provider-fallback ternaries reference for other providers.
     anthropic_model = "claude-sonnet-4-5-20250929"

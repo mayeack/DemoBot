@@ -43,6 +43,9 @@ _DEFAULTS: Dict[str, Any] = {
     # (SPLUNK_REALM/O11Y_INGEST/...) are deliberately NOT kept here — they
     # live in .env only, so the two planes can't diverge.
     "integration_creds": {},
+    # The "NemoClaw Guardrails" drawer toggle (server-side: tool calls are not
+    # chat requests). Persisted so the demo posture survives a restart.
+    "nemoclaw_guardrails": {"enabled": False},
 }
 _ID_RE = re.compile(r"[^a-z0-9-]+")
 
@@ -156,7 +159,13 @@ _PROVIDER_FIELDS: Dict[str, List[_CredField]] = {
 # group. Scope is deliberately CREDENTIALS + IDENTITY only: timeouts, fail-open
 # posture, enabled-rule lists and Agent Control tuning stay in .env, where they
 # are annotated and rarely change per-demo.
-INTEGRATION_CHOICES: List[str] = ["ai_defense", "splunk_o11y", "agent_observability"]
+INTEGRATION_CHOICES: List[str] = ["ai_defense", "splunk_o11y", "agent_observability", "nemo_guardrails"]
+
+
+def _validate_optional_nim_url(value: str) -> None:
+    """An optional second local NIM (NemoGuard content safety) obeys the same
+    local-only rule as the inference NIM. Blank never reaches here."""
+    _validate_nim_base_url(value)
 
 _INTEGRATION_FIELDS: Dict[str, List[_CredField]] = {
     # Applies live: AIDefenseClient.reconfigure() re-reads the settings singleton.
@@ -198,6 +207,24 @@ _INTEGRATION_FIELDS: Dict[str, List[_CredField]] = {
                    placeholder="https://console.multitenant.galileocloud.io"),
         _CredField("project", "Project", env="GALILEO_PROJECT", placeholder="YeackBot"),
         _CredField("log_stream", "Log stream", env="GALILEO_LOG_STREAM", placeholder="default"),
+    ],
+    # Applies live: NemoGuardrailsClient.reconfigure() drops the built rails so
+    # the next chat turn rebuilds them from the settings singleton.
+    "nemo_guardrails": [
+        _CredField("enabled", "Enabled", boolean=True, settings_attr="nemo_guardrails_enabled",
+                   help="Master switch. The per-chat NeMo Guardrails toggle is ignored when this is off."),
+        _CredField("rails", "Rails", settings_attr="nemo_guardrails_rails", wide=True,
+                   placeholder="self_check_input,self_check_output,overreach",
+                   help="Comma-separated: self_check_input, self_check_output (NeMo's LLM "
+                        "self-checks on the active chat model) and overreach (DemoBot's "
+                        "prescriptive-overreach output rail)."),
+        _CredField("content_safety_url", "NemoGuard content-safety NIM (this host)",
+                   settings_attr="nemo_guardrails_content_safety_url",
+                   placeholder="http://localhost:8001/v1", validate=_validate_optional_nim_url,
+                   help="Optional SECOND local NIM serving llama-3.1-nemoguard-8b-content-safety. "
+                        "Leave empty to skip the content-safety rails."),
+        _CredField("fail_open", "Fail open", boolean=True, settings_attr="nemo_guardrails_fail_open",
+                   help="True releases the turn when the rails error; False withholds it."),
     ],
 }
 
@@ -287,6 +314,35 @@ def set_ai_defense_enabled_rules_supported(supported: bool) -> bool:
     data["ai_defense_enabled_rules_supported"] = bool(supported)
     _persist(data)
     return bool(supported)
+
+
+# ---------------------------------------------------------------------------
+# NemoClaw Guardrails toggle (enforcement switch for the NemoClaw policy layer)
+# ---------------------------------------------------------------------------
+def get_nemoclaw_guardrails() -> Dict[str, Any]:
+    from backend.config import settings
+
+    # The live setting is the truth (startup applies the stored value over .env).
+    return {"enabled": bool(settings.nemoclaw_guardrails_enabled)}
+
+
+def set_nemoclaw_guardrails(enabled: bool) -> Dict[str, Any]:
+    from backend.config import settings
+
+    data = load()
+    data["nemoclaw_guardrails"] = {"enabled": bool(enabled)}
+    _persist(data)
+    settings.nemoclaw_guardrails_enabled = bool(enabled)
+    return get_nemoclaw_guardrails()
+
+
+def apply_nemoclaw_guardrails_from_store() -> None:
+    """Startup hook: the persisted toggle wins over the .env default."""
+    from backend.config import settings
+
+    cfg = load().get("nemoclaw_guardrails")
+    if isinstance(cfg, dict) and "enabled" in cfg:
+        settings.nemoclaw_guardrails_enabled = bool(cfg["enabled"])
 
 
 # ---------------------------------------------------------------------------
@@ -563,6 +619,7 @@ def get_integration_fields() -> Dict[str, List[Dict[str, Any]]]:
                 "placeholder": f.placeholder,
                 "help": f.help,
                 "restart": f.restart,
+                "wide": f.wide,
                 "present": bool(cur) if not f.boolean else True,
             }
             if not f.secret:
@@ -584,6 +641,9 @@ def _reconfigure_integration(integration: str) -> None:
     elif integration == "agent_observability":
         from backend.services.agent_control import agent_control_client
         agent_control_client.reconfigure()
+    elif integration == "nemo_guardrails":
+        from backend.services.nemo_guardrails import nemo_guardrails_client
+        nemo_guardrails_client.reconfigure()
 
 
 def set_integration_creds(integration: str, fields: Dict[str, str]) -> List[str]:
@@ -600,13 +660,11 @@ def set_integration_creds(integration: str, fields: Dict[str, str]) -> List[str]
     if not specs or not fields:
         return []
 
-    data = load()
-    store = dict(data.get("integration_creds") or {})
-    istore = dict(store.get(integration) or {})
-    applied: List[str] = []
-    restart: List[str] = []
-    persist_blob = False
-
+    # Resolve + validate EVERY submitted field before applying any of them. A card
+    # saves all its fields in one PUT and .env is written field-by-field, so
+    # validating inside the apply loop below would leave .env half-updated whenever a
+    # later field is rejected — reported to the operator as a plain error.
+    pending: List[tuple] = []
     for f in specs:
         if f.key not in fields:
             continue
@@ -617,7 +675,20 @@ def set_integration_creds(integration: str, fields: Dict[str, str]) -> List[str]
             val = (raw or "").strip()
             if not val:  # blank = keep existing (never wipe)
                 continue
+            if f.validate:
+                f.validate(val)  # ValueError -> 422, nothing written
+        if f.env_file and not f.env:
+            raise ValueError(f"{f.key}: env_file field needs an env var name")
+        pending.append((f, val))
 
+    data = load()
+    store = dict(data.get("integration_creds") or {})
+    istore = dict(store.get(integration) or {})
+    applied: List[str] = []
+    restart: List[str] = []
+    persist_blob = False
+
+    for f, val in pending:
         if f.settings_attr:
             setattr(settings, f.settings_attr, _as_bool(val) if f.boolean else val)
         if f.env:
@@ -625,8 +696,6 @@ def set_integration_creds(integration: str, fields: Dict[str, str]) -> List[str]
         if f.env_file:
             # .env is the single source of truth for these — the consumer is a
             # different process, so mirroring them into the blob could only drift.
-            if not f.env:
-                raise ValueError(f"{f.key}: env_file field needs an env var name")
             _write_env_key(f.env, val)
         else:
             istore[f.key] = val

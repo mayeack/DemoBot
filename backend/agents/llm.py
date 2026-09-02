@@ -71,6 +71,15 @@ def clear_caches() -> None:
     """
     _MODEL_CACHE.clear()
     _AGENT_CACHE.clear()
+    # The NeMo rails are bound to the active chat model (their judge), so a
+    # provider/model change must rebuild them too. Lazy import: services ->
+    # llm is the normal direction.
+    try:
+        from backend.services.nemo_guardrails import nemo_guardrails_client
+
+        nemo_guardrails_client.reconfigure()
+    except Exception:  # noqa: BLE001 - never let the optional layer break a switch
+        logger.debug("NeMo Guardrails reconfigure skipped", exc_info=True)
 
 
 def get_chat_model(settings, *, max_tokens: int = 2048, temperature: float = 0.7,

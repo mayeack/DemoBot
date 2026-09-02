@@ -140,10 +140,16 @@ async def startup_event():
         # Same for the AI Defense / Splunk Agent Observability integration creds.
         # (Collector-consumed keys are .env-owned and already loaded by config.)
         settings_store.apply_integration_creds_from_store()
+        # The NemoClaw Guardrails drawer toggle is server-side state: restore it.
+        settings_store.apply_nemoclaw_guardrails_from_store()
         # Discover which models each provider currently offers (background thread so
         # startup isn't blocked) — populates the Settings "Model" dropdown.
         from backend import model_catalog
         model_catalog.refresh_async()
+        # Probe what this host can run (GPU, container runtime, local NIM) so the
+        # UI can grey out options that cannot work here. Background, best-effort.
+        from backend import host_capabilities
+        host_capabilities.refresh_async()
         await hec_runtime.start()
         logger.info("Settings loaded; HEC forwarders started")
     except Exception as e:
