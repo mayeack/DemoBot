@@ -221,7 +221,9 @@ def run(check, sched, THEMES, slots, NOW, TZ):
         fake.book(client_id="c1", session_id="S", theme="medadvice", name="Alex Rivera", provider_label="x",
                   start_utc=slots[0].start_utc, duration_minutes=20, timezone_name=TZ)
         _, out = turn()
-        check("already booked: first answer says so instead of offering", out["scheduling"]["state"] == "already_booked" and slots[0].label in out["final_message"])
+        check("already booked: first answer says so in its own bubble, answer untouched",
+              out["scheduling"]["state"] == "already_booked" and slots[0].label in out["scheduling"]["message"]
+              and "final_message" not in out)
 
         # --- degradation ---------------------------------------------------------
         node_mod.store = FakeStore(fail=True)
