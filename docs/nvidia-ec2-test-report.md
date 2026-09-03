@@ -6,6 +6,26 @@
 gating, NeMo Guardrails, NemoClaw (policy layer + sandbox runtime), NVIDIA AI Virtual Assistant blueprint,
 plus the prior-version (Ollama) regression on the same box.
 
+## Summary
+
+- **Every NVIDIA capability in 4.2 works on a g5.xlarge once the deploy tooling is fixed**: `provider=nvidia` on a
+  local Nemotron Nano NIM (all agents, Multi-Agent Mode, reasoning-off contract), host gating, NeMo Guardrails
+  on the NIM judge, NemoClaw policy layer **and** live sandbox runtime, the NVIDIA AI Virtual Assistant
+  blueprint with native tool calling and JSON routing, telemetry under the box's own environment, the public
+  tunnel, the full offline suite on the box, the Ollama switch-back, and an unattended reboot.
+- **Nothing regressed for hosts without a GPU**: the Mac baseline is green (24 suites, observability, NemoClaw
+  policy layer, manual turns), and the prior-version Ollama flows on the box behave as in 4.1 (poisoned model,
+  synthetic PII + Cisco AI Defense block).
+- **Eleven defects were found and fixed** (§0), all but one in the EC2/NemoClaw glue shipped in 4.2.0; the app-side
+  one is the host-capability cache (§0 #10). Four were only findable on real hardware (dpkg lock, NIM memory
+  budget, NGC entitlement behaviour, NemoClaw preset validator).
+- **Cost of the NIM on this instance**: ~26 tok/s per stream and ~20 s app turns versus Ollama's 85 tok/s and
+  ~3 s on the same A10G (bf16, no quantized profile). It is the right box for showing the NVIDIA stack, not for a
+  latency-sensitive demo.
+- **Known non-regressions**: the Splunk gen_ai *metric* tier fails for the box exactly as for the Mac (org-wide
+  metric-series cap since July); spans flow. NemoClaw's OCSF export could not be enabled on this build, so the
+  RUNTIME pill relies on the plugin's `after_tool_call` path.
+
 ## 0. Defects found before any GPU time was spent
 
 | # | Where | Defect | Fix |
@@ -120,3 +140,15 @@ The 3× slower decode is the expected bf16-vs-Q4 gap: the NIM's only A10G profil
 which caps single-stream decode near 30 tok/s. The Ollama model is a 7 GB 4-bit quant. For a demo box that
 wants sub-5-second turns on this instance type, Ollama remains the faster provider; the NIM buys the NVIDIA
 stack (NeMo rails on a local judge, NemoClaw, the blueprint's native tool calling) at ~20 s per turn.
+
+## 6. Reboot test and clean deploy record
+
+| Check | Result | Evidence |
+|---|---|---|
+| `sudo systemctl reboot`; everything must return unattended | **PASS** in 380 s | app `/health` 200 and the public URL 200 at +30 s; collector + tunnel active at +30 s; `demobot-nemoclaw` (oneshot) re-onboarded the sandbox and the forwarder came up at +53 s; the NIM reached `/v1/health/ready` at +343 s (weights + profiling, no restart loop); sandbox phase Ready |
+| Idempotent `fleet.sh deploy 1` re-run on the finished box | __DEPLOY_RERUN__ | |
+
+Timeline of the box: provisioned 12:19 PDT; first bootstrap died on the dpkg lock; second bootstrap ran the NIM
+pull; the NIM's three memory failures, the NGC entitlement, the NemoClaw preset schema and host, and the hung
+exec were all diagnosed and fixed on this box during the run; matrix, switch-back and reboot completed
+by 17:43 PDT. Compute for the day ≈ 5.5 h × $1.006 ≈ $5.5.

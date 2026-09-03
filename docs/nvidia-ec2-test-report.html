@@ -40,6 +40,26 @@ ul,ol{padding-left:1.4rem}
 <strong>Stack under test:</strong> <code>provider=nvidia</code> local NIM (<code>nvidia/nvidia-nemotron-nano-9b-v2</code>), host-capability
 gating, NeMo Guardrails, NemoClaw (policy layer + sandbox runtime), NVIDIA AI Virtual Assistant blueprint,
 plus the prior-version (Ollama) regression on the same box.</p>
+<h2 id="summary">Summary</h2>
+<ul>
+<li><strong>Every NVIDIA capability in 4.2 works on a g5.xlarge once the deploy tooling is fixed</strong>: <code>provider=nvidia</code> on a
+  local Nemotron Nano NIM (all agents, Multi-Agent Mode, reasoning-off contract), host gating, NeMo Guardrails
+  on the NIM judge, NemoClaw policy layer <strong>and</strong> live sandbox runtime, the NVIDIA AI Virtual Assistant
+  blueprint with native tool calling and JSON routing, telemetry under the box's own environment, the public
+  tunnel, the full offline suite on the box, the Ollama switch-back, and an unattended reboot.</li>
+<li><strong>Nothing regressed for hosts without a GPU</strong>: the Mac baseline is green (24 suites, observability, NemoClaw
+  policy layer, manual turns), and the prior-version Ollama flows on the box behave as in 4.1 (poisoned model,
+  synthetic PII + Cisco AI Defense block).</li>
+<li><strong>Eleven defects were found and fixed</strong> (§0), all but one in the EC2/NemoClaw glue shipped in 4.2.0; the app-side
+  one is the host-capability cache (§0 #10). Four were only findable on real hardware (dpkg lock, NIM memory
+  budget, NGC entitlement behaviour, NemoClaw preset validator).</li>
+<li><strong>Cost of the NIM on this instance</strong>: ~26 tok/s per stream and ~20 s app turns versus Ollama's 85 tok/s and
+  ~3 s on the same A10G (bf16, no quantized profile). It is the right box for showing the NVIDIA stack, not for a
+  latency-sensitive demo.</li>
+<li><strong>Known non-regressions</strong>: the Splunk gen_ai <em>metric</em> tier fails for the box exactly as for the Mac (org-wide
+  metric-series cap since July); spans flow. NemoClaw's OCSF export could not be enabled on this build, so the
+  RUNTIME pill relies on the plugin's <code>after_tool_call</code> path.</li>
+</ul>
 <h2 id="0-defects-found-before-any-gpu-time-was-spent">0. Defects found before any GPU time was spent</h2>
 <table>
 <thead>
@@ -385,6 +405,32 @@ turn); the two cannot share the A10G, which is why the bootstrap keeps Ollama un
 which caps single-stream decode near 30 tok/s. The Ollama model is a 7 GB 4-bit quant. For a demo box that
 wants sub-5-second turns on this instance type, Ollama remains the faster provider; the NIM buys the NVIDIA
 stack (NeMo rails on a local judge, NemoClaw, the blueprint's native tool calling) at ~20 s per turn.</p>
+<h2 id="6-reboot-test-and-clean-deploy-record">6. Reboot test and clean deploy record</h2>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Result</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sudo systemctl reboot</code>; everything must return unattended</td>
+<td><strong>PASS</strong> in 380 s</td>
+<td>app <code>/health</code> 200 and the public URL 200 at +30 s; collector + tunnel active at +30 s; <code>demobot-nemoclaw</code> (oneshot) re-onboarded the sandbox and the forwarder came up at +53 s; the NIM reached <code>/v1/health/ready</code> at +343 s (weights + profiling, no restart loop); sandbox phase Ready</td>
+</tr>
+<tr>
+<td>Idempotent <code>fleet.sh deploy 1</code> re-run on the finished box</td>
+<td><strong>DEPLOY_RERUN</strong></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>Timeline of the box: provisioned 12:19 PDT; first bootstrap died on the dpkg lock; second bootstrap ran the NIM
+pull; the NIM's three memory failures, the NGC entitlement, the NemoClaw preset schema and host, and the hung
+exec were all diagnosed and fixed on this box during the run; matrix, switch-back and reboot completed
+by 17:43 PDT. Compute for the day ≈ 5.5 h × $1.006 ≈ $5.5.</p>
 </main>
 <h2>NVIDIA options: local NIM and the NemoClaw runtime</h2>
 <pre># provider=nvidia = a NIM on THIS box (loopback :8000). Default image fits one A10G.
