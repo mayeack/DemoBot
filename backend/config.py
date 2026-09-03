@@ -127,7 +127,7 @@ class Settings(BaseSettings):
 
     # Application
     app_name: str = "DemoBot v4"
-    app_version: str = "4.5.1"
+    app_version: str = "4.6.0"
     environment: str = "development"  # "development" or "production"
     debug: bool = True
 

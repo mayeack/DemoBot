@@ -72,6 +72,9 @@ SCHEDULING = SchedulingProfile(
     resolved="Great — glad it's sorted. If it acts up again, I can get a technician out to you.",
     offer="Want me to schedule a technician visit? Pick an arrival window:",
     choose="Here are the next technician arrival windows:",
+    clarify_slot="Just so I send the technician at the right time — did you mean one of these?",
+    day_unavailable=("I don't have {day} arrival windows — technician visits run {days}. "
+                     "Here are the closest:"),
     ask_name="Got it — whose name should the visit be under?",
     confirmed=(
         "You're all set: a technician will arrive {label}, booked under {name}. "

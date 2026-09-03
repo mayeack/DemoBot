@@ -119,6 +119,37 @@ check("'more times' pages forward", P("can you show me other times?", offered, [
 check("decline after an offer", P("no thanks", offered, []) == {"action": "decline"})
 check("accept after an offer", P("yes please", offered, []) == {"action": "accept", "page": 0})
 check("unrelated text while offering is not scheduling", P("my throat still hurts", offered, []) is None)
+# A named day is BINDING — "Saturday at 8am" must never book Friday/Monday 8:00 AM.
+check("a named day we didn't offer never matches", P("Can you do Saturday at 8am?", offered, []) ==
+      {"action": "clarify_slot", "pref": {"weekday": 5, "minute_of_day": 480}})
+check("the offered day + its time matches exactly",
+      (P("Monday at 8am works", offered, []) or {}).get("slot_id") == slots[0].slot_id)
+check("a day with several offered slots is ambiguous -> clarify",
+      (P("how about Monday?", offered, []) or {}).get("action") == "clarify_slot")
+check("a time we didn't offer -> clarify, never the nearest",
+      (P("can you do 3pm?", offered, []) or {}).get("action") == "clarify_slot")
+check("match_slot refuses a day we didn't offer", sched.match_slot("Saturday at 8am", sd) is None)
+check("match_slot still takes an exact offered time", sched.match_slot("8:20", sd)["slot_id"] == slots[1].slot_id)
+# The preference parser: a bare number is not a time.
+pt = sched.parse_time_preference
+check("preference: day + time", pt("Can you do Saturday at 8am?").as_dict() == {"weekday": 5, "minute_of_day": 480})
+check("preference: day only", pt("how about tuesday").as_dict() == {"weekday": 1, "minute_of_day": None})
+check("preference: time only", pt("does 2:30 pm work").as_dict() == {"weekday": None, "minute_of_day": 870})
+check("preference: 'at 3' means the afternoon", pt("at 3").minute_of_day == 15 * 60)
+check("preference: a bare count is not a time", pt("it's been 2 days now").expressed is False)
+check("preference: no day/time expressed", pt("my throat still hurts").expressed is False)
+check("preference label reads back", pt("Saturday at 8am").label == "Saturday at 8:00 AM")
+# Best-guess candidates for what they asked for.
+sat = sched.TimePreference(weekday=5, minute_of_day=480)
+med_cands = sched.slots_for_preference(med, sat, now_utc=NOW, tz=TZ)
+check("medadvice doesn't book Saturday -> nearest bookable times instead",
+      all(s.weekday != 5 for s in med_cands) and med_cands[0].label == slots[0].label, str(med_cands[0].label))
+tax_cands = sched.slots_for_preference(THEMES["taxadvice"].scheduling, sat, now_utc=NOW, tz=TZ)
+check("taxadvice books Saturday -> Saturday candidates", all(s.weekday == 5 for s in tax_cands) and len(tax_cands) == 3,
+      str([s.label for s in tax_cands]))
+check("business-days label", sched.business_days_label(med) == "Monday to Friday"
+      and sched.business_days_label(THEMES["taxadvice"].scheduling) == "Monday to Saturday")
+
 checked = {"state": "check_resolved", "page": 0, "slots": [], "pending": None, "appointments": []}
 check("'no' to the resolved check -> not_resolved", P("No, not really", checked, []) == {"action": "not_resolved", "page": 0})
 check("'still' to the resolved check -> not_resolved", P("still hurts", checked, []) == {"action": "not_resolved", "page": 0})
