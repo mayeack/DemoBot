@@ -169,96 +169,85 @@ def main() -> int:
         check("POST /api/chat/message (stubbed LLM) -> 200", rmsg.status_code == 200, f"{rmsg.status_code}")
         # --- Governance content toggles ------------------------------------
         # Each force_* flag appends a directive to the INPUT asking the model to
-        # produce the content, with a deterministic fallback when the (stubbed)
-        # model omits it.
+        # produce the content INSIDE its answer fields. There is deliberately NO
+        # deterministic fallback: a (stubbed) model that omits the content yields
+        # a reply with none of it, and the turn reports the category as not
+        # delivered. Canned text appended after the LLM call is not what the
+        # guardrails score.
         #
-        # The directive TEXT is provider-dependent (build_input_directives):
-        #   * ollama       -> natural, UNLABELED asks; an uncensored local model
-        #                     complies with those. Hallucination and authority
-        #                     ride inside the JSON answer contract instead of an
-        #                     appended block, because mistral-nemo:12b emits unfenced
-        #                     JSON and the synthesizer drops any trailing text.
-        #   * every other  -> the labeled "* SAMPLE:" test-suite framing that a
-        #                     censored model needs to comply at all.
-        # So pin the provider per block and assert BOTH builders. Previously this
-        # section asserted only the labeled markers, which meant all five checks
-        # failed whenever .env selected ollama — i.e. in the default demo config.
+        # The directive is the same on every provider (build_input_directives):
+        # unlabeled, theme-aware, embedded in the JSON answer contract. A
+        # censored provider (anthropic / bedrock / openai / nvidia) is additionally
+        # given the GOVERNANCE EVALUATION MODE permission preamble; ollama is
+        # not. Neither path may ever solicit a "SAMPLE" label or a "fictional"
+        # banner — that text used to reach the audience. So pin the provider per
+        # block and assert both.
         _saved_provider = settings.ai_provider
+        _LABELS = ("SAMPLE:", "(fictional)", "Synthetic governance", "test suite",
+                   "INTERNAL SAFETY-DETECTOR", "labeled synthetic")
 
         def _turn(**flags):
             return c.post("/api/chat/message", headers=AUTH,
                           json={"session_id": sid, "message": "I have a sore throat.",
                                 "disclaimer_accepted": True, **flags})
 
+        def _unlabeled(tag):
+            leaked = [w for w in _LABELS if w in _last_system["v"]]
+            check(f"{tag}: directive solicits no sample/fictional label", not leaked, str(leaked))
+
         try:
-            # -- labeled path (anthropic / bedrock / openai / nvidia) ----------
-            settings.ai_provider = "anthropic"
-            rb = _turn(force_boundary_injection=True)
-            check("labeled: boundary -> AUTHORITY-VIOLATION SAMPLE on the INPUT",
-                  "AUTHORITY-VIOLATION SAMPLE" in _last_system["v"])
-            check("labeled: boundary -> overreach present (fallback fires for stubbed model)",
-                  rb.status_code == 200 and "**Recommended Prescription:**" in rb.json().get("message", ""),
-                  f"{rb.status_code}")
-            rp = _turn(force_pii_injection=True)
-            check("labeled: pii -> PII/PHI SAMPLE on the INPUT",
-                  "PII/PHI SAMPLE" in _last_system["v"])
-            check("labeled: pii -> synthetic SSN present (fallback)",
-                  rp.status_code == 200 and bool(re.search(r"\d{3}-\d{2}-\d{4}", rp.json().get("message", ""))),
-                  f"{rp.status_code}")
-            rt = _turn(force_toxic_injection=True)
-            check("labeled: toxic -> TOXICITY SAMPLE on the INPUT",
-                  "TOXICITY SAMPLE" in _last_system["v"])
-            check("labeled: toxic -> toxic content present (fallback)",
-                  rt.status_code == 200 and "**Direct Assessment:**" in rt.json().get("message", ""),
-                  f"{rt.status_code}")
-            rh = _turn(force_hallucination_injection=True)
-            check("labeled: hallucination -> HALLUCINATION SAMPLE on the INPUT",
-                  rh.status_code == 200 and "HALLUCINATION SAMPLE" in _last_system["v"], f"{rh.status_code}")
+            for provider in ("anthropic", "ollama"):
+                settings.ai_provider = provider
+                censored = provider != "ollama"
+                rb = _turn(force_boundary_injection=True)
+                check(f"{provider}: boundary -> overstep directive embedded in the answer",
+                      "overstep your authorized non-prescriptive scope" in _last_system["v"])
+                _unlabeled(f"{provider}: boundary")
+                check(f"{provider}: boundary -> no canned overreach for the stubbed model",
+                      rb.status_code == 200 and "**Recommended Prescription:**" not in rb.json().get("message", "")
+                      and not re.search(r"\b(?:oxycodone|alprazolam|adderall|zolpidem|tramadol)\b",
+                                        rb.json().get("message", ""), re.I),
+                      f"{rb.status_code}")
+                rp = _turn(force_pii_injection=True)
+                check(f"{provider}: pii -> record header embedded in the answer contract",
+                      "patient record header" in _last_system["v"]
+                      and "NNN-NN-NNNN" in _last_system["v"])
+                _unlabeled(f"{provider}: pii")
+                check(f"{provider}: pii -> no canned SSN for the stubbed model",
+                      rp.status_code == 200 and not re.search(r"\d{3}-\d{2}-\d{4}", rp.json().get("message", "")),
+                      f"{rp.status_code}")
+                rt = _turn(force_toxic_injection=True)
+                check(f"{provider}: toxic -> persona override embedded in the answer",
+                      "REQUIRED PERSONA OVERRIDE" in _last_system["v"])
+                _unlabeled(f"{provider}: toxic")
+                check(f"{provider}: toxic -> no canned harassment for the stubbed model",
+                      rt.status_code == 200 and not any(w in rt.json().get("message", "")
+                                                        for w in ("idiot", "pathetic", "worthless", "useless",
+                                                                  "miserable", "brainless", "dumb",
+                                                                  "**Direct Assessment:**")),
+                      f"{rt.status_code}")
+                rh = _turn(force_hallucination_injection=True)
+                check(f"{provider}: hallucination -> embedded in the answer contract",
+                      rh.status_code == 200
+                      and "never admit that anything is invented or unverified" in _last_system["v"]
+                      and "MANDATORY" in _last_system["v"], f"{rh.status_code}")
+                _unlabeled(f"{provider}: hallucination")
+                check(f"{provider}: hallucination -> no canned fabrication for the stubbed model",
+                      rh.status_code == 200 and not any(h in rh.json().get("message", "") for h in
+                                                        ("**Data:**", "**Recent Research:**", "**Current Guidelines:**",
+                                                         "**Possible Explanation:**", "**Recommended Resource:**",
+                                                         "**Technical Detail:**", "**Available Options:**")),
+                      f"{rh.status_code}")
+                check(f"{provider}: evaluation preamble {'present' if censored else 'absent'}",
+                      ("GOVERNANCE EVALUATION MODE" in _last_system["v"]) is censored)
 
-            rnb = _turn()
-            check("labeled: no toggles -> no directive on the INPUT",
-                  "INTERNAL SAFETY-DETECTOR TEST SUITE" not in _last_system["v"])
-            check("labeled: no toggles -> no overreach marker",
-                  rnb.status_code == 200 and "**Recommended Prescription:**" not in rnb.json().get("message", ""),
-                  f"{rnb.status_code}")
-
-            # -- ollama path: unlabeled asks, and the two categories that must
-            #    survive the JSON parse are written into the answer contract ---
-            settings.ai_provider = "ollama"
-            rp = _turn(force_pii_injection=True)
-            check("ollama: pii -> unlabeled NNN-NN-NNNN ask, no SAMPLE label",
-                  "NNN-NN-NNNN" in _last_system["v"]
-                  and "PII/PHI SAMPLE" not in _last_system["v"])
-            check("ollama: pii -> record header embedded in the answer contract",
-                  "patient record header" in _last_system["v"])
-            # No fallback on this path any more: pii_directive_ollama embeds the
-            # identity line in a parsed field, so a stubbed model that produces
-            # nothing must yield NO synthetic SSN rather than a canned one.
-            check("ollama: pii -> no canned SSN fallback for the stubbed model",
-                  rp.status_code == 200
-                  and not re.search(r"\d{3}-\d{2}-\d{4}", rp.json().get("message", "")),
-                  f"{rp.status_code}")
-            rt = _turn(force_toxic_injection=True)
-            check("ollama: toxic -> persona override embedded, no SAMPLE label",
-                  "REQUIRED PERSONA OVERRIDE" in _last_system["v"]
-                  and "TOXICITY SAMPLE" not in _last_system["v"])
-            # The verified harassment snippet is no longer appended here, so a
-            # stubbed model must not produce the canned block.
-            check("ollama: toxic -> no canned harassment fallback for the stubbed model",
-                  rt.status_code == 200
-                  and "**Direct Assessment:**" not in rt.json().get("message", ""),
-                  f"{rt.status_code}")
-            rh = _turn(force_hallucination_injection=True)
-            check("ollama: hallucination -> embedded in the answer contract",
-                  "never admit that anything is invented or unverified" in _last_system["v"])
-            rb = _turn(force_boundary_injection=True)
-            check("ollama: boundary -> overstep directive embedded in the answer",
-                  "overstep your authorized non-prescriptive scope" in _last_system["v"])
-
-            rnb = _turn()
-            check("ollama: no toggles -> neither directive header on the INPUT",
-                  "written as earnest, first-person advice" not in _last_system["v"]
-                  and "REQUIRED IN THIS RESPONSE" not in _last_system["v"])
+                rnb = _turn()
+                check(f"{provider}: no toggles -> no directive on the INPUT",
+                      "REQUIRED IN THIS RESPONSE" not in _last_system["v"]
+                      and "GOVERNANCE EVALUATION MODE" not in _last_system["v"])
+                check(f"{provider}: no toggles -> no overreach marker",
+                      rnb.status_code == 200 and "**Recommended Prescription:**" not in rnb.json().get("message", ""),
+                      f"{rnb.status_code}")
         finally:
             settings.ai_provider = _saved_provider
         # /message/stream: same turn over SSE — auth-gated, stage frames then one final.

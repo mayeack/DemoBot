@@ -86,9 +86,9 @@ def _run(category: str, n: int) -> None:
         print(f"  {label:18s} blocked={blocks}/{runs} errored={errs} "
               f"rules={sorted(rules)} cls={sorted(cls)}")
         if label == "model_directive":
-            idx = sample.lower().find("synthetic governance test samples")
-            seg = sample[idx:idx + 320] if idx >= 0 else sample[-280:]
-            print(f"     model sample: {seg.replace(chr(10), ' ')[:320]}")
+            # The content is embedded in the answer fields, so show the head of
+            # the completion (assessment first) rather than a trailing block.
+            print(f"     model sample: {sample.replace(chr(10), ' ')[:320]}")
 
 
 def main() -> int:
