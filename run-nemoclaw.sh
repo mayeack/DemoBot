@@ -131,8 +131,15 @@ git archive HEAD:openclaw/plugins/demobot-toolguard | tar -x -C "$CTX"
 [ -f "$CTX/index.js" ] || die "plugin not found in git (HEAD:openclaw/plugins/demobot-toolguard)"
 
 if nemoclaw list 2>/dev/null | grep -q "^$SANDBOX\b\|[[:space:]]$SANDBOX[[:space:]]"; then
-  log "sandbox $SANDBOX exists — starting it"
-  nemoclaw "$SANDBOX" start >/dev/null 2>&1 || true
+  # `nemoclaw <sandbox> start` on a sandbox that is ALREADY Ready re-provisions
+  # it (5-10 min on a g5.xlarge, 2026-09-02) and takes the gateway down with
+  # it. Only start when it is not Ready.
+  if openshell sandbox list 2>/dev/null | grep -E "^$SANDBOX[[:space:]]" | grep -q "Ready"; then
+    log "sandbox $SANDBOX exists and is Ready — not restarting it"
+  else
+    log "sandbox $SANDBOX exists — starting it"
+    nemoclaw "$SANDBOX" start >/dev/null 2>&1 || true
+  fi
 else
   log "onboarding sandbox $SANDBOX from nemoclaw/Dockerfile (provider: $PROVIDER)"
   env NEMOCLAW_NON_INTERACTIVE=1 NEMOCLAW_AGENT=openclaw NEMOCLAW_PROVIDER="$PROVIDER" \
