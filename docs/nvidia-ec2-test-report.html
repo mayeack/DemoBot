@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NVIDIA stack test report — DemoBot 4.2.1 on a g5.xlarge EC2 box (+ Mac baseline)</title>
+<style>
+:root{--bg:#ffffff;--fg:#1c1e21;--muted:#5c6370;--border:#d7dbe0;--accent:#0b6bcb;--code-bg:#f5f7f9;--th:#eef2f6;--warn:#8a5a00}
+@media (prefers-color-scheme: dark){:root{--bg:#14171a;--fg:#e6e8ea;--muted:#9aa3ad;--border:#2c3238;--accent:#63a9f0;--code-bg:#1c2126;--th:#1f252b;--warn:#e0b050}}
+*{box-sizing:border-box}
+body{margin:0;padding:2.5rem 1.5rem 5rem;background:var(--bg);color:var(--fg);
+ font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+ -webkit-font-smoothing:antialiased}
+main{max-width:60rem;margin:0 auto}
+h1{font-size:2rem;line-height:1.25;margin:0 0 .5rem;letter-spacing:-.02em}
+h2{font-size:1.4rem;margin:3rem 0 .75rem;padding-bottom:.4rem;border-bottom:1px solid var(--border);letter-spacing:-.01em}
+h3{font-size:1.1rem;margin:2rem 0 .5rem}
+h4{font-size:1rem;margin:1.5rem 0 .4rem;color:var(--muted)}
+p,li{margin:.6rem 0}
+a{color:var(--accent)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.875em;
+ background:var(--code-bg);padding:.15em .4em;border-radius:4px;border:1px solid var(--border)}
+pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:1rem;
+ overflow-x:auto;line-height:1.5}
+pre code{background:none;border:none;padding:0;font-size:.85rem}
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--th);font-weight:600}
+tbody tr:nth-child(even){background:color-mix(in srgb,var(--th) 45%,transparent)}
+blockquote{margin:1.2rem 0;padding:.6rem 1rem;border-left:3px solid var(--warn);
+ background:color-mix(in srgb,var(--warn) 8%,transparent);color:var(--fg)}
+blockquote p{margin:.3rem 0}
+hr{border:none;border-top:1px solid var(--border);margin:2.5rem 0}
+strong{font-weight:650}
+ul,ol{padding-left:1.4rem}
+@media print{body{padding:0}pre,table{page-break-inside:avoid}}
+</style></head>
+<body><main>
+<h1 id="nvidia-stack-test-report-demobot-421-on-a-g5xlarge-ec2-box-mac-baseline">NVIDIA stack test report — DemoBot 4.2.1 on a g5.xlarge EC2 box (+ Mac baseline)</h1>
+<p><strong>Date:</strong> 2026-09-02 · <strong>Branch:</strong> <code>fix/ec2-nim-nemoclaw-bootstrap</code> (from <code>main</code> 112708a, PR #55) ·
+<strong>Account:</strong> personal AWS 177835492378, us-east-1 · <strong>Box:</strong> 1 × g5.xlarge (A10G 24 GB), 150 GB gp3 ·
+<strong>Stack under test:</strong> <code>provider=nvidia</code> local NIM (<code>nvidia/nvidia-nemotron-nano-9b-v2</code>), host-capability
+gating, NeMo Guardrails, NemoClaw (policy layer + sandbox runtime), NVIDIA AI Virtual Assistant blueprint,
+plus the prior-version (Ollama) regression on the same box.</p>
+<h2 id="summary">Summary</h2>
+<ul>
+<li><strong>Every NVIDIA capability in 4.2 works on a g5.xlarge once the deploy tooling is fixed</strong>: <code>provider=nvidia</code> on a
+  local Nemotron Nano NIM (all agents, Multi-Agent Mode, reasoning-off contract), host gating, NeMo Guardrails
+  on the NIM judge, NemoClaw policy layer <strong>and</strong> live sandbox runtime, the NVIDIA AI Virtual Assistant
+  blueprint with native tool calling and JSON routing, telemetry under the box's own environment, the public
+  tunnel, the full offline suite on the box, the Ollama switch-back, and an unattended reboot.</li>
+<li><strong>Nothing regressed for hosts without a GPU</strong>: the Mac baseline is green (24 suites, observability, NemoClaw
+  policy layer, manual turns), and the prior-version Ollama flows on the box behave as in 4.1 (poisoned model,
+  synthetic PII + Cisco AI Defense block).</li>
+<li><strong>Twelve defects were found and fixed</strong> (§0), all but one in the EC2/NemoClaw glue shipped in 4.2.0; the app-side
+  one is the host-capability cache (§0 #10). Four were only findable on real hardware (dpkg lock, NIM memory
+  budget, NGC entitlement behaviour, NemoClaw preset validator).</li>
+<li><strong>Cost of the NIM on this instance</strong>: ~26 tok/s per stream and ~20 s app turns versus Ollama's 85 tok/s and
+  ~3 s on the same A10G (bf16, no quantized profile). It is the right box for showing the NVIDIA stack, not for a
+  latency-sensitive demo.</li>
+<li><strong>Known non-regressions</strong>: the Splunk gen_ai <em>metric</em> tier fails for the box exactly as for the Mac (org-wide
+  metric-series cap since July); spans flow. NemoClaw's OCSF export could not be enabled on this build, so the
+  RUNTIME pill relies on the plugin's <code>after_tool_call</code> path.</li>
+</ul>
+<h2 id="0-defects-found-before-any-gpu-time-was-spent">0. Defects found before any GPU time was spent</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Where</th>
+<th>Defect</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>deploy/ec2/ec2-bootstrap.sh</code></td>
+<td><code>--with-nim</code> prepended <code>AI_PROVIDER=nvidia</code> to <code>SETS</code> in step 9c, <strong>after</strong> step 8 had rewritten <code>.env</code>; a NIM box booted on the Mac's <code>AI_PROVIDER=ollama</code> with the NIM idle</td>
+<td>decision moved to step 3 (right after GPU detection); <code>tests/test_ec2_scripts.py</code> asserts the order</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>deploy/ec2/ec2-bootstrap.sh</code></td>
+<td>fleet drop-in kept ~11 GB of Ollama models resident (<code>OLLAMA_KEEP_ALIVE=60m</code>); the NIM needs ~20 GB of the A10G's 23 GB</td>
+<td>NIM box: <code>OLLAMA_MAX_LOADED_MODELS=1</code>, <code>OLLAMA_KEEP_ALIVE=0</code>, warm-up keeps its own 5-min keep_alive for the placement check, then explicit unload + <code>ollama ps</code> must be empty</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>deploy/ec2/fleet.sh</code>, <code>push-replica.sh</code></td>
+<td>no way to pass <code>--with-nim</code> / <code>--with-nemoclaw</code> through the fleet driver</td>
+<td><code>FLEET_NIM</code>, <code>FLEET_NIM_MODEL</code>, <code>FLEET_NEMOCLAW</code>; push-replica <code>--with-nim [model]</code>, <code>--with-nemoclaw</code>, refusing without the NGC key in <code>.env</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>deploy/ec2/ec2-bootstrap.sh</code></td>
+<td>NemoClaw prerequisites missing (Node ≥ 22.19, <code>binutils</code>); NIM readiness wait 15 min; NIM absent from the final health gate; keys checked 20 min in</td>
+<td>Node 22 + binutils installed; NIM starts <strong>before</strong> the app with a 40-min wait; <code>/v1/health/ready</code> + <code>/v1/models</code> gate <code>BOOTSTRAP_OK</code>; both keys checked in step 0</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>deploy/ec2/ec2-bootstrap.sh</code></td>
+<td>every <code>apt-get</code> raced Ubuntu's <code>unattended-upgrades</code> for the dpkg lock; the first live deploy died at step 9b (<code>Could not get lock /var/lib/dpkg/lock-frontend</code>) ten minutes in</td>
+<td>all apt calls go through <code>apt_get()</code> (waits on the lock via <code>fuser</code>, <code>DPkg::Lock::Timeout=600</code>); found by the live run, guarded by the test</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>deploy/ec2/ec2-bootstrap.sh</code></td>
+<td>the NIM unit ran the image at its defaults; vLLM pre-allocates the hybrid-Mamba SSM state cache for <code>max_num_seqs=256</code> — 33.75 GiB regardless of context — next to 17.35 GiB of weights on the 22 GiB A10G → CUDA OOM, restart loop, never ready (capping the context alone changed nothing)</td>
+<td><code>NIM_MAX_NUM_SEQS=8</code> (~1 GiB SSM cache), <code>NIM_KVCACHE_PERCENT=0.95</code> and <code>NIM_MAX_MODEL_LEN=8192</code> in <code>/etc/demobot-nim.env</code>, passed to the container and overridable (16 sequences at 0.90 still left −0.69 GiB for KV blocks); found live, guarded by the test</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>nemoclaw/policies/demobot-guard.yaml</code>, <code>run-nemoclaw.sh</code></td>
+<td>the network-policy preset predated NemoClaw's schema (<code>Preset must declare preset.name</code>) so the sandbox never got a route to the guard; the sandbox was also pointed at <code>127.0.0.1</code>, which inside the sandbox is the sandbox; and the plugin-config write raced the sandbox start (<code>Connection refused</code>) and silently kept the loopback URL</td>
+<td>preset rewritten in the shipped-preset shape (<code>preset</code> header, <code>network_policies</code>, node + curl binaries, no <code>allowed_ips</code> — the validator refuses it in user presets and pins the <code>--trusted-private-host</code> itself); the sandbox reaches the host at its private IP (the validator also refuses loopback and NemoClaw's managed aliases for user presets); config write waits for phase Ready; bootstrap no longer overrides <code>--host</code></td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>deploy/ec2/ec2-bootstrap.sh</code></td>
+<td>NemoClaw onboarding ran 10 s after <code>enable --now</code> (app not answering yet) and without <code>NVIDIA_INFERENCE_API_KEY</code> in its environment (the key only reached the systemd unit's env file), so it died before installing anything</td>
+<td>wait for <code>/health</code>, export <code>/etc/demobot-nemoclaw.env</code>, then run onboarding exactly as the unit does</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>backend/host_capabilities.py</code></td>
+<td>the capability snapshot was probed once at startup and only re-probed on a manual refresh; on a fresh GPU box the NIM comes up 20+ min after the app, so <code>/api/server-info</code> said "GPU present but no NIM answering" 45 min after the same app was serving turns on it (Settings chips and the model gate read that)</td>
+<td><code>current()</code> returns a snapshot older than the TTL as-is and kicks one background re-probe (stale-while-revalidate); unit test added</td>
+</tr>
+<tr>
+<td>11</td>
+<td><code>tests/observability/verify_nemoclaw_observability.sh</code>, <code>run-nemoclaw.sh</code></td>
+<td>an <code>openshell sandbox exec</code> can hang indefinitely; one Tier 2 check sat for 2 h 51 min on the box and blocked everything queued behind it</td>
+<td>every exec bounded (<code>timeout 60</code> / <code>timeout 90</code>); the script test refuses an unbounded one</td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>run-nemoclaw.sh</code>, <code>deploy/ec2/ec2-bootstrap.sh</code></td>
+<td><code>nemoclaw &lt;sandbox&gt; start</code> on an already-Ready sandbox re-provisioned it (5-10 min, gateway down meanwhile) on every unit run; on a re-deploy the bootstrap's Ollama placement check ran against VRAM the live NIM owns and would fail <code>--gpu require</code></td>
+<td>start only when the phase is not Ready; skip the placement check when a NIM already answers on :8000 (it is the GPU proof)</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>deploy/ec2/fleet.sh</code></td>
+<td><code>next-replica</code> and <code>provision</code> died silently (exit 1, no output) when nothing was claimed yet — empty <code>grep</code> under <code>pipefail</code></td>
+<td><code>\|\| true</code> on the claimed-replicas pipeline; regression test runs the function with stubbed <code>aws</code>/<code>cloudflared</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="1-mac-baseline-no-nvidia-gpu-proves-42-is-inert-without-a-gpu-and-41-flows-still-work">1. Mac baseline (no NVIDIA GPU) — proves 4.2 is inert without a GPU and 4.1 flows still work</h2>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Result</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tests/run_all.sh</code> (24 suites incl. <code>test_api.py</code>, new <code>test_ec2_scripts.py</code>)</td>
+<td><strong>PASS</strong> 24/24</td>
+<td><code>RESULT: 24 passed, 0 failed</code></td>
+</tr>
+<tr>
+<td><code>verify_observability.sh</code> Tier 0-2 (span content, collector, spans + metrics forwarded, 0 export failures)</td>
+<td><strong>PASS</strong> 8/8</td>
+<td>spans 12349→12487, metric points 58881→59598</td>
+</tr>
+<tr>
+<td><code>verify_observability.sh</code> Tier 3 (gen_ai metric MTS in O11y)</td>
+<td><strong>FAIL — pre-existing, org-side</strong></td>
+<td><code>gen_ai.client.token.usage MTS: 0</code>, "org is refusing new gen_ai.client.* MTS creation"; known since 2026-07-29 (metric cardinality cap), span-fed views unaffected</td>
+</tr>
+<tr>
+<td><code>verify_nemoclaw_observability.sh</code></td>
+<td><strong>PASS</strong> 10/10, Tier 2 SKIP</td>
+<td>sandbox not on a podman Mac, by design</td>
+</tr>
+<tr>
+<td><code>GET /api/server-info</code> gating on a GPU-less host</td>
+<td><strong>PASS</strong></td>
+<td><code>provider_nvidia</code> and <code>nim_local</code> disabled with "no NVIDIA GPU on this host" reasons; <code>nemoclaw_runtime</code> disabled (podman)</td>
+</tr>
+<tr>
+<td>Ollama chat turn, default blueprint</td>
+<td><strong>PASS</strong></td>
+<td><code>recommendation</code>, 581 chars; governance <code>provider=ollama model=mistral-nemo:12b blueprint=demobot_multi_agent policy_action=allow</code></td>
+</tr>
+<tr>
+<td>NeMo Guardrails with the Ollama judge (master switch on, drawer toggle on)</td>
+<td><strong>PASS</strong></td>
+<td>benign turn passes (31 s with rails); jailbreak → <code>safety_warning</code> in 4 s, governance <code>guardrail_ids=['nemo_guardrails'] safety_categories=['self check input']</code>; master switch restored</td>
+</tr>
+<tr>
+<td>NVIDIA AI Virtual Assistant blueprint on Ollama (per-request <code>blueprint</code>)</td>
+<td><strong>PASS</strong></td>
+<td>record-lookup turn 642 chars, knowledge-retrieval turn 717 chars; governance <code>blueprint=nvidia_virtual_assistant workflow=demobot_nvidia_virtual_assistant</code>; <code>GET /api/analytics/sessions</code> lists the session; server default unchanged</td>
+</tr>
+</tbody>
+</table>
+<p>Mac manual checks: <code>RESULT: 12 passed, 0 failed</code> (script: <code>mac-checks.sh</code>, restores every setting it flips).</p>
+<h2 id="2-provisioning-the-box-what-actually-happened">2. Provisioning the box (what actually happened)</h2>
+<p><code>fleet.sh provision</code> (count 1, 150 GB gp3) launched <code>i-0196b1ed29d8bfadf</code> as replica 1 → <code>https://medadvice1.yeackbot.com</code>.
+Deploy attempt 1 died at step 9b on the dpkg lock (defect 6). Attempt 2 got through Node install, <code>nvcr.io</code>
+login, the NIM image pull (~10 GB), then the NIM crash-looped three separate ways before serving —
+each one a real finding:</p>
+<ol>
+<li><strong>402 Payment Required</strong> fetching the model files: the NGC org had no NIM product subscription (a legacy
+   84-char key authenticates but the org is not entitled). Fixed on the NVIDIA side by generating a personal
+   <code>nvapi-</code> key through build.nvidia.com's NIM deploy flow, which also attached the entitlement. The deploy gates
+   were relaxed to accept either key shape (<code>docker login</code> is the real check).</li>
+<li><strong>CUDA OOM, 33.75 GiB</strong> in vLLM's profiling pass at the image defaults (defect 7): the hybrid-Mamba SSM
+   state cache for <code>max_num_seqs=256</code>. Capping the context alone changed nothing.</li>
+<li><strong>"No available memory for the cache blocks"</strong> with 16 sequences at 0.90 utilization: vLLM's own profile read
+   weights 16.58 GiB + activation peak 3.90 GiB → KV cache −0.69 GiB. <strong>8 sequences at 0.95 leaves 1.52 GiB of
+   KV cache (6228 blocks)</strong> and the NIM came ready with restart count 0.</li>
+</ol>
+<p>Everything the fixes were written for was observed working on the box: the provider decision was logged before
+the <code>.env</code> rewrite and <code>AI_PROVIDER=nvidia</code> landed; the GPU placement check passed (<code>100% GPU</code>) and the unload
+left <code>0 MiB</code> used before the NIM started; the dpkg-lock wait absorbed <code>unattended-upgrades</code>; Node 22 and
+<code>binutils</code> were installed; NemoClaw onboarding succeeded once it ran through the unit's environment.</p>
+<h2 id="3-ec2-test-matrix-providernvidia-on-the-local-nim">3. EC2 test matrix — <code>provider=nvidia</code> on the local NIM</h2>
+<p>Box: g5.xlarge, A10G 23028 MiB, driver 595.91, NIM <code>nvcr.io/nim/nvidia/nvidia-nemotron-nano-9b-v2:latest</code>
+(profile <code>vllm-bf16-tp1-pp1</code>, engine vLLM 0.10.0, V0 because Mamba), <code>NIM_MAX_NUM_SEQS=8</code>,
+<code>NIM_KVCACHE_PERCENT=0.95</code>, <code>NIM_MAX_MODEL_LEN=8192</code>. Script: <code>ec2-matrix.sh</code> (restores what it flips).</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Check</th>
+<th>Result</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A</td>
+<td>A10G present; Ollama holds nothing; <code>demobot-nim</code> container + all six units active; <code>/v1/health/ready</code> 200; <code>/v1/models</code> serves the Nemotron id; direct completion with <code>enable_thinking=false</code></td>
+<td><strong>PASS</strong> 10/10</td>
+<td>direct NIM: 23 prompt + 200 completion tokens in 8.4 s; VRAM 20.1 GB used</td>
+</tr>
+<tr>
+<td>B</td>
+<td><code>GET /api/settings/ai-provider</code> → provider=nvidia, NIM ready + served</td>
+<td><strong>FAIL → PASS</strong></td>
+<td>first pass: cached "NIM DOWN" from startup (defect 10); re-run on the fixed app: <code>ready=True served=[nemotron-nano-9b-v2]</code>, super greyed</td>
+</tr>
+<tr>
+<td>B</td>
+<td><code>GET /api/server-info</code> gates: <code>provider_nvidia</code> ON, <code>nim_local</code> ON, <code>nemoclaw_runtime</code> ON</td>
+<td><strong>FAIL (nim_local) → PASS</strong></td>
+<td>re-run on the fixed app: all three ON (Docker 29.7 + NVIDIA runtime, Node 22.23)</td>
+</tr>
+<tr>
+<td>G</td>
+<td><code>tests/run_all.sh</code> on the box (24 suites incl. <code>test_api.py</code>, the new script suite)</td>
+<td><strong>PASS</strong> 24/24</td>
+<td><code>RESULT: 24 passed, 0 failed</code></td>
+</tr>
+<tr>
+<td>B</td>
+<td>featured <code>nemotron-3-super-120b-a12b</code> listed but not served (greyed)</td>
+<td><strong>PASS</strong></td>
+<td></td>
+</tr>
+<tr>
+<td>B</td>
+<td>chat turn on the NIM, JSON contract, no <code>&lt;think&gt;</code>; governance <code>provider_name=nvidia model_name=nvidia/nvidia-nemotron-nano-9b-v2 cost 0</code></td>
+<td><strong>PASS</strong></td>
+<td>655 chars in 18.7 s; NIM logged the app's completions</td>
+</tr>
+<tr>
+<td>B</td>
+<td>Multi-Agent Mode turn; <code>NVIDIA_REASONING=True</code> turn still clean (strip works)</td>
+<td><strong>PASS</strong></td>
+<td>817 chars; reasoning-on turn 624 chars, no <code>&lt;think&gt;</code></td>
+</tr>
+<tr>
+<td>C</td>
+<td>NeMo Guardrails with the NIM judge: benign passes; jailbreak → <code>safety_warning</code>, governance <code>guardrail_ids=['nemo_guardrails'] safety_categories=['self check input']</code>; toggle-off path unchanged; <code>tests/test_nemo_guardrails.py</code></td>
+<td><strong>PASS</strong> 5/5</td>
+<td>benign turn with rails 10 s, jailbreak 8 s (Ollama 12B judge on the Mac: 31 s / 4 s)</td>
+</tr>
+<tr>
+<td>C</td>
+<td>overreach output rail</td>
+<td><strong>not exercised</strong></td>
+<td>the prescription prompt was caught earlier by the input rail (<code>self check input</code>), which is the designed order</td>
+</tr>
+<tr>
+<td>E</td>
+<td>NVIDIA AI Virtual Assistant blueprint on the NIM, routing <code>auto</code> (native tools) and <code>json</code>: record-lookup and knowledge-retrieval turns, governance <code>blueprint=nvidia_virtual_assistant</code>, analytics lists the session; <code>test_blueprint_parity.py</code>, <code>test_nvidia_blueprint.py</code></td>
+<td><strong>PASS</strong> 10/10</td>
+<td>record turns 31-32 s, 415-490 chars</td>
+</tr>
+<tr>
+<td>D</td>
+<td>NemoClaw policy layer + sandbox runtime: <code>verify_nemoclaw_observability.sh</code> Tier 0 (policy, Dockerfile, preset, forwarder, unit suite, plugin selftest), Tier 1 (toggle ON blocks an unlisted egress via the policy layer; a forwarded OCSF denial becomes a <code>nemoclaw_guardrails</code> governance event), <strong>Tier 2 live sandbox</strong> (answers status, <code>demobot-toolguard</code> enabled inside, the sandbox reaches DemoBot's guard through the applied <code>demobot-guard</code> policy)</td>
+<td><strong>PASS</strong> 13/13 (after defects 8, 9, 11 and the <code>start</code>-re-provision fix)</td>
+<td>sandbox guard URL <code>http://172.31.7.215:8001</code>; <code>Applied preset: demobot-guard</code>; <code>runtime_supported</code> ON; <code>toolguard/nemoclaw</code> shows <code>demobot-guard</code> among the loaded network policies. First passes failed on exactly the defects listed; one read taken during the script's own <code>nemoclaw gateway restart</code> was transiently 11/13 and was 13/13 three minutes later</td>
+</tr>
+<tr>
+<td>D</td>
+<td>NemoClaw drawer pill reaching <strong>RUNTIME</strong> from a real sandbox denial</td>
+<td><strong>not exercised</strong></td>
+<td>this NemoClaw build refused <code>openshell settings set ocsf_json_enabled</code> (warning logged), so runtime denials are attributed only through the plugin's <code>after_tool_call</code> path, which the plugin selftest and the Tier 1 synthetic feed cover; driving the sandboxed agent into a denied tool call is out of scope here</td>
+</tr>
+<tr>
+<td>I</td>
+<td>performance</td>
+<td>measured</td>
+<td>see §5</td>
+</tr>
+<tr>
+<td>F</td>
+<td>Public URL through the box's own tunnel: <code>/health</code> 200, <code>/app</code> 401 without the key, 200 with it; public API reports provider=nvidia with the NIM ready</td>
+<td><strong>PASS</strong> 4/4</td>
+<td><code>https://medadvice1.yeackbot.com</code> (replica 1's Cloudflare tunnel <code>demobot-1</code>)</td>
+</tr>
+<tr>
+<td>F</td>
+<td>Telemetry under <code>deployment.environment=demobot-ec2-1</code></td>
+<td><strong>PASS (spans)</strong> / <strong>known gap (metrics)</strong></td>
+<td>box collector counters: 510 spans → Splunk APM, 147 → Splunk Agent Observability, 10 503 metric points, no <code>send_failed</code> counters; <code>check_o11y_metadata.py … demobot-ec2-1</code> fails on the gen_ai metric MTS exactly as the Mac does (org-wide metric cap since 2026-07-29, unrelated to 4.2)</td>
+</tr>
+</tbody>
+</table>
+<p>Observation, not a defect: a raw <code>/v1/chat/completions</code> call with <code>enable_thinking=false</code> and no system prompt still
+began with a reasoning-style preamble in plain text ("Okay, the user wants…"); the app's turns, which carry the
+JSON answer contract, came back clean, and no <code>&lt;think&gt;</code> block appeared anywhere.</p>
+<h2 id="4-prior-version-regression-on-the-same-box-switch-back-to-ollama">4. Prior-version regression on the same box: switch back to Ollama</h2>
+<p>Procedure (matrix section H): stop <code>demobot-nim</code>, <code>PUT /api/settings/ai-provider {"provider":"ollama"}</code>, chat turns
+on <code>mistral-nemo:12b</code> and on the poisoned model, the synthetic-PII injection with Cisco AI Defense review, then
+back to <code>provider=nvidia</code> and <code>demobot-nim</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Result</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>First Ollama turn immediately after stopping the NIM</td>
+<td><strong>FAIL (transient) → PASS on re-run</strong></td>
+<td>the turn started at 00:15:51 and never completed within the 5-minute client timeout: Ollama logged <code>llama-server GPU discovery watchdog timed out</code> and <code>disabling mmap … due to host memory pressure</code> while the NIM container's 17 GB of VRAM and its host memory were still being released; the next turn five minutes later worked. Re-run with a 60 s settle and an explicit warm-up: <strong>HTTP 200 in 7.3 s</strong> (343 chars, <code>recommendation</code>), governance <code>provider=ollama model=mistral-nemo:12b action=allow</code>; second turn 2.1 s</td>
+</tr>
+<tr>
+<td>Ollama model placement after the switch</td>
+<td><strong>PASS</strong> — <code>mistral-nemo:12b 8.3 GB 100% GPU</code>, context 8192, 29-minute keep-alive from the app's per-call <code>keep_alive</code> (the daemon default on a NIM box is 0)</td>
+<td><code>ollama ps</code> PROCESSOR column</td>
+</tr>
+<tr>
+<td>Poisoned model <code>mistral-nemo:12b-poisoned</code> selectable and answering</td>
+<td><strong>PASS</strong></td>
+<td>457 chars; governance <code>provider=ollama model=mistral-nemo:12b-poisoned</code></td>
+</tr>
+<tr>
+<td>Synthetic PII injection + Cisco AI Defense review on the poisoned model</td>
+<td><strong>PASS</strong></td>
+<td>reply <code>safety_warning</code>; governance <code>policy_action=block guardrail_ids=['cisco_ai_defense']</code>, categories "PII, Prescriptive Overreach" — the 4.1 guardrail chain is intact under 4.2</td>
+</tr>
+<tr>
+<td>Back to <code>provider=nvidia</code>, NIM restarted and ready</td>
+<td><strong>PASS</strong></td>
+<td>NIM ready after the reload (300 s to <code>/v1/health/ready</code> after <code>systemctl start demobot-nim</code> with all Ollama models unloaded first; next turn 19.8 s); governance <code>provider=nvidia</code> on the next turn</td>
+</tr>
+</tbody>
+</table>
+<p>Operational note for the switch-back: stop the NIM, wait a minute, warm the Ollama model (or accept a slow first
+turn); the two cannot share the A10G, which is why the bootstrap keeps Ollama unloaded on a NIM box.</p>
+<h2 id="5-performance-on-the-same-a10g-g5xlarge">5. Performance on the same A10G (g5.xlarge)</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Ollama <code>mistral-nemo:12b</code> Q4_K_M (4.1 baseline, measured 2026-07-28)</th>
+<th>NIM Nemotron Nano 9B v2 bf16 (this run)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>decode</td>
+<td>85.1 tok/s</td>
+<td><strong>26.3 tok/s</strong> (400 tokens in 15.2 s, wall)</td>
+</tr>
+<tr>
+<td>prefill</td>
+<td>3852 tok/s</td>
+<td>23 prompt + 200 completion tokens in 8.4 s wall (prefill not separable from the API)</td>
+</tr>
+<tr>
+<td>full app turn, local</td>
+<td>~3 s</td>
+<td><strong>~19-23 s</strong> (single-agent 18.7 s; blueprint turns 31-32 s)</td>
+</tr>
+<tr>
+<td>NeMo Guardrails judge overhead</td>
+<td>+10-15 s on the 12B (napkin)</td>
+<td>benign turn with rails 10 s total, jailbreak verdict 8 s</td>
+</tr>
+<tr>
+<td>VRAM</td>
+<td>11.1 GB (both models resident)</td>
+<td>20.4 GB (weights 16.6 GB + SSM cache + 1.5 GB KV)</td>
+</tr>
+</tbody>
+</table>
+<p>The 3× slower decode is the expected bf16-vs-Q4 gap: the NIM's only A10G profile is <code>vllm-bf16-tp1-pp1</code>
+(no quantized profile for this card), so every token streams 16.6 GB of weights through the A10G's 600 GB/s,
+which caps single-stream decode near 30 tok/s. The Ollama model is a 7 GB 4-bit quant. For a demo box that
+wants sub-5-second turns on this instance type, Ollama remains the faster provider; the NIM buys the NVIDIA
+stack (NeMo rails on a local judge, NemoClaw, the blueprint's native tool calling) at ~20 s per turn.</p>
+<h2 id="6-reboot-test-and-clean-deploy-record">6. Reboot test and clean deploy record</h2>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Result</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sudo systemctl reboot</code>; everything must return unattended</td>
+<td><strong>PASS</strong> in 380 s</td>
+<td>app <code>/health</code> 200 and the public URL 200 at +30 s; collector + tunnel active at +30 s; <code>demobot-nemoclaw</code> (oneshot) re-onboarded the sandbox and the forwarder came up at +53 s; the NIM reached <code>/v1/health/ready</code> at +343 s (weights + profiling, no restart loop); sandbox phase Ready</td>
+</tr>
+<tr>
+<td>Idempotent <code>fleet.sh deploy 1</code> re-run on the finished box</td>
+<td><strong>PASS — <code>BOOTSTRAP_OK</code> in 3 min</strong></td>
+<td>first attempt tripped the Ollama placement gate because the live NIM owns the VRAM (defect 12, fixed: the check is skipped when a NIM already serves); the re-run logged <code>a NIM already serves on :8000 — skipping the Ollama placement check</code>, re-ran NemoClaw onboarding against the Ready sandbox without re-provisioning it, and the health gate read app 200, NIM <code>/v1/health/ready</code> 200, <code>/v1/models</code> 200, both NemoClaw units active, public URL 200, GPU 20 077 MiB of 23 028 MiB</td>
+</tr>
+</tbody>
+</table>
+<p>Timeline of the box: provisioned 12:19 PDT; first bootstrap died on the dpkg lock; second bootstrap ran the NIM
+pull; the NIM's three memory failures, the NGC entitlement, the NemoClaw preset schema and host, and the hung
+exec were all diagnosed and fixed on this box during the run; matrix, switch-back and reboot completed
+by 17:43 PDT. Compute for the day ≈ 5.5 h × $1.006 ≈ $5.5.</p>
+</main>
+<h2>NVIDIA options: local NIM and the NemoClaw runtime</h2>
+<pre># provider=nvidia = a NIM on THIS box (loopback :8000). Default image fits one A10G.
+./ec2-bootstrap.sh --with-nim                                   # nvidia/nvidia-nemotron-nano-9b-v2
+./ec2-bootstrap.sh --with-nim nvidia/nemotron-3-super-120b-a12b # needs 8x H100 (p5-class), not g5
+# NemoClaw runtime (OpenClaw in an OpenShell sandbox, governed by /api/toolguard)
+./ec2-bootstrap.sh --with-nemoclaw</pre>
+<p><code>--with-nim</code> installs Docker + the NVIDIA Container Toolkit (the DL base AMI has both), logs into <code>nvcr.io</code> with <code>NGC_API_KEY</code> (from <code>.env</code> or the payload overrides), runs <code>demobot-nim.service</code> and sets <code>AI_PROVIDER=nvidia</code>, <code>NVIDIA_BASE_URL</code>, <code>NVIDIA_MODEL</code> (an explicit <code>--set</code> still wins). First start pulls the image + weights (minutes). <code>--with-nemoclaw</code> runs <code>run-nemoclaw.sh</code> once (needs <code>NVIDIA_INFERENCE_API_KEY</code> in <code>.env</code> for the sandbox's provider) and installs <code>demobot-nemoclaw</code> + <code>demobot-nemoclaw-forwarder</code> units — NemoClaw restarts nothing after a reboot by itself. Details: <code>docs/nvidia-integration.md</code>.</p>
+</body></html>

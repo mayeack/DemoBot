@@ -33,6 +33,7 @@ NEMOCLAW_MIN_NODE = (22, 19)
 _lock = threading.Lock()
 _cache: Dict[str, Any] = {}
 _cached_at = 0.0
+_refreshing = False   # one background re-probe in flight at a time
 
 
 # --------------------------------------------------------------------------- probes
@@ -203,17 +204,35 @@ def detect(force: bool = False) -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - detection must never break a request
         logger.exception("host capability detection failed")
         result = {"capabilities": {"error": str(exc)}, "gated": {}}
+    global _refreshing
     with _lock:
         _cache.clear()
         _cache.update(result)
         _cached_at = time.monotonic()
+        _refreshing = False
     return dict(result)
 
 
 def current() -> Dict[str, Any]:
-    """The cached snapshot without probing (empty before the first detect)."""
+    """The cached snapshot, never probing on the caller's thread.
+
+    Stale-while-revalidate: a snapshot older than ``_CACHE_TTL`` kicks off ONE
+    background re-probe and is returned as-is. Without this the cache only ever
+    changed at startup or on a manual refresh, so a NIM that came up after the
+    app — the normal order on a fresh GPU box, where the image pull takes 20+
+    minutes — left ``/api/server-info`` saying "no NIM answering" 45 minutes
+    after the same app was serving turns on it (EC2 replica 1, 2026-09-02).
+    """
+    global _refreshing
     with _lock:
-        return dict(_cache)
+        snap = dict(_cache)
+        stale = bool(_cache) and (time.monotonic() - _cached_at) >= _CACHE_TTL
+        kick = stale and not _refreshing
+        if kick:
+            _refreshing = True
+    if kick:
+        refresh_async()
+    return snap
 
 
 def refresh_async() -> None:

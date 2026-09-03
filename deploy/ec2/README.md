@@ -369,3 +369,50 @@ once (needs `NVIDIA_INFERENCE_API_KEY` in `.env` for the sandbox's provider) and
 installs `demobot-nemoclaw` + `demobot-nemoclaw-forwarder` units — NemoClaw
 restarts nothing after a reboot by itself. Units: `demobot-nim`,
 `demobot-nemoclaw`, `demobot-nemoclaw-forwarder`. Details: `docs/nvidia-integration.md`.
+
+### Fleet path (the normal way)
+
+```bash
+export FLEET_NIM=1 FLEET_NEMOCLAW=1 FLEET_VOLUME_GB=150   # + the usual FLEET_* config
+./deploy/ec2/fleet.sh preflight     # confirms NGC_API_KEY / NVIDIA_INFERENCE_API_KEY are in this Mac's .env
+./deploy/ec2/fleet.sh provision && ./deploy/ec2/fleet.sh deploy
+```
+
+`fleet.sh deploy` forwards `--with-nim [FLEET_NIM_MODEL]` and `--with-nemoclaw` to
+`push-replica.sh`, which refuses to ship without the matching key in `.env`
+(a personal `nvapi-…` key or a legacy NGC key; the keys ride in the payload,
+never on argv, and `docker login nvcr.io` on the box is the real validation). Expect 25-45 minutes: the
+NIM image (~10 GB) and weights (~18 GB) are pulled on first start, so the box
+wants a 150 GB volume.
+
+### What a NIM box does differently (fixed in 4.2.1)
+
+- **The provider decision is made in step 3, before step 8 rewrites `.env`.** In
+  4.2.0 the `AI_PROVIDER=nvidia` override was prepended *after* the rewrite, so a
+  `--with-nim` box quietly booted on whatever `AI_PROVIDER` the Mac shipped.
+  `tests/test_ec2_scripts.py` asserts the order.
+- **Ollama holds no VRAM.** The Nemotron Nano NIM needs ~20 GB of the A10G's
+  23 GB, and the standard fleet drop-in keeps ~11 GB of Ollama models resident.
+  A NIM box gets `OLLAMA_MAX_LOADED_MODELS=1`, `OLLAMA_KEEP_ALIVE=0`; the GPU
+  warm-up check still runs (with its own 5-minute `keep_alive`), then the model
+  is unloaded and `ollama ps` must be empty before `demobot-nim` starts. Ollama
+  stays installed with every model pulled, so the box can switch back — **stop
+  `demobot-nim` first**, or the Ollama model lands split CPU/GPU.
+- **The NIM starts before the app** and is waited for (up to 40 minutes, progress
+  every 30 s), so the app's startup catalog probe sees NIM READY. The final
+  health gate includes `/v1/health/ready` and `/v1/models`: `BOOTSTRAP_OK` on a
+  NIM box means the NIM is serving.
+- **The NIM runs with 8 concurrent sequences, 0.95 GPU-memory utilization
+  and 8192 tokens** (`NIM_MAX_NUM_SEQS`, `NIM_KVCACHE_PERCENT`, `NIM_MAX_MODEL_LEN`
+  in `/etc/demobot-nim.env`, passed to the container; set any of them in the
+  bootstrap's environment to change it).
+  Nemotron Nano is a hybrid Mamba model: vLLM pre-allocates its SSM state cache
+  for `max_num_seqs` (default 256), a flat 33.75 GiB that cannot sit next to
+  17 GiB of weights on a 22 GiB A10G — the container OOM-loops without ever
+  becoming ready, and the context cap alone does not help. vLLM's own profile
+  line (`reserved for KV Cache is …GiB`) is the number to watch: 16 sequences at
+  0.90 still left −0.69 GiB; 8 at 0.95 leaves ~1.5 GiB, ample for a model with
+  only a few attention layers. 8192 is what the demo runs Ollama at.
+- **NemoClaw prerequisites** (`binutils` for the installer's `strings` check,
+  Node ≥ 22.19 from NodeSource) are installed by `--with-nemoclaw`; both keys are
+  checked in the payload preflight (step 0), not twenty minutes in.

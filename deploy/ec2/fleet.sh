@@ -22,6 +22,12 @@
 #   FLEET_VOLUME_GB=100  FLEET_SSH_KEY=~/.ssh/demobot_ec2  FLEET_USER=ubuntu
 #   FLEET_HOSTNAME=medadvice.yeackbot.com   (box N serves medadviceN.yeackbot.com)
 #   FLEET_PARALLEL=4                        (concurrent bootstraps during deploy)
+#   FLEET_NIM=0        1 = every box runs a LOCAL NVIDIA NIM and serves provider=nvidia
+#                      (bootstrap --with-nim; needs NGC_API_KEY in this Mac's .env)
+#   FLEET_NIM_MODEL=   optional NIM image id (default nvidia/nvidia-nemotron-nano-9b-v2)
+#   FLEET_NEMOCLAW=0   1 = also run the NVIDIA NemoClaw sandbox runtime
+#                      (bootstrap --with-nemoclaw; needs NVIDIA_INFERENCE_API_KEY in .env)
+#   A NIM box wants FLEET_VOLUME_GB=150: image + weights (~30 GB) on top of Ollama's models.
 #
 # COST: g5.xlarge is ~$1.006/hr each in us-east-1 — about $742/month per box if
 # left running. Use `stop` (or deploy/ec2/schedule.sh) aggressively; stopped
@@ -41,6 +47,9 @@ SSH_KEY="${FLEET_SSH_KEY:-$HOME/.ssh/demobot_ec2}"
 SSH_USER="${FLEET_USER:-ubuntu}"
 HOSTNAME_="${FLEET_HOSTNAME:-medadvice.yeackbot.com}"
 PARALLEL="${FLEET_PARALLEL:-4}"
+NIM="${FLEET_NIM:-0}"
+NIM_MODEL="${FLEET_NIM_MODEL:-}"
+NEMOCLAW="${FLEET_NEMOCLAW:-0}"
 TAG_KEY="demobot-fleet"
 
 # G and VT On-Demand vCPU quota. g5.xlarge is 4 vCPU each.
@@ -105,7 +114,10 @@ claimed_replicas() {
       --filters "Name=tag:$TAG_KEY,Values=true" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
       --query "Reservations[].Instances[].Tags[?Key=='Replica'].Value" --output text 2>/dev/null | tr '\t' '\n'
     cloudflared tunnel list 2>/dev/null | grep -oE 'demobot-[0-9]+' | grep -oE '[0-9]+$'
-  } | grep -E '^[0-9]+$' | sort -un
+  } | grep -E '^[0-9]+$' | sort -un || true
+  # `|| true`: with nothing claimed yet (first box, or after a full teardown)
+  # grep matches nothing and exits 1, which under pipefail + set -e silently
+  # killed next-replica AND provision with no message. Seen 2026-09-02.
 }
 
 # Lowest unused replica number, counting up from 1.
@@ -197,6 +209,21 @@ cmd_preflight() {
   [ -f "$SSH_KEY" ] && echo "  ssh key: $SSH_KEY" || warn "ssh private key $SSH_KEY not found"
   [ -f "$HOME/.cloudflared/cert.pem" ] && echo "  cloudflare cert.pem present" \
     || warn "no ~/.cloudflared/cert.pem — 'cloudflared tunnel login' is needed to create per-box tunnels"
+
+  if [ "$NIM" = 1 ] || [ "$NEMOCLAW" = 1 ]; then
+    log "NVIDIA options"
+    if [ "$NIM" = 1 ]; then
+      echo "  local NIM: ${NIM_MODEL:-nvidia/nvidia-nemotron-nano-9b-v2} (provider=nvidia on every box)"
+      grep -qE '^NGC_API_KEY=[^[:space:]]{20,}$' "$REPO/.env" && echo "  NGC_API_KEY: present in .env" \
+        || warn "NGC_API_KEY missing from $REPO/.env — deploy will refuse (free key, personal or legacy: https://org.ngc.nvidia.com/setup/api-key)"
+      [ "$VOLUME_GB" -ge 150 ] 2>/dev/null || warn "FLEET_VOLUME_GB=$VOLUME_GB — a NIM box wants 150 (image + weights ~30 GB on top of Ollama's models)"
+    fi
+    if [ "$NEMOCLAW" = 1 ]; then
+      echo "  NemoClaw runtime: yes"
+      grep -qE '^NVIDIA_INFERENCE_API_KEY=[^[:space:]]{20,}$' "$REPO/.env" && echo "  NVIDIA_INFERENCE_API_KEY: present in .env" \
+        || warn "NVIDIA_INFERENCE_API_KEY missing from $REPO/.env — deploy will refuse"
+    fi
+  fi
 }
 
 cmd_provision() {
@@ -259,10 +286,15 @@ deploy_one() {
     done
     [ "$ok" = true ] || { echo "ssh never came up on $ip"; exit 1; }
 
+    local -a extra=()
+    if [ "$NIM" = 1 ]; then
+      extra+=(--with-nim); [ -n "$NIM_MODEL" ] && extra+=("$NIM_MODEL")
+    fi
+    [ "$NEMOCLAW" = 1 ] && extra+=(--with-nemoclaw)
     "$REPO/deploy/ec2/push-replica.sh" \
         --host "$ip" --user "$SSH_USER" --port 22 --key "$SSH_KEY" \
         --replica "$replica" --own-tunnel --hostname "$HOSTNAME_" \
-        --gpu require
+        --gpu require "${extra[@]}"
   } >"$logfile" 2>&1
 }
 
@@ -296,7 +328,7 @@ cmd_deploy() {
     done
     running=$(jobs -pr | wc -l | tr -d ' ')
 
-    log "deploying replica $replica -> $ip  (log: $logdir/$replica.log)"
+    log "deploying replica $replica -> $ip  (log: $logdir/$replica.log)$([ "$NIM" = 1 ] && echo '  [+NIM]')$([ "$NEMOCLAW" = 1 ] && echo '  [+NemoClaw]')"
     deploy_one "$replica" "$ip" "$logdir/$replica.log" &
     pids+=($!); reps+=("$replica"); logs+=("$logdir/$replica.log")
     running=$((running + 1))
