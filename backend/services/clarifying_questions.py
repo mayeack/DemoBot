@@ -104,6 +104,9 @@ class ClarifyingQuestionsService:
         questions_count = sum(
             1 for msg in conversation_history
             if msg.get("role") == "assistant" and "?" in msg.get("content", "")
+            # The scheduling offer is a question by design; it must not spend
+            # the clarifier's budget (docs/scheduling.md).
+            and not (msg.get("metadata") or {}).get("scheduling")
         )
 
         # Don't ask if we've reached max

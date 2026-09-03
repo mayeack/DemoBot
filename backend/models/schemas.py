@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 from enum import Enum
 
@@ -28,6 +28,14 @@ class ChatMessage(BaseModel):
     type: Optional[MessageType] = MessageType.USER_MESSAGE
     timestamp: Optional[datetime] = None
 
+class SchedulingAction(BaseModel):
+    """A structured scheduling action sent when the user clicks a chip in the
+    chat (docs/scheduling.md). It wins over the typed-text intent parser."""
+    action: Literal["book", "accept", "more_times", "decline", "list", "cancel", "reschedule", "choose_slot"]
+    slot_id: Optional[str] = Field(default=None, max_length=32)
+    appointment_id: Optional[str] = Field(default=None, max_length=64)
+    page: int = Field(default=0, ge=0, le=50)
+
 class ChatRequest(BaseModel):
     session_id: str
     message: str
@@ -43,6 +51,13 @@ class ChatRequest(BaseModel):
     agent_control_review: Optional[bool] = None  # Submit the response to Galileo Agent Control for evaluation against the console's Controls
     nemo_guardrails_review: Optional[bool] = None  # Run NVIDIA NeMo Guardrails input rails on the prompt and output rails on the answer
     blueprint: Optional[str] = None  # Agentic architecture for this turn (demobot_multi_agent | nvidia_virtual_assistant); None = the server default
+    # Appointment scheduling (docs/scheduling.md): the browser's stable id (the
+    # owner of its bookings — a partition key, never authorization), its IANA
+    # zone for slot labels, and a structured action when a scheduling chip was
+    # clicked. Without client_id the scheduling nodes stay inert.
+    client_id: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9_.:-]{1,64}$")
+    client_tz: Optional[str] = Field(default=None, max_length=64)
+    scheduling_action: Optional[SchedulingAction] = None
 
 class ChatResponse(BaseModel):
     session_id: str
@@ -51,6 +66,9 @@ class ChatResponse(BaseModel):
     severity: Optional[SeverityLevel] = None
     escalated: bool = False
     timestamp: datetime
+    # Structured scheduling payload (state, slots, appointments, the chips to
+    # render as `actions`); None when the turn had nothing to schedule.
+    scheduling: Optional[Dict[str, Any]] = None
 
 # Governance Log Models
 class GenAILogEntry(BaseModel):

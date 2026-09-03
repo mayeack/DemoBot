@@ -41,6 +41,11 @@ def _route_after_intake(state: Dict[str, Any]) -> str:
     """
     if state.get("terminal"):
         return "end"
+    # A scheduling-intent turn has nothing for the domain specialists: the
+    # synthesizer answers (with the scheduling directive) and the scheduling
+    # agent follows in the shared POST chain (docs/scheduling.md).
+    if (state.get("scheduling_context") or {}).get("action"):
+        return "synthesizer"
     return "coordinator" if state.get("multi_agent_mode") is True else "synthesizer"
 
 

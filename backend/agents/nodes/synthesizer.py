@@ -107,6 +107,9 @@ def make_synthesizer_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
         if findings:
             system_prompt = f"{system_prompt}\n\nSPECIALIST FINDINGS:\n{findings}"
         system_prompt = system_prompt + directive_text
+        # Scheduling-intent turns (docs/scheduling.md): the full context in
+        # single-agent mode, a hand-off note in Multi-Agent Mode; empty otherwise.
+        system_prompt = system_prompt + (state.get("scheduling_directive") or "")
         provider = settings.ai_provider
 
         agent_start = time.perf_counter()

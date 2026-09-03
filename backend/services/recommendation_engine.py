@@ -2069,7 +2069,12 @@ Put ALL customer-facing text in "reply" -- do not add commentary outside the JSO
         agent_control_review: Optional[bool] = None,
         nemo_guardrails_review: Optional[bool] = None,  # kwargs parity; NeMo rails are graph nodes (no legacy seat)
         blueprint: Optional[str] = None,  # kwargs parity; the legacy engine predates blueprints
-        enduser_id: Optional[str] = None
+        enduser_id: Optional[str] = None,
+        # kwargs parity; appointment scheduling lives in the agentic graph
+        # (backend/agents/nodes/scheduling.py) and has no legacy seat.
+        client_id: Optional[str] = None,
+        client_tz: Optional[str] = None,
+        scheduling_action: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Process user message and generate response

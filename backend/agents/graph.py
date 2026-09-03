@@ -149,6 +149,9 @@ def _build_turn_state(
     service_name: Optional[str] = None,
     deployment_id: Optional[str] = None,
     blueprint: Optional[str] = None,
+    client_id: Optional[str] = None,
+    client_tz: Optional[str] = None,
+    scheduling_action: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build the initial workflow state shared by run_turn / run_turn_stream."""
     bp = get_blueprint(blueprint or active_blueprint_key())
@@ -170,6 +173,9 @@ def _build_turn_state(
         nemo_guardrails_review=nemo_guardrails_review,
         service_name=service_name,
         deployment_id=deployment_id,
+        client_id=client_id,
+        client_tz=client_tz,
+        scheduling_action=scheduling_action,
     )
     state["request_id"] = str(uuid.uuid4())
     state["trace_id"] = str(uuid.uuid4())
@@ -201,6 +207,9 @@ def run_turn(
     service_name: Optional[str] = None,
     deployment_id: Optional[str] = None,
     blueprint: Optional[str] = None,
+    client_id: Optional[str] = None,
+    client_tz: Optional[str] = None,
+    scheduling_action: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Run one chat turn through the multi-agent workflow.
 
@@ -227,6 +236,9 @@ def run_turn(
         service_name=service_name,
         deployment_id=deployment_id,
         blueprint=blueprint,
+        client_id=client_id,
+        client_tz=client_tz,
+        scheduling_action=scheduling_action,
     )
     runner = get_agentic_runner(state["blueprint"])
     request_id = state["request_id"]
