@@ -69,14 +69,17 @@ Box: g5.xlarge, A10G 23028 MiB, driver 595.91, NIM `nvcr.io/nim/nvidia/nvidia-ne
 | # | Check | Result | Evidence |
 |---|---|---|---|
 | A | A10G present; Ollama holds nothing; `demobot-nim` container + all six units active; `/v1/health/ready` 200; `/v1/models` serves the Nemotron id; direct completion with `enable_thinking=false` | **PASS** 10/10 | direct NIM: 23 prompt + 200 completion tokens in 8.4 s; VRAM 20.1 GB used |
-| B | `GET /api/settings/ai-provider` → provider=nvidia, NIM ready + served | **FAIL → fixed** | cached "NIM DOWN" from startup (defect 10); the payload recovered after the first settings write; app-side fix committed |
-| B | `GET /api/server-info` gates: `provider_nvidia` ON, `nim_local` ON, `nemoclaw_runtime` ON | **FAIL (nim_local) → fixed** | same cache; `nemoclaw_runtime` ON (Docker 29.7 + NVIDIA runtime, Node 22.23) |
+| B | `GET /api/settings/ai-provider` → provider=nvidia, NIM ready + served | **FAIL → PASS** | first pass: cached "NIM DOWN" from startup (defect 10); re-run on the fixed app: `ready=True served=[nemotron-nano-9b-v2]`, super greyed |
+| B | `GET /api/server-info` gates: `provider_nvidia` ON, `nim_local` ON, `nemoclaw_runtime` ON | **FAIL (nim_local) → PASS** | re-run on the fixed app: all three ON (Docker 29.7 + NVIDIA runtime, Node 22.23) |
+| G | `tests/run_all.sh` on the box (24 suites incl. `test_api.py`, the new script suite) | **PASS** 24/24 | `RESULT: 24 passed, 0 failed` |
 | B | featured `nemotron-3-super-120b-a12b` listed but not served (greyed) | **PASS** | |
 | B | chat turn on the NIM, JSON contract, no `<think>`; governance `provider_name=nvidia model_name=nvidia/nvidia-nemotron-nano-9b-v2 cost 0` | **PASS** | 655 chars in 18.7 s; NIM logged the app's completions |
 | B | Multi-Agent Mode turn; `NVIDIA_REASONING=True` turn still clean (strip works) | **PASS** | 817 chars; reasoning-on turn 624 chars, no `<think>` |
 | C | NeMo Guardrails with the NIM judge: benign passes; jailbreak → `safety_warning`, governance `guardrail_ids=['nemo_guardrails'] safety_categories=['self check input']`; toggle-off path unchanged; `tests/test_nemo_guardrails.py` | **PASS** 5/5 | benign turn with rails 10 s, jailbreak 8 s (Ollama 12B judge on the Mac: 31 s / 4 s) |
 | C | overreach output rail | **not exercised** | the prescription prompt was caught earlier by the input rail (`self check input`), which is the designed order |
 | E | NVIDIA AI Virtual Assistant blueprint on the NIM, routing `auto` (native tools) and `json`: record-lookup and knowledge-retrieval turns, governance `blueprint=nvidia_virtual_assistant`, analytics lists the session; `test_blueprint_parity.py`, `test_nvidia_blueprint.py` | **PASS** 10/10 | record turns 31-32 s, 415-490 chars |
+| D | NemoClaw policy layer + sandbox runtime: `verify_nemoclaw_observability.sh` Tier 0 (policy, Dockerfile, preset, forwarder, unit suite, plugin selftest), Tier 1 (toggle ON blocks an unlisted egress via the policy layer; a forwarded OCSF denial becomes a `nemoclaw_guardrails` governance event), **Tier 2 live sandbox** (answers status, `demobot-toolguard` enabled inside, the sandbox reaches DemoBot's guard through the applied `demobot-guard` policy) | **PASS** 13/13 (after defects 8, 9, 11 and the `start`-re-provision fix) | sandbox guard URL `http://172.31.7.215:8001`; `Applied preset: demobot-guard`; `runtime_supported` ON; `toolguard/nemoclaw` shows `demobot-guard` among the loaded network policies. First passes failed on exactly the defects listed; one read taken during the script's own `nemoclaw gateway restart` was transiently 11/13 and was 13/13 three minutes later |
+| D | NemoClaw drawer pill reaching **RUNTIME** from a real sandbox denial | **not exercised** | this NemoClaw build refused `openshell settings set ocsf_json_enabled` (warning logged), so runtime denials are attributed only through the plugin's `after_tool_call` path, which the plugin selftest and the Tier 1 synthetic feed cover; driving the sandboxed agent into a denied tool call is out of scope here |
 | I | performance | measured | see §5 |
 | F | Public URL through the box's own tunnel: `/health` 200, `/app` 401 without the key, 200 with it; public API reports provider=nvidia with the NIM ready | **PASS** 4/4 | `https://medadvice1.yeackbot.com` (replica 1's Cloudflare tunnel `demobot-1`) |
 | F | Telemetry under `deployment.environment=demobot-ec2-1` | **PASS (spans)** / **known gap (metrics)** | box collector counters: 510 spans → Splunk APM, 147 → Splunk Agent Observability, 10 503 metric points, no `send_failed` counters; `check_o11y_metadata.py … demobot-ec2-1` fails on the gen_ai metric MTS exactly as the Mac does (org-wide metric cap since 2026-07-29, unrelated to 4.2) |
@@ -84,3 +87,19 @@ Box: g5.xlarge, A10G 23028 MiB, driver 595.91, NIM `nvcr.io/nim/nvidia/nvidia-ne
 Observation, not a defect: a raw `/v1/chat/completions` call with `enable_thinking=false` and no system prompt still
 began with a reasoning-style preamble in plain text ("Okay, the user wants…"); the app's turns, which carry the
 JSON answer contract, came back clean, and no `<think>` block appeared anywhere.
+
+## 5. Performance on the same A10G (g5.xlarge)
+
+| | Ollama `mistral-nemo:12b` Q4_K_M (4.1 baseline, measured 2026-07-28) | NIM Nemotron Nano 9B v2 bf16 (this run) |
+|---|---|---|
+| decode | 85.1 tok/s | **26.3 tok/s** (400 tokens in 15.2 s, wall) |
+| prefill | 3852 tok/s | 23 prompt + 200 completion tokens in 8.4 s wall (prefill not separable from the API) |
+| full app turn, local | ~3 s | **~19-23 s** (single-agent 18.7 s; blueprint turns 31-32 s) |
+| NeMo Guardrails judge overhead | +10-15 s on the 12B (napkin) | benign turn with rails 10 s total, jailbreak verdict 8 s |
+| VRAM | 11.1 GB (both models resident) | 20.4 GB (weights 16.6 GB + SSM cache + 1.5 GB KV) |
+
+The 3× slower decode is the expected bf16-vs-Q4 gap: the NIM's only A10G profile is `vllm-bf16-tp1-pp1`
+(no quantized profile for this card), so every token streams 16.6 GB of weights through the A10G's 600 GB/s,
+which caps single-stream decode near 30 tok/s. The Ollama model is a 7 GB 4-bit quant. For a demo box that
+wants sub-5-second turns on this instance type, Ollama remains the faster provider; the NIM buys the NVIDIA
+stack (NeMo rails on a local judge, NemoClaw, the blueprint's native tool calling) at ~20 s per turn.

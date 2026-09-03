@@ -215,14 +215,20 @@ left <code>0 MiB</code> used before the NIM started; the dpkg-lock wait absorbed
 <tr>
 <td>B</td>
 <td><code>GET /api/settings/ai-provider</code> → provider=nvidia, NIM ready + served</td>
-<td><strong>FAIL → fixed</strong></td>
-<td>cached "NIM DOWN" from startup (defect 10); the payload recovered after the first settings write; app-side fix committed</td>
+<td><strong>FAIL → PASS</strong></td>
+<td>first pass: cached "NIM DOWN" from startup (defect 10); re-run on the fixed app: <code>ready=True served=[nemotron-nano-9b-v2]</code>, super greyed</td>
 </tr>
 <tr>
 <td>B</td>
 <td><code>GET /api/server-info</code> gates: <code>provider_nvidia</code> ON, <code>nim_local</code> ON, <code>nemoclaw_runtime</code> ON</td>
-<td><strong>FAIL (nim_local) → fixed</strong></td>
-<td>same cache; <code>nemoclaw_runtime</code> ON (Docker 29.7 + NVIDIA runtime, Node 22.23)</td>
+<td><strong>FAIL (nim_local) → PASS</strong></td>
+<td>re-run on the fixed app: all three ON (Docker 29.7 + NVIDIA runtime, Node 22.23)</td>
+</tr>
+<tr>
+<td>G</td>
+<td><code>tests/run_all.sh</code> on the box (24 suites incl. <code>test_api.py</code>, the new script suite)</td>
+<td><strong>PASS</strong> 24/24</td>
+<td><code>RESULT: 24 passed, 0 failed</code></td>
 </tr>
 <tr>
 <td>B</td>
@@ -261,6 +267,18 @@ left <code>0 MiB</code> used before the NIM started; the dpkg-lock wait absorbed
 <td>record turns 31-32 s, 415-490 chars</td>
 </tr>
 <tr>
+<td>D</td>
+<td>NemoClaw policy layer + sandbox runtime: <code>verify_nemoclaw_observability.sh</code> Tier 0 (policy, Dockerfile, preset, forwarder, unit suite, plugin selftest), Tier 1 (toggle ON blocks an unlisted egress via the policy layer; a forwarded OCSF denial becomes a <code>nemoclaw_guardrails</code> governance event), <strong>Tier 2 live sandbox</strong> (answers status, <code>demobot-toolguard</code> enabled inside, the sandbox reaches DemoBot's guard through the applied <code>demobot-guard</code> policy)</td>
+<td><strong>PASS</strong> 13/13 (after defects 8, 9, 11 and the <code>start</code>-re-provision fix)</td>
+<td>sandbox guard URL <code>http://172.31.7.215:8001</code>; <code>Applied preset: demobot-guard</code>; <code>runtime_supported</code> ON; <code>toolguard/nemoclaw</code> shows <code>demobot-guard</code> among the loaded network policies. First passes failed on exactly the defects listed; one read taken during the script's own <code>nemoclaw gateway restart</code> was transiently 11/13 and was 13/13 three minutes later</td>
+</tr>
+<tr>
+<td>D</td>
+<td>NemoClaw drawer pill reaching <strong>RUNTIME</strong> from a real sandbox denial</td>
+<td><strong>not exercised</strong></td>
+<td>this NemoClaw build refused <code>openshell settings set ocsf_json_enabled</code> (warning logged), so runtime denials are attributed only through the plugin's <code>after_tool_call</code> path, which the plugin selftest and the Tier 1 synthetic feed cover; driving the sandboxed agent into a denied tool call is out of scope here</td>
+</tr>
+<tr>
 <td>I</td>
 <td>performance</td>
 <td>measured</td>
@@ -283,6 +301,48 @@ left <code>0 MiB</code> used before the NIM started; the dpkg-lock wait absorbed
 <p>Observation, not a defect: a raw <code>/v1/chat/completions</code> call with <code>enable_thinking=false</code> and no system prompt still
 began with a reasoning-style preamble in plain text ("Okay, the user wants…"); the app's turns, which carry the
 JSON answer contract, came back clean, and no <code>&lt;think&gt;</code> block appeared anywhere.</p>
+<h2 id="5-performance-on-the-same-a10g-g5xlarge">5. Performance on the same A10G (g5.xlarge)</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Ollama <code>mistral-nemo:12b</code> Q4_K_M (4.1 baseline, measured 2026-07-28)</th>
+<th>NIM Nemotron Nano 9B v2 bf16 (this run)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>decode</td>
+<td>85.1 tok/s</td>
+<td><strong>26.3 tok/s</strong> (400 tokens in 15.2 s, wall)</td>
+</tr>
+<tr>
+<td>prefill</td>
+<td>3852 tok/s</td>
+<td>23 prompt + 200 completion tokens in 8.4 s wall (prefill not separable from the API)</td>
+</tr>
+<tr>
+<td>full app turn, local</td>
+<td>~3 s</td>
+<td><strong>~19-23 s</strong> (single-agent 18.7 s; blueprint turns 31-32 s)</td>
+</tr>
+<tr>
+<td>NeMo Guardrails judge overhead</td>
+<td>+10-15 s on the 12B (napkin)</td>
+<td>benign turn with rails 10 s total, jailbreak verdict 8 s</td>
+</tr>
+<tr>
+<td>VRAM</td>
+<td>11.1 GB (both models resident)</td>
+<td>20.4 GB (weights 16.6 GB + SSM cache + 1.5 GB KV)</td>
+</tr>
+</tbody>
+</table>
+<p>The 3× slower decode is the expected bf16-vs-Q4 gap: the NIM's only A10G profile is <code>vllm-bf16-tp1-pp1</code>
+(no quantized profile for this card), so every token streams 16.6 GB of weights through the A10G's 600 GB/s,
+which caps single-stream decode near 30 tok/s. The Ollama model is a 7 GB 4-bit quant. For a demo box that
+wants sub-5-second turns on this instance type, Ollama remains the faster provider; the NIM buys the NVIDIA
+stack (NeMo rails on a local judge, NemoClaw, the blueprint's native tool calling) at ~20 s per turn.</p>
 </main>
 <h2>NVIDIA options: local NIM and the NemoClaw runtime</h2>
 <pre># provider=nvidia = a NIM on THIS box (loopback :8000). Default image fits one A10G.
