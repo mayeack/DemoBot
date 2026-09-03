@@ -416,15 +416,19 @@ function collectDest(card) {
   return patch;
 }
 function setResult(id, msg, ok) {
-  const el = cardFor(id).querySelector('[data-result]');
+  const card = cardFor(id);
+  if (!card) return;   // tab switched while the request was in flight
+  const el = card.querySelector('[data-result]');
   el.textContent = msg;
   el.className = 'text-sm ml-2 ' + (ok ? 'text-green-600' : 'text-red-600');
 }
 async function saveDestination(id) {
   try {
     await api('PUT', '/api/hec/destinations/' + encodeURIComponent(id), collectDest(cardFor(id)));
-    setResult(id, 'Saved.', true);
+    // Re-render first: loadDestinations() rebuilds the card's innerHTML, so a
+    // result written before it is wiped out (same order as saveIntegration).
     await loadDestinations();
+    setResult(id, 'Saved.', true);
   } catch (e) { setResult(id, 'Error: ' + e.message, false); }
 }
 async function testDestination(id) {
@@ -432,9 +436,9 @@ async function testDestination(id) {
   try {
     await api('PUT', '/api/hec/destinations/' + encodeURIComponent(id), collectDest(cardFor(id)));
     const r = await api('POST', '/api/hec/destinations/' + encodeURIComponent(id) + '/test');
+    await loadDestinations();
     if (r.ok) setResult(id, `✓ Success (${r.status_code}, ${r.latency_ms} ms)`, true);
     else setResult(id, '✗ ' + (r.error || 'failed'), false);
-    await loadDestinations();
   } catch (e) { setResult(id, 'Error: ' + e.message, false); }
 }
 async function deleteDestination(id) {

@@ -17,6 +17,15 @@ as one list; per-card colors made unrelated controls look like separate widgets
 and made "which of these is a guardrail vs. a load generator" harder to see, not
 easier. A card that needs emphasis earns it from its position in the drawer.
 
+The drawer is organized into named groups, each a `<section data-group="…">`
+with a neutral `<h3>` header: **Guardrails** (Cisco AI Defense, Agent
+Observability Controls, NeMo Guardrails, NemoClaw Guardrails, Internal Policy
+Engine), **Agent Pipeline** (Multi-Agent Mode), **Synthetic Content** (the
+injection toggles), **Load & Incident Generators** (Auto-Generate Sessions,
+Trigger Demo Incident, Prompt Injection Spray) and **Display** (Appearance). A
+new card goes inside the group it belongs to — never loose at the top level,
+and not in a new group unless it fits none of these.
+
 Two kinds of card exist and they look the same:
 
 - **per-request toggles** (Cisco AI Defense, Agent Observability Controls,
@@ -24,7 +33,7 @@ Two kinds of card exist and they look the same:
   toggles) — the toggle's state is sent on every chat request
   (`chat.js buildChatPayload`);
 - **server-side toggles** (Auto-Generate Sessions, NemoClaw Guardrails, Trigger
-  Demo Incident, Prompt-Injection Spray) — the toggle calls an API and polls its
+  Demo Incident, Prompt Injection Spray) — the toggle calls an API and polls its
   status; the state lives on the server (NemoClaw persists in `settings_store`).
 
 Options a host cannot run are greyed out with the reason as a tooltip, driven by
@@ -33,9 +42,11 @@ client-side guess.
 
 Color is reserved for **state**, never identity. These may stay colored:
 
-- the status pill (`#…Status`) — its ON color is set in `frontend/js/chat.js` and
-  may be semantic (green = injection enabled, red = destructive, amber = campaign
-  running). The OFF state is always `bg-gray-100 text-gray-600`.
+- the status pill (`#…Status`) — one look for every card, set only through
+  `setPill()` in `frontend/js/chat.js`: **On** = `bg-green-100 text-green-700`,
+  **Off** = `bg-gray-100 text-gray-600`. No per-card ON colors, no verbs
+  ("REVIEWING", "SPRAYING"), no pulse; what a control is doing while On goes in
+  the pill's `title` tooltip.
 - live counters/timers beside the pill (`#autoPromptStats`, `#incidentRemaining`,
   `#sprayRemaining`)
 - the toggle's own `peer-checked:bg-*` / `peer-focus:ring-*` accent
