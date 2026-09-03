@@ -45,7 +45,7 @@ settings.pii_injection_rate = 0.0
 settings.toxic_injection_rate = 0.0
 settings.hallucination_injection_rate = 0.0
 settings.authority_injection_rate = 0.0
-settings.ai_provider = "anthropic"          # censored-provider directive path (labeled fallbacks are deterministic)
+settings.ai_provider = "anthropic"          # censored-provider directive path (fallbacks are deterministic)
 if hasattr(settings, "blueprint_routing"):
     settings.blueprint_routing = "json"     # tool-less routing so the stubbed LLM serves every core
 
@@ -318,7 +318,9 @@ def test_dynamic_parity() -> None:
         check("NeMo output block attributed", r["medadvice/nemo_output_block"]["governance"]["guardrail_ids"] == ["nemo_guardrails"])
         check("Agent Control deny attributed", "galileo_agent_control" in (r["medadvice/agent_control_deny"]["governance"]["guardrail_ids"] or []))
         check("forced injection flags land in governance",
-              all(r["medadvice/forced_injection"]["governance"][k] for k in ("pii_detected", "toxic_detected")))
+              all(r["medadvice/forced_injection"]["governance"][k]
+                  for k in ("pii_detected", "toxic_detected", "hallucination_detected",
+                            "authority_violation_detected")))
         check("generation error degrades to the safe reply", r["medadvice/generation_error"]["result"]["type"] == "safety_warning")
         check("benign turn passes the whole POST chain",
               r["medadvice/benign"]["guardrail_stages"][-1] == "governance")

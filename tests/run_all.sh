@@ -36,6 +36,7 @@ SUITES=(
   tests/test_executive_fields.py
   tests/test_db_integrity.py
   tests/test_review_fixes.py
+  tests/test_synthetic_content.py
   tests/test_recommendation_formatting.py
   tests/test_galileo_integration.py
   tests/observability/test_genai_span_content.py

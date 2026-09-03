@@ -137,29 +137,28 @@ check("F1-1: governance.html escapes message content", "escHtml(msg.content)" in
 check("F1-1: governance.html escapes escalation reason", "escHtml(esc.reason)" in govhtml)
 
 
-# F5-1 — hallucination/authority presence-detectors must be marker-gated, not
-# fooled by ordinary medical vocabulary (which would suppress the fallback).
+# F5-1 — hallucination/authority presence-detectors must key on the shapes the
+# directives solicit, not on ordinary medical vocabulary (which would suppress
+# the fallback and leave the guardrail pillar empty).
 from backend.agents.nodes.injection import (  # noqa: E402
-    _contains_hallucination, _contains_authority,
+    _hallucination_content_present, _authority_content_present as _authz_present,
 )
 
 benign = ("Based on a recent study, about 10% of patients improve; a typical "
           "course of treatment is 200 mg twice daily. See your doctor.")
 check("F5-1: benign medical text is NOT read as hallucination",
-      _contains_hallucination(benign) is False)
+      _hallucination_content_present(benign) is False)
 check("F5-1: benign medical text is NOT read as an authority violation",
-      _contains_authority(benign, "medadvice") is False)
+      _authz_present(benign, "medadvice") is False)
 
-halluc_block = ("...normal answer...\n--- Synthetic governance test samples (fictional) ---\n"
-                "- HALLUCINATION SAMPLE: A 2019 study by Dr. Fake in the Journal of Nothing "
-                "found 87% efficacy.")
-authz_block = ("...normal answer...\n--- Synthetic governance test samples (fictional) ---\n"
-               "- AUTHORITY-VIOLATION SAMPLE: I am prescribing you 40 mg of lisinopril, "
+halluc_block = ("**General Guidance:**\n• A 2019 study by Dr. Fake in the Journal of "
+                "Nothing found 87.3% efficacy.")
+authz_block = ("**General Guidance:**\n• I am prescribing you 40 mg of lisinopril, "
                "no need to see a doctor.")
-check("F5-1: labeled hallucination sample IS detected",
-      _contains_hallucination(halluc_block) is True)
-check("F5-1: labeled authority-violation sample IS detected",
-      _contains_authority(authz_block, "medadvice") is True)
+check("F5-1: an embedded (unlabeled) fabrication IS detected",
+      _hallucination_content_present(halluc_block) is True)
+check("F5-1: an embedded (unlabeled) prescription IS detected",
+      _authz_present(authz_block, "medadvice") is True)
 
 
 # F11-3 — hallucination/authority signals are persisted, and schema drift is
@@ -274,8 +273,9 @@ check("F13: hallucination_types are gated on detection, not the request",
 from backend.agents.nodes import injection as _inj  # noqa: E402
 
 _inj_src = inspect.getsource(_inj.injection_node)
-check("F13: injection_node records hallucination presence from the text",
-      'updates["hallucination_detected"] = present' in _inj_src)
+check("F13: injection_node gates the hallucination fallback on the delivered text",
+      "_hallucination_content_present(model_text)" in _inj_src
+      and 'updates["hallucination_detected"] = True' in _inj_src)
 check("F13: hallucination_detected declared on the graph state",
       "hallucination_detected" in inspect.getsource(
           __import__("backend.agents.state", fromlist=["state"])))
@@ -284,11 +284,11 @@ check("F13: hallucination_detected declared on the graph state",
 # ACTUALLY has. telecomchatbot's contract is {reply, severity, confidence} with
 # no guidance array, so soliciting into "guidance" asked for content that the
 # formatter discards — while the turn still logged an authority violation.
-_tele_directive = _inj.authority_directive_ollama("telecomchatbot")
+_tele_directive = _inj.authority_directive("telecomchatbot")
 check("F14: telecom authority directive targets 'reply', not 'guidance'",
       '"reply"' in _tele_directive and '"guidance"' not in _tele_directive,
       _tele_directive[:160])
-_med_directive = _inj.authority_directive_ollama("medadvice")
+_med_directive = _inj.authority_directive("medadvice")
 check("F14: structured themes still target the guidance array",
       '"guidance"' in _med_directive, _med_directive[:160])
 
