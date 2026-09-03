@@ -144,9 +144,9 @@ def _payload(profile: SchedulingProfile, theme: str, state_name: str, **fields: 
         "appointments": [],
         "appointment": None,
         "actions": [],
-        # A follow-up the UI shows as its OWN assistant bubble (with the chips
-        # under it) instead of appending to the answer — the "did this resolve
-        # your concern?" check.
+        # Answer-turn scheduling copy the UI shows as its OWN assistant bubble
+        # (with the chips under it) — the resolved check, the already-booked
+        # note. Scheduling text is never appended to the answer itself.
         "message": None,
     }
     payload.update(fields)
@@ -538,12 +538,15 @@ def scheduling_node(state: Dict[str, Any]) -> Dict[str, Any]:
             updates["llm_input_tokens"] = (state.get("llm_input_tokens", 0) or 0) + (response.input_tokens or 0)
             updates["llm_output_tokens"] = (state.get("llm_output_tokens", 0) or 0) + (response.output_tokens or 0)
         updates["agent_trace"] = trace
-        # An intent turn IS the scheduling reply: the scheduling agent's wording
-        # replaces the domain agent's text (a local model tends to re-answer the
-        # domain question despite the hand-off). Other answer-turn copy
-        # (already booked) is appended.
-        updates["final_message"] = text if intent_turn else (
-            f"{final_message.rstrip()}\n\n{text}" if final_message else text)
+        if intent_turn:
+            # An intent turn IS the scheduling reply: the scheduling agent's
+            # wording replaces the domain agent's text (a local model tends to
+            # re-answer the domain question despite the hand-off).
+            updates["final_message"] = text
+        else:
+            # Answer-turn copy (already booked) is its OWN bubble, never text
+            # inside the answer.
+            payload["message"] = text
         return updates
 
     # Single-agent mode: on an intent turn the domain agent was directed to write
@@ -554,7 +557,9 @@ def scheduling_node(state: Dict[str, Any]) -> Dict[str, Any]:
         if not _model_covers_outcome(payload, final_message):
             updates["final_message"] = text
         return updates
-    updates["final_message"] = f"{final_message.rstrip()}\n\n{text}" if final_message else text
+    # Answer-turn copy (already booked) is its OWN bubble, never text inside
+    # the answer.
+    payload["message"] = text
     return updates
 
 

@@ -80,10 +80,11 @@ recommendation/escalation turns only when the severity is in the theme's
 has an upcoming appointment (the first answer says so instead), and never after an
 explicit decline in the session. Prior checks, declines and bookings are read from the
 persisted `metadata.scheduling` of earlier assistant messages, so the policy survives
-restarts and Show Recent reloads. (The check rides in the payload's `message`; the
-answer text itself is left untouched. The check is fixed copy in both modes — a yes/no
-prompt must not depend on a model's phrasing — so the scheduling agent phrases what
-follows it, not the check itself.)
+restarts and Show Recent reloads. Scheduling copy on an answer turn — the check, the
+already-booked note — rides in the payload's `message` and is rendered as its **own
+green chat bubble**; the answer text itself is never touched. (The check is fixed copy
+in both modes — a yes/no prompt must not depend on a model's phrasing — so the
+scheduling agent phrases what follows it, not the check itself.)
 
 ## Identity and time
 

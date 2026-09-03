@@ -840,6 +840,17 @@ function setLoadingStatus(text) {
 // them and sends the click back as a structured scheduling_action.
 const CLIENT_ID_KEY = 'medadvice_client_id';
 let _memClientId = null;   // private-mode fallback: one id for the life of the tab
+// Turns whose whole reply is the scheduling message (the user asked about
+// scheduling): no severity badge — the severity belongs to the domain answer
+// that was replaced.
+const SCHEDULING_REPLY_STATES = new Set([
+    'offered', 'choosing', 'rescheduling', 'awaiting_name', 'booked', 'listed',
+    'cancelled', 'rescheduled', 'declined', 'resolved', 'unavailable',
+]);
+
+function schedulingReplySeverity(scheduling, severity) {
+    return (scheduling && SCHEDULING_REPLY_STATES.has(scheduling.state)) ? null : severity;
+}
 
 function _newClientId() {
     return (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
@@ -903,10 +914,11 @@ function _schedulingChipText(a) {
 function attachSchedulingActions(bubble, payload) {
     if (!bubble || !payload) return;
     let host = bubble;
-    // A follow-up ("Did this resolve your concern?") is its OWN assistant bubble,
-    // separate from the answer, with the chips under it.
+    // Answer-turn scheduling copy ("Did this resolve your concern?", "You already
+    // have…") is its OWN green chat bubble, separate from the answer, with the
+    // chips under it — never text inside the answer.
     if (payload.message) {
-        host = addMessageToChat('assistant', payload.message, 'scheduling_followup') || bubble;
+        host = addMessageToChat('assistant', payload.message, 'recommendation') || bubble;
     }
     if (!Array.isArray(payload.actions) || !payload.actions.length) return;
     const row = document.createElement('div');
@@ -1034,7 +1046,8 @@ async function sendMessage(presetText = null, schedulingAction = null) {
             data = await sendMessageLegacy(payload);
         }
 
-        const bubble = addMessageToChat('assistant', data.message, data.type, data.severity, data.escalated);
+        const bubble = addMessageToChat('assistant', data.message, data.type,
+                                        schedulingReplySeverity(data.scheduling, data.severity), data.escalated);
         attachSchedulingActions(bubble, data.scheduling);
 
         if (data.escalated) {
@@ -1315,7 +1328,8 @@ async function loadRecentSession(id) {
     const lastAssistant = msgs.map((m) => m.role).lastIndexOf('assistant');
     let lastBubble = null, lastScheduling = null;
     msgs.forEach((m, i) => {
-        const bubble = addMessageToChat(m.role, m.content || '', m.type, m.severity || null,
+        const sched = (m.metadata && m.metadata.scheduling) || null;
+        const bubble = addMessageToChat(m.role, m.content || '', m.type, schedulingReplySeverity(sched, m.severity || null),
                                         !!data.escalated && i === lastAssistant, m.timestamp);
         if (m.role === 'assistant') {
             lastBubble = bubble;
