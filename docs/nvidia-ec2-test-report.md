@@ -16,7 +16,7 @@ plus the prior-version (Ollama) regression on the same box.
 - **Nothing regressed for hosts without a GPU**: the Mac baseline is green (24 suites, observability, NemoClaw
   policy layer, manual turns), and the prior-version Ollama flows on the box behave as in 4.1 (poisoned model,
   synthetic PII + Cisco AI Defense block).
-- **Eleven defects were found and fixed** (§0), all but one in the EC2/NemoClaw glue shipped in 4.2.0; the app-side
+- **Twelve defects were found and fixed** (§0), all but one in the EC2/NemoClaw glue shipped in 4.2.0; the app-side
   one is the host-capability cache (§0 #10). Four were only findable on real hardware (dpkg lock, NIM memory
   budget, NGC entitlement behaviour, NemoClaw preset validator).
 - **Cost of the NIM on this instance**: ~26 tok/s per stream and ~20 s app turns versus Ollama's 85 tok/s and
@@ -40,6 +40,7 @@ plus the prior-version (Ollama) regression on the same box.
 | 9 | `deploy/ec2/ec2-bootstrap.sh` | NemoClaw onboarding ran 10 s after `enable --now` (app not answering yet) and without `NVIDIA_INFERENCE_API_KEY` in its environment (the key only reached the systemd unit's env file), so it died before installing anything | wait for `/health`, export `/etc/demobot-nemoclaw.env`, then run onboarding exactly as the unit does |
 | 10 | `backend/host_capabilities.py` | the capability snapshot was probed once at startup and only re-probed on a manual refresh; on a fresh GPU box the NIM comes up 20+ min after the app, so `/api/server-info` said "GPU present but no NIM answering" 45 min after the same app was serving turns on it (Settings chips and the model gate read that) | `current()` returns a snapshot older than the TTL as-is and kicks one background re-probe (stale-while-revalidate); unit test added |
 | 11 | `tests/observability/verify_nemoclaw_observability.sh`, `run-nemoclaw.sh` | an `openshell sandbox exec` can hang indefinitely; one Tier 2 check sat for 2 h 51 min on the box and blocked everything queued behind it | every exec bounded (`timeout 60` / `timeout 90`); the script test refuses an unbounded one |
+| 12 | `run-nemoclaw.sh`, `deploy/ec2/ec2-bootstrap.sh` | `nemoclaw <sandbox> start` on an already-Ready sandbox re-provisioned it (5-10 min, gateway down meanwhile) on every unit run; on a re-deploy the bootstrap's Ollama placement check ran against VRAM the live NIM owns and would fail `--gpu require` | start only when the phase is not Ready; skip the placement check when a NIM already answers on :8000 (it is the GPU proof) |
 | 5 | `deploy/ec2/fleet.sh` | `next-replica` and `provision` died silently (exit 1, no output) when nothing was claimed yet — empty `grep` under `pipefail` | `\|\| true` on the claimed-replicas pipeline; regression test runs the function with stubbed `aws`/`cloudflared` |
 
 ## 1. Mac baseline (no NVIDIA GPU) — proves 4.2 is inert without a GPU and 4.1 flows still work
@@ -146,7 +147,7 @@ stack (NeMo rails on a local judge, NemoClaw, the blueprint's native tool callin
 | Check | Result | Evidence |
 |---|---|---|
 | `sudo systemctl reboot`; everything must return unattended | **PASS** in 380 s | app `/health` 200 and the public URL 200 at +30 s; collector + tunnel active at +30 s; `demobot-nemoclaw` (oneshot) re-onboarded the sandbox and the forwarder came up at +53 s; the NIM reached `/v1/health/ready` at +343 s (weights + profiling, no restart loop); sandbox phase Ready |
-| Idempotent `fleet.sh deploy 1` re-run on the finished box | __DEPLOY_RERUN__ | |
+| Idempotent `fleet.sh deploy 1` re-run on the finished box | **PASS — `BOOTSTRAP_OK` in 3 min** | first attempt tripped the Ollama placement gate because the live NIM owns the VRAM (defect 12, fixed: the check is skipped when a NIM already serves); the re-run logged `a NIM already serves on :8000 — skipping the Ollama placement check`, re-ran NemoClaw onboarding against the Ready sandbox without re-provisioning it, and the health gate read app 200, NIM `/v1/health/ready` 200, `/v1/models` 200, both NemoClaw units active, public URL 200, GPU 20 077 MiB of 23 028 MiB |
 
 Timeline of the box: provisioned 12:19 PDT; first bootstrap died on the dpkg lock; second bootstrap ran the NIM
 pull; the NIM's three memory failures, the NGC entitlement, the NemoClaw preset schema and host, and the hung
