@@ -124,6 +124,8 @@ def test_bootstrap_start_order_and_gate() -> None:
           "NemoClaw onboarding waits for /health and exports /etc/demobot-nemoclaw.env first")
     # The NIM must not start at its 131072-token default on a 24 GB card (CUDA
     # OOM in vLLM's profiling pass, restart loop, never ready — 2026-09-02).
+    check("NIM_ALREADY_UP" in text and "skipping the Ollama placement check" in text,
+          "re-deploy on a live NIM box skips the Ollama placement check (the NIM owns the VRAM)")
     check("NIM_MAX_MODEL_LEN=" in text and "-e NIM_MAX_MODEL_LEN" in text,
           "the NIM unit caps the context via NIM_MAX_MODEL_LEN (default 8192)")
     check("NIM_MAX_NUM_SEQS=" in text and "-e NIM_MAX_NUM_SEQS" in text,

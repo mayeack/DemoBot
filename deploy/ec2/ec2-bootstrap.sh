@@ -424,7 +424,15 @@ ollama list
 # The decisive GPU check. Backend logs can say CUDA while a specific model still
 # lands on CPU (VRAM pressure, unsupported quant). `ollama ps` reports where the
 # weights actually are, so warm one model and read the PROCESSOR column.
-if [ "$GPU" = true ]; then
+NIM_ALREADY_UP=false
+if [ "$WITH_NIM" = true ] && curl -sf -o /dev/null http://localhost:8000/v1/health/ready 2>/dev/null; then
+  # Idempotent re-deploy on a live NIM box: the NIM owns ~20 GB of the A10G, so
+  # an Ollama warm-up would land split CPU/GPU and fail the placement gate for
+  # no reason — the serving NIM IS the GPU proof. Skip the check.
+  NIM_ALREADY_UP=true
+  log "a NIM already serves on :8000 — skipping the Ollama placement check (the GPU is proven by the NIM)"
+fi
+if [ "$GPU" = true ] && [ "$NIM_ALREADY_UP" != true ]; then
   WARM="${WANTED[0]:-$BASE}"
   log "warming $WARM to confirm GPU placement"
   curl -sf http://localhost:11434/api/generate \
