@@ -354,6 +354,32 @@ def _execute(state: Dict[str, Any], profile: SchedulingProfile, theme_key: str, 
                 "text": text, "summary": "The user said the concern is resolved; close warmly, no offer.",
                 "facts": [f"They can schedule {profile.a_noun} anytime by asking."]}
 
+    if kind == "clarify_slot":
+        # The user named a day/time we could not resolve to exactly one offered
+        # slot ("Saturday at 8am" against Friday slots). Never guess: show what
+        # they most likely meant as buttons and let them pick.
+        pref = svc.preference_from_dict(action.get("pref"))
+        pending_prev = ctx.get("pending") or {}
+        reschedule_id = action.get("appointment_id") or (
+            pending_prev.get("reschedule_id") if pending_prev.get("awaiting") == "slot" else None)
+        cands = [s.as_dict() for s in svc.slots_for_preference(profile, pref, now_utc=now, tz=tz)]
+        if not cands:
+            cands = [s.as_dict() for s in svc.suggest_slots(profile, now_utc=now, tz=tz, page=0)]
+        day_bookable = pref.weekday is None or pref.weekday in profile.business_days
+        if day_bookable:
+            text = profile.render("clarify_slot", asked=pref.label)
+        else:
+            text = profile.render("day_unavailable", day=svc.weekday_label(pref.weekday),
+                                  days=svc.business_days_label(profile))
+        out = present(cands, state_name="clarify_slot", text=text, page_no=0,
+                      pending={"awaiting": "slot", "reschedule_id": reschedule_id} if reschedule_id else None,
+                      reschedule_id=reschedule_id)
+        out["facts"].append(
+            f"They asked for {pref.label}." + ("" if day_bookable else
+            f" {profile.noun_plural.capitalize()} are only booked {svc.business_days_label(profile)}, "
+            f"so {svc.weekday_label(pref.weekday)} is not available — say so and offer the closest times."))
+        return out
+
     if kind in ("accept", "more_times", "choose_slot"):
         slots = ctx.get("slots") or []
         pending_prev = ctx.get("pending") or {}
@@ -575,6 +601,9 @@ def _model_covers_outcome(payload: Dict[str, Any], text: str) -> bool:
     if state_name == "listed":
         labels = [a.get("label") for a in payload.get("appointments") or [] if a.get("label")]
         return bool(labels) and all(label in text for label in labels)
-    if state_name in ("choosing", "rescheduling"):
-        return any(s.get("label") in text for s in payload.get("slots") or []) or "time" in low
+    if state_name in ("choosing", "rescheduling", "clarify_slot"):
+        # Only an actual offered time counts. A bare mention of "time" used to
+        # pass here, which let a re-answered domain question stand in for the
+        # question we needed to ask.
+        return any(s.get("label") in text for s in payload.get("slots") or [])
     return False

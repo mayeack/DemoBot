@@ -83,6 +83,11 @@ class SchedulingProfile:
     offer: str = ("Would you like to schedule {a_noun} with {provider}? "
                   "Here are the next available times:")
     choose: str = "Here are some available times for {a_noun}:"
+    # Asked when the user names a day/time we cannot resolve to exactly one
+    # offered slot — never guess across days.
+    clarify_slot: str = "I want to book the right time — did you mean one of these?"
+    day_unavailable: str = ("I don't have {day} availability — {noun_plural} are booked {days}. "
+                            "Here are the closest times:")
     already_booked: str = ("You already have {a_noun} scheduled for {label}. "
                            "Ask me about your schedule if you'd like to change it.")
     ask_name: str = "Great — what name should I put the {noun} under?"
@@ -120,6 +125,9 @@ class SchedulingProfile:
             "provider": self.provider_noun,
             "label": "",
             "name": "",
+            "day": "",
+            "days": "",
+            "asked": "that time",
         }
         values.update({k: v for k, v in fields.items() if v is not None})
         return template.format(**values)
@@ -188,6 +196,10 @@ class Slot:
     label: str
     day: str
     time: str
+    # Local weekday (Monday = 0) and minute-of-day: what intent matching needs,
+    # carried so it never has to re-parse the label.
+    weekday: int = 0
+    minute_of_day: int = 0
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -197,6 +209,8 @@ class Slot:
             "label": self.label,
             "day": self.day,
             "time": self.time,
+            "weekday": self.weekday,
+            "minute_of_day": self.minute_of_day,
         }
 
 
@@ -210,7 +224,27 @@ def _slot(profile: SchedulingProfile, local_start: datetime, zone: ZoneInfo) -> 
         label=label_for(profile, start_utc, zone=zone),
         day=_day_text(local_start),
         time=_time_text(local_start),
+        weekday=local_start.weekday(),
+        minute_of_day=local_start.hour * 60 + local_start.minute,
     )
+
+
+def _iter_slots(profile: SchedulingProfile, *, now_utc: datetime, tz: Optional[str],
+                max_days: int = _MAX_DAYS_AHEAD):
+    """Every bookable slot from ``now + lead_minutes`` onward, in order."""
+    zone = resolve_tz(tz)
+    step = timedelta(minutes=profile.duration_minutes)
+    earliest = _to_local(now_utc + timedelta(minutes=profile.lead_minutes), zone)
+    day = earliest.replace(hour=0, minute=0, second=0, microsecond=0)
+    for _ in range(max_days):
+        if day.weekday() in profile.business_days:
+            t = day.replace(hour=profile.open_hour)
+            close = day.replace(hour=profile.close_hour)
+            while t + step <= close:
+                if t >= earliest:
+                    yield _slot(profile, t, zone)
+                t += step
+        day += timedelta(days=1)
 
 
 def suggest_slots(profile: SchedulingProfile, *, now_utc: Optional[datetime] = None,
@@ -218,27 +252,16 @@ def suggest_slots(profile: SchedulingProfile, *, now_utc: Optional[datetime] = N
     """The next ``count`` slots after ``now + lead_minutes`` inside business hours,
     skipping ``page * count`` earlier ones ("More times" pages forward)."""
     now_utc = now_utc or datetime.utcnow()
-    zone = resolve_tz(tz)
     count = count or profile.slots_per_page
     skip = max(0, int(page or 0)) * count
-    step = timedelta(minutes=profile.duration_minutes)
-    earliest = _to_local(now_utc + timedelta(minutes=profile.lead_minutes), zone)
-    day = earliest.replace(hour=0, minute=0, second=0, microsecond=0)
     out: List[Slot] = []
-    for _ in range(_MAX_DAYS_AHEAD):
-        if day.weekday() in profile.business_days:
-            t = day.replace(hour=profile.open_hour)
-            close = day.replace(hour=profile.close_hour)
-            while t + step <= close:
-                if t >= earliest:
-                    if skip:
-                        skip -= 1
-                    else:
-                        out.append(_slot(profile, t, zone))
-                        if len(out) >= count:
-                            return out
-                t += step
-        day += timedelta(days=1)
+    for slot in _iter_slots(profile, now_utc=now_utc, tz=tz):
+        if skip:
+            skip -= 1
+            continue
+        out.append(slot)
+        if len(out) >= count:
+            break
     return out
 
 
@@ -257,6 +280,133 @@ def resolve_slot(profile: SchedulingProfile, slot_id: Optional[str], *,
         return None
     zone = resolve_tz(tz)
     return _slot(profile, _to_local(start_utc, zone), zone)
+
+
+# --------------------------------------------------------------------------- what the user asked for
+_WEEKDAY_WORDS = {
+    "monday": 0, "mon": 0, "tuesday": 1, "tue": 1, "tues": 1,
+    "wednesday": 2, "wed": 2, "weds": 2, "thursday": 3, "thu": 3, "thur": 3, "thurs": 3,
+    "friday": 4, "fri": 4, "saturday": 5, "sat": 5, "sunday": 6, "sun": 6,
+}
+_WEEKDAY_LABELS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+
+def weekday_label(weekday: Optional[int]) -> str:
+    return _WEEKDAY_LABELS[weekday] if weekday is not None and 0 <= weekday <= 6 else ""
+
+
+def business_days_label(profile: SchedulingProfile) -> str:
+    """'Monday to Friday' for a contiguous run, else 'Monday, Wednesday and Friday'."""
+    days = sorted(set(profile.business_days))
+    if not days:
+        return ""
+    if len(days) > 2 and days == list(range(days[0], days[-1] + 1)):
+        return f"{_WEEKDAY_LABELS[days[0]]} to {_WEEKDAY_LABELS[days[-1]]}"
+    names = [_WEEKDAY_LABELS[d] for d in days]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" and {names[-1]}"
+
+
+@dataclass(frozen=True)
+class TimePreference:
+    """The day and/or time of day a typed message asked for. Either half may be
+    absent ("Saturday", "at 8am", "Saturday at 8am")."""
+
+    weekday: Optional[int] = None
+    minute_of_day: Optional[int] = None
+
+    @property
+    def expressed(self) -> bool:
+        return self.weekday is not None or self.minute_of_day is not None
+
+    @property
+    def time_text(self) -> str:
+        if self.minute_of_day is None:
+            return ""
+        hour, minute = divmod(self.minute_of_day, 60)
+        hour12 = hour % 12 or 12
+        return f"{hour12}:{minute:02d} {'AM' if hour < 12 else 'PM'}"
+
+    @property
+    def label(self) -> str:
+        parts = [p for p in (weekday_label(self.weekday), self.time_text) if p]
+        return " at ".join(parts) if len(parts) == 2 else (parts[0] if parts else "that time")
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"weekday": self.weekday, "minute_of_day": self.minute_of_day}
+
+
+def preference_from_dict(data: Optional[Dict[str, Any]]) -> TimePreference:
+    data = data or {}
+    weekday = data.get("weekday")
+    minute = data.get("minute_of_day")
+    return TimePreference(
+        weekday=int(weekday) if isinstance(weekday, int) and 0 <= weekday <= 6 else None,
+        minute_of_day=int(minute) if isinstance(minute, int) and 0 <= minute < 1440 else None,
+    )
+
+
+def _parse_clock(text: str) -> Optional[int]:
+    """Minute-of-day a message asks for, or None. Deliberately strict: a bare
+    number ("it's been 2 days") is NOT a time — it needs am/pm, a colon, or a
+    leading "at"."""
+    t = str(text or "").lower()
+    hour = minute = None
+    ampm = None
+    m = re.search(r"\b(\d{1,2}):(\d{2})\s*(am|pm|a\.m\.|p\.m\.)?\b", t)
+    if m:
+        hour, minute, ampm = int(m.group(1)), int(m.group(2)), (m.group(3) or "").replace(".", "") or None
+    else:
+        m = re.search(r"\b(\d{1,2})\s*(am|pm|a\.m\.|p\.m\.)\b", t)
+        if m:
+            hour, minute, ampm = int(m.group(1)), 0, m.group(2).replace(".", "")
+        else:
+            m = re.search(r"\bat\s+(\d{1,2})\b(?!\s*(?:day|week|month|hour|min|year))", t)
+            if m:
+                hour, minute = int(m.group(1)), 0
+    if hour is None:
+        return None
+    if ampm == "pm" and hour < 12:
+        hour += 12
+    elif ampm == "am" and hour == 12:
+        hour = 0
+    elif ampm is None and hour <= 7:
+        hour += 12   # "at 3" means 3 PM in a business-hours conversation
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return hour * 60 + minute
+
+
+def parse_time_preference(text: str) -> TimePreference:
+    """The day/time a message asks for. A named day is BINDING: it is never
+    silently traded for the same clock time on another day."""
+    t = str(text or "").lower()
+    weekday = None
+    for word, day in _WEEKDAY_WORDS.items():
+        if re.search(rf"\b{word}\b", t):
+            weekday = day
+            break
+    return TimePreference(weekday=weekday, minute_of_day=_parse_clock(t))
+
+
+def slots_for_preference(profile: SchedulingProfile, pref: TimePreference, *,
+                         now_utc: Optional[datetime] = None, tz: Optional[str] = None,
+                         count: Optional[int] = None, scan_days: int = 21) -> List[Slot]:
+    """Best-guess slots for what the user asked for: the requested weekday when the
+    theme books that day, otherwise the nearest times on the days it does book."""
+    now_utc = now_utc or datetime.utcnow()
+    count = count or profile.slots_per_page
+    pool = list(_iter_slots(profile, now_utc=now_utc, tz=tz, max_days=scan_days))
+    if not pool:
+        return []
+    if pref.weekday is not None:
+        same_day = [s for s in pool if s.weekday == pref.weekday]
+        if same_day:
+            pool = same_day          # the day is bookable: stay on it
+        # else: the theme does not book that day — fall back to the nearest times,
+        # and the caller's copy says so.
+    if pref.minute_of_day is not None:
+        pool = sorted(pool, key=lambda s: (abs(s.minute_of_day - pref.minute_of_day), s.start_utc))
+    return pool[:count]
 
 
 # --------------------------------------------------------------------------- offer policy
@@ -306,11 +456,9 @@ _RE_CHECK_NO = re.compile(
 _RE_CHECK_YES = re.compile(
     r"^\s*(yes|yeah|yep|yup|it did|that (did|helped|worked|resolved)|resolved|all good|i'?m good|"
     r"thanks|thank you|perfect|great)\b", re.I)
-_RE_TIME = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?\b", re.I)
 _RE_NAME_PREFIX = re.compile(
     r"^\s*(my name is|my name'?s|the name is|name is|name:|it'?s|its|i'?m|i am|under|put it under|use|call me|this is)\s+",
     re.I)
-_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 
 def clean_name(text: str) -> str:
@@ -325,9 +473,34 @@ def looks_like_name(text: str) -> bool:
     return bool(t) and "?" not in t and len(t.split()) <= 5 and not re.search(r"\d", t)
 
 
+def _entry_weekday(entry: Dict[str, Any]) -> Optional[int]:
+    """A slot/appointment dict's local weekday — from the field when present, else
+    parsed from its 'Fri Sep 4' day text (rows stored before the field existed)."""
+    value = entry.get("weekday")
+    if isinstance(value, int) and 0 <= value <= 6:
+        return value
+    return _WEEKDAY_WORDS.get(str(entry.get("day", ""))[:3].lower())
+
+
+def _entry_minute_of_day(entry: Dict[str, Any]) -> Optional[int]:
+    value = entry.get("minute_of_day")
+    if isinstance(value, int) and 0 <= value < 1440:
+        return value
+    m = re.match(r"(\d{1,2}):(\d{2})\s*(AM|PM)", str(entry.get("time", "")), re.I)
+    if not m:
+        return None
+    hour, minute, ampm = int(m.group(1)) % 12, int(m.group(2)), m.group(3).upper()
+    return (hour + (12 if ampm == "PM" else 0)) * 60 + minute
+
+
 def match_slot(text: str, slots: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Pick one of the offered slots from typed text: an ordinal ("the second one"),
-    a time ("10:00", "10am") or a weekday ("Tuesday"), else None."""
+    """The one offered slot a typed message clearly means — an ordinal ("the second
+    one"), or a day/time that resolves to exactly one — else None.
+
+    A named day is BINDING: "Saturday at 8am" must never book Friday 8:00 AM just
+    because the clock matches. When nothing resolves unambiguously the caller asks
+    a follow-up instead of guessing (see ``parse_action`` -> ``clarify_slot``).
+    """
     if not slots:
         return None
     t = str(text or "").lower()
@@ -337,40 +510,18 @@ def match_slot(text: str, slots: List[Dict[str, Any]]) -> Optional[Dict[str, Any
                 return slots[idx]
             except IndexError:
                 return None
-    m = _RE_TIME.search(t)
-    if m:
-        hour = int(m.group(1))
-        minute = int(m.group(2) or 0)
-        ampm = (m.group(3) or "").replace(".", "").lower()
-        if 0 <= hour <= 23 and 0 <= minute <= 59:
-            candidates = []
-            for s in slots:
-                tm = re.match(r"(\d{1,2}):(\d{2}) (AM|PM)", str(s.get("time", "")))
-                if not tm:
-                    continue
-                sh, sm, sap = int(tm.group(1)), int(tm.group(2)), tm.group(3).lower()
-                if sm != minute:
-                    continue
-                if ampm:
-                    if sh == (hour % 12 or 12) and sap == ampm:
-                        candidates.append(s)
-                elif hour > 12:
-                    if sh == hour - 12 and sap == "pm":
-                        candidates.append(s)
-                elif sh == hour:
-                    candidates.append(s)
-            if len(candidates) == 1:
-                return candidates[0]
-            if candidates:
-                # An ambiguous bare hour: prefer a weekday match, else the earliest.
-                for s in candidates:
-                    if any(d in t for d in _DAYS if str(s.get("day", "")).lower().startswith(d)):
-                        return s
-                return candidates[0]
-    for s in slots:
-        day = str(s.get("day", "")).lower()
-        if day[:3] in _DAYS and re.search(rf"\b{day[:3]}\w*\b", t):
-            return s
+    pref = parse_time_preference(t)
+    pool = list(slots)
+    if pref.weekday is not None:
+        pool = [s for s in pool if _entry_weekday(s) == pref.weekday]
+        if not pool:
+            return None          # they named a day we did not offer — never guess
+    if pref.minute_of_day is not None:
+        exact = [s for s in pool if _entry_minute_of_day(s) == pref.minute_of_day]
+        return exact[0] if len(exact) == 1 else None
+    # A day with nothing else: confident only when that day has a single slot.
+    if pref.weekday is not None and len(pool) == 1:
+        return pool[0]
     return None
 
 
@@ -400,7 +551,7 @@ def parse_action(message: str, last_meta: Optional[Dict[str, Any]],
     pending = meta.get("pending") or {}
     slots = list(meta.get("slots") or [])
     listed = list(meta.get("appointments") or [])
-    offering = state in ("offered", "choosing", "rescheduling")
+    offering = state in ("offered", "choosing", "rescheduling", "clarify_slot")
 
     if _RE_MORE.search(text) and (offering or pending):
         act: Dict[str, Any] = {"action": "more_times", "page": int(meta.get("page") or 0) + 1}
@@ -427,6 +578,10 @@ def parse_action(message: str, last_meta: Optional[Dict[str, Any]],
         if picked:
             return {"action": "reschedule", "appointment_id": pending.get("reschedule_id"),
                     "slot_id": picked.get("slot_id")}
+        pref = parse_time_preference(text)
+        if pref.expressed:
+            return {"action": "clarify_slot", "pref": pref.as_dict(),
+                    "appointment_id": pending.get("reschedule_id")}
     if pending.get("awaiting") == "name":
         if _RE_DECLINE.search(text):
             return {"action": "decline"}
@@ -447,6 +602,11 @@ def parse_action(message: str, last_meta: Optional[Dict[str, Any]],
         picked = match_slot(text, slots)
         if picked:
             return {"action": "book", "slot_id": picked.get("slot_id")}
+        # A day/time we could not resolve to exactly one offered slot ("Saturday
+        # at 8am" against Friday slots): ask, never guess.
+        pref = parse_time_preference(text)
+        if pref.expressed:
+            return {"action": "clarify_slot", "pref": pref.as_dict()}
         if _RE_ACCEPT.search(text) or _RE_BOOK.search(text):
             return {"action": "accept", "page": int(meta.get("page") or 0)}
         return None

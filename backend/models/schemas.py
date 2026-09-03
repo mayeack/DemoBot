@@ -32,7 +32,7 @@ class SchedulingAction(BaseModel):
     """A structured scheduling action sent when the user clicks a chip in the
     chat (docs/scheduling.md). It wins over the typed-text intent parser."""
     action: Literal["book", "accept", "more_times", "decline", "list", "cancel", "reschedule", "choose_slot",
-                    "resolved", "not_resolved"]
+                    "resolved", "not_resolved", "clarify_slot"]
     slot_id: Optional[str] = Field(default=None, max_length=32)
     appointment_id: Optional[str] = Field(default=None, max_length=64)
     page: int = Field(default=0, ge=0, le=50)

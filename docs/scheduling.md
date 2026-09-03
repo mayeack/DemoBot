@@ -124,7 +124,19 @@ Request (`POST /api/chat/message` and `/message/stream`):
 ```
 
 `action` ∈ `resolved | not_resolved | book | accept | more_times | decline | list | cancel |
-reschedule | choose_slot`.
+reschedule | choose_slot | clarify_slot`.
+
+### Reading what the user asked for
+
+A typed reply only books when it resolves to **exactly one** offered slot — an ordinal
+("the second one"), or a day/time that matches one. **A named day is binding:** "Saturday
+at 8am" never books Friday 8:00 AM because the clock happens to match. Anything else
+(a day with several slots, a time not on offer, a day the theme doesn't book) becomes
+`clarify_slot`: the assistant says what it thinks they meant and shows the closest
+bookable times as buttons. When the theme doesn't book that day at all it says so —
+"I don't have Saturday availability — follow-up visits are booked Monday to Friday" —
+and offers the nearest times instead. The clock parser is deliberately strict: am/pm, a
+colon, or a leading "at" is required, so "it's been 2 days" is not a request for 2:00.
 
 Response — `scheduling` on `ChatResponse` **and** the SSE `final` frame (and persisted as
 the assistant message's `metadata.scheduling`, returned by `GET /api/chat/session/{id}`):
@@ -140,8 +152,8 @@ the assistant message's `metadata.scheduling`, returned by `GET /api/chat/sessio
               {"action": "decline", "text": "No thanks"}] }
 ```
 
-`state` ∈ `check_resolved | resolved | offered | choosing | awaiting_name | booked |
-listed | cancelled | rescheduled | declined | already_booked | rescheduling |
+`state` ∈ `check_resolved | resolved | offered | choosing | clarify_slot | awaiting_name |
+booked | listed | cancelled | rescheduled | declined | already_booked | rescheduling |
 unavailable`; `message` (set for `check_resolved`) is a follow-up the UI renders as its
 own assistant bubble, with the chips under it. `actions` is the
 whole chip contract: the backend decides which chips exist and their (verticalized)

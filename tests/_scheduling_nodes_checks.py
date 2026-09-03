@@ -175,6 +175,23 @@ def run(check, sched, THEMES, slots, NOW, TZ):
         check("book: name unknown -> awaiting_name with the slot pending",
               p["state"] == "awaiting_name" and p["pending"] == {"awaiting": "name", "slot_id": slots[1].slot_id} and fake.calls == [])
         check("book: single-agent appends the ask-name copy when the model omitted it", med.render("ask_name") in out["final_message"])
+        # The reported bug: "Saturday at 8am" against Friday/Monday slots used to
+        # book the matching clock time on the WRONG day. Now it asks.
+        s, out = turn(conversation_history=[{"role": "user", "content": "q"}, assistant(offered_meta),
+                                            {"role": "user", "content": "Can you do Saturday at 8am?"}],
+                      user_message="Can you do Saturday at 8am?", final_message="Sure.")
+        q = out["scheduling"]
+        check("intent: a day we don't book asks instead of booking",
+              q["state"] == "clarify_slot" and fake.calls == [] and all(c["action"] != "book" or c["slot_id"] for c in q["actions"]))
+        check("intent: it says why Saturday isn't available and names the booking days",
+              "Saturday" in out["final_message"] and "Monday to Friday" in out["final_message"], out["final_message"])
+        check("intent: it offers the closest bookable times as buttons",
+              [c["action"] for c in q["actions"]] == ["book", "book", "book", "more_times", "decline"]
+              and all("Sat" not in c["text"] for c in q["actions"][:3]), str([c["text"] for c in q["actions"]]))
+        check("intent: picking one of those buttons books it",
+              turn(scheduling_action={"action": "book", "slot_id": q["slots"][0]["slot_id"], "page": 0},
+                   conversation_history=[assistant(q)])[1]["scheduling"]["state"] in ("booked", "awaiting_name"))
+
         hist2 = hist + [assistant(p, "What name?"), {"role": "user", "content": "Alex Rivera"}]
         s, out = turn(conversation_history=hist2, user_message="Alex Rivera", final_message="Booked.")
         p = out["scheduling"]

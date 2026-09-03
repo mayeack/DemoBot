@@ -844,8 +844,8 @@ let _memClientId = null;   // private-mode fallback: one id for the life of the 
 // scheduling): no severity badge — the severity belongs to the domain answer
 // that was replaced.
 const SCHEDULING_REPLY_STATES = new Set([
-    'offered', 'choosing', 'rescheduling', 'awaiting_name', 'booked', 'listed',
-    'cancelled', 'rescheduled', 'declined', 'resolved', 'unavailable',
+    'offered', 'choosing', 'clarify_slot', 'rescheduling', 'awaiting_name', 'booked',
+    'listed', 'cancelled', 'rescheduled', 'declined', 'resolved', 'unavailable',
 ]);
 
 function schedulingReplySeverity(scheduling, severity) {
