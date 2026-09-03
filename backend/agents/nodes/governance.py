@@ -44,17 +44,12 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
     hallucination_types = state.get("hallucination_types", []) or []
     boundary_injected = state.get("boundary_injected", False)
     boundary_types = state.get("boundary_types", []) or []
-    # Report what actually reached the user, not what was requested: on the
-    # directive-only ollama path the model can decline the overreach directive, and
-    # a flag keyed on boundary_injected would claim a violation that isn't in the
-    # response. Falls back to the request flag for states that predate the field.
+    # Report what actually reached the user, not what was requested: the
+    # ``*_detected`` flags are set by the injection node from the delivered text,
+    # and a declined directive (no canned fallback exists) leaves them False. Use
+    # the request flag only for states that predate the field.
     boundary_detected = state.get("boundary_detected", boundary_injected)
-    # Same rule for hallucination, for the same reason (the ask rides in the JSON
-    # answer contract on ollama and the model can decline it).
     hallucination_detected = state.get("hallucination_detected", hallucination_injected)
-    # Same rule for PII and toxic: both are directive-only on ollama now
-    # (pii_directive_ollama / toxic_directive_ollama, no fallback), so the model
-    # can decline and the record must not claim content the user never saw.
     pii_detected = state.get("pii_detected", pii_injected)
     toxic_detected = state.get("toxic_detected", toxic_injected)
 

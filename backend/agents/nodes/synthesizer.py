@@ -4,11 +4,14 @@ The final agent of the multi-agent stage. It fuses the specialist findings into
 the single structured recommendation the downstream nodes expect, and — because
 it is the only user-facing agent — it carries the governance test-content
 directive (so any solicited PII/toxic/hallucination/authority content lands in
-the final answer for the guardrail/eval demo).
+the final answer for the guardrail/eval demo). Every category is solicited INTO
+the theme's answer fields, so nothing after the JSON answer is kept: an
+unfenced local model drops it anyway, and a censored model's trailing text is
+where a "these samples are fictional" note would live (see nodes/injection.py).
 
-Absorbs the former ``domain_agent`` node: same parsing (``_parse_recommendation``
-/ ``_extract_directive_tail``), same formatting (``content_engine``), and it sets
-the same state fields. Differences from the old domain agent:
+Absorbs the former ``domain_agent`` node: same parsing (``_parse_recommendation``),
+same formatting (``content_engine``), and it sets the same state fields.
+Differences from the old domain agent:
 - ``llm_input_tokens`` / ``llm_output_tokens`` are the running SUM across
   coordinator + specialists + synthesizer (the multi-agent token contract).
 - ``agent_name`` stays ``{theme}_domain_agent`` for Splunk dashboard continuity.
@@ -19,7 +22,6 @@ call.
 
 from __future__ import annotations
 
-import re
 import time
 from typing import Any, Callable, Dict, List
 
@@ -47,25 +49,6 @@ from backend.telemetry import otel
 # SYNTHESIZER_MAX_TOKENS / SYNTHESIZER_TEMPERATURE live in agent_common so the
 # router can log the real values on the governance INPUT event without importing
 # this module (see the import above).
-
-
-def _extract_directive_tail(output_text: str) -> str:
-    """Return any text the model appended AFTER its structured JSON answer.
-
-    Under the governance directive the model emits its normal ```json answer```
-    and then appends a "Synthetic governance test samples" block; preserving the
-    tail lets a compliant model response stand on its own. (Moved verbatim from
-    the domain agent.)
-    """
-    text = output_text or ""
-    m = re.search(r"```(?:json)?\s*\{.*?\}\s*```", text, re.DOTALL)
-    if m:
-        return text[m.end():].strip()
-    idx = text.lower().find("synthetic governance test samples")
-    if idx != -1:
-        nl = text.rfind("\n", 0, idx)
-        return text[(nl + 1 if nl != -1 else idx):].strip()
-    return ""
 
 
 def _format_specialist_findings(specialist_outputs: List[Dict[str, Any]]) -> str:
@@ -98,11 +81,11 @@ def make_synthesizer_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
         # directive; ordinary turns keep the safe OTC-only rules untouched.
         if requested_categories.get("authority"):
             system_prompt = relax_scope_rules(system_prompt, theme_config.key)
-        # Same idea for the hallucination category on the local model: an appended
-        # directive alone is ignored, so the fabrication requirement is written into
-        # the theme's own answer contract. Censored providers already comply with the
-        # labeled-sample directive, so they keep the prompt untouched.
-        if requested_categories.get("hallucination") and settings.ai_provider == "ollama":
+        # Same idea for the hallucination category: an appended directive alone is
+        # ignored by the local model, so the fabrication requirement is written into
+        # the theme's own answer contract (harmless on providers that would have
+        # complied anyway, and one path is easier to keep at parity).
+        if requested_categories.get("hallucination"):
             system_prompt = embed_hallucination_contract(system_prompt, theme_config.key)
         if findings:
             system_prompt = f"{system_prompt}\n\nSPECIALIST FINDINGS:\n{findings}"
@@ -149,14 +132,6 @@ def make_synthesizer_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
         )
         confidence = content_engine._coerce_confidence(recommendation.get("confidence", 0.5))
         final_message = content_engine._format_recommendation(recommendation)
-
-        # Carry forward any governance test samples the model appended after its
-        # JSON answer (structured themes only — conversational replies aren't
-        # JSON-parsed, so their samples are already in final_message).
-        if not theme_config.conversational:
-            tail = _extract_directive_tail(response.content)
-            if tail:
-                final_message = f"{final_message}\n\n{tail}"
 
         trace = list(state.get("agent_trace", []))
         trace.append(

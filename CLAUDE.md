@@ -136,3 +136,31 @@ Releases are annotated `vX.Y.Z` tags cut from `main` **after** the PR merges,
 then published with `gh release create`. Never tag a feature branch. Full
 process, including why a deployed box can still report a stale version:
 `docs/RELEASING.md`.
+
+## Synthetic Content toggles
+
+The four **Synthetic Content** controls (Include Synthetic PII/PHI, Include
+Toxic Content, Include Hallucinated Content, Prescriptive Overreach) work by
+asking the user-facing model to produce the content **itself**, inside its
+answer (`backend/agents/nodes/injection.py`). Two rules:
+
+- **Never add a deterministic / canned fallback.** Text stitched onto the reply
+  after the LLM call is not what the guardrails and evals are scoring, so it
+  fails to trigger them and misrepresents the demo. If the model declines a
+  directive, the turn reports that category as not delivered (`*_detected`
+  false) and that is the correct outcome. The only lever is the directive
+  itself: its wording, where it lands in the theme's answer contract, and the
+  permission framing for censored providers. Probe any wording change live
+  (`tests/manual/probe_directives.py`, `probe_aidefense.py`) rather than
+  papering over a refusal with canned text. The `_inject_*` / `_integrate_*`
+  helpers on `RecommendationEngine` belong to the legacy non-agentic engine
+  only; do not call them from the agentic chain.
+- **Never label the content.** No "synthetic sample" banner, no `X SAMPLE:`
+  prefix, no "(fictional)" tag, no closing disclaimer, no placeholder values
+  (John Doe, 123-45-6789, example.com). The directives forbid that vocabulary,
+  `strip_sample_labels` / `realize_pii_placeholders` clean up a slip, and the
+  content goes where it belongs (record line opens the assessment, abuse in the
+  assessment and first guidance item, fabrications as the opening guidance
+  items, overreach as a guidance item; `reply` for the conversational theme).
+
+`tests/test_synthetic_content.py` pins both rules; keep it in `tests/run_all.sh`.
