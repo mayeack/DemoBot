@@ -119,6 +119,11 @@ check("'more times' pages forward", P("can you show me other times?", offered, [
 check("decline after an offer", P("no thanks", offered, []) == {"action": "decline"})
 check("accept after an offer", P("yes please", offered, []) == {"action": "accept", "page": 0})
 check("unrelated text while offering is not scheduling", P("my throat still hurts", offered, []) is None)
+checked = {"state": "check_resolved", "page": 0, "slots": [], "pending": None, "appointments": []}
+check("'no' to the resolved check -> not_resolved", P("No, not really", checked, []) == {"action": "not_resolved", "page": 0})
+check("'still' to the resolved check -> not_resolved", P("still hurts", checked, []) == {"action": "not_resolved", "page": 0})
+check("'yes' to the resolved check -> resolved", P("Yes, that helped, thanks", checked, []) == {"action": "resolved"})
+check("a new question after the check is not scheduling", P("What about my headache?", checked, []) is None)
 pending_name = {"state": "awaiting_name", "page": 0, "slots": [], "appointments": [],
                 "pending": {"awaiting": "name", "slot_id": slots[0].slot_id}}
 check("bare name while awaiting one", P("Alex Rivera", pending_name, []) == {"action": "book", "slot_id": slots[0].slot_id, "name": "Alex Rivera"})

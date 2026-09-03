@@ -95,7 +95,7 @@ def _session_scheduling_history(history: List[Dict[str, Any]]) -> Dict[str, Any]
         if not isinstance(sched, dict):
             continue
         state = sched.get("state")
-        if state in ("offered", "choosing", "awaiting_name", "already_booked"):
+        if state in ("check_resolved", "offered", "choosing", "awaiting_name", "already_booked"):
             offered = True
         if state == "declined":
             declined = True
@@ -144,6 +144,10 @@ def _payload(profile: SchedulingProfile, theme: str, state_name: str, **fields: 
         "appointments": [],
         "appointment": None,
         "actions": [],
+        # A follow-up the UI shows as its OWN assistant bubble (with the chips
+        # under it) instead of appending to the answer — the "did this resolve
+        # your concern?" check.
+        "message": None,
     }
     payload.update(fields)
     return payload
@@ -321,10 +325,15 @@ def _execute(state: Dict[str, Any], profile: SchedulingProfile, theme_key: str, 
         verdict = svc.should_offer(profile, severity=state.get("severity"), first_answer=ctx.get("first_answer", True),
                                    declined=ctx.get("declined", False), has_upcoming=bool(upcoming))
         if verdict == "offer":
-            slots = [s.as_dict() for s in svc.suggest_slots(profile, now_utc=now, tz=tz, page=0)]
-            out = present(slots, state_name="offered", text=profile.render("offer"), page_no=0)
-            out["facts"].append("The user has NOT been asked yet; this is the invitation.")
-            return out
+            # Not the offer yet: first ask, in a separate bubble, whether the
+            # answer resolved the concern. The offer follows a "no".
+            text = profile.render("check")
+            return {"payload": _payload(profile, theme_key, "check_resolved", appointments=upcoming, message=text,
+                                        actions=[_action_chip("resolved", profile.render("check_yes")),
+                                                 _action_chip("not_resolved", profile.render("check_no"))]),
+                    "text": text, "summary": text,
+                    "facts": ["Ask ONLY whether the answer resolved their concern (yes/no buttons are shown); "
+                              "do not mention appointments or times yet."]}
         if verdict == "already_booked":
             label = upcoming[0]["label"]
             text = profile.render("already_booked", label=label)
@@ -332,6 +341,18 @@ def _execute(state: Dict[str, Any], profile: SchedulingProfile, theme_key: str, 
                                         actions=_appointment_chips(upcoming)),
                     "text": text, "summary": text, "facts": []}
         return {"payload": None, "text": "", "summary": "", "facts": []}
+
+    if kind == "not_resolved":
+        slots = [s.as_dict() for s in svc.suggest_slots(profile, now_utc=now, tz=tz, page=0)]
+        out = present(slots, state_name="offered", text=profile.render("offer"), page_no=0)
+        out["facts"].append("The user said the concern is NOT resolved; invite them to book.")
+        return out
+
+    if kind == "resolved":
+        text = profile.render("resolved")
+        return {"payload": _payload(profile, theme_key, "resolved", appointments=upcoming),
+                "text": text, "summary": "The user said the concern is resolved; close warmly, no offer.",
+                "facts": [f"They can schedule {profile.a_noun} anytime by asking."]}
 
     if kind in ("accept", "more_times", "choose_slot"):
         slots = ctx.get("slots") or []
@@ -470,6 +491,14 @@ def scheduling_node(state: Dict[str, Any]) -> Dict[str, Any]:
         return {}
     text = outcome.get("text") or ""
     updates: Dict[str, Any] = {"scheduling": payload}
+    # The "did this resolve your concern?" check rides in payload["message"]: the
+    # UI shows it as its own bubble under the untouched answer. It is fixed copy
+    # in BOTH modes — a yes/no prompt must not depend on a model's phrasing (a
+    # local model turned it into a statement) — so no scheduling-agent call here;
+    # the agent phrases what follows a "no".
+    if payload.get("state") == "check_resolved":
+        payload["message"] = text
+        return updates
 
     if multi_agent:
         # The scheduling agent phrases the outcome (offer included); the
@@ -511,7 +540,8 @@ def scheduling_node(state: Dict[str, Any]) -> Dict[str, Any]:
         updates["agent_trace"] = trace
         # An intent turn IS the scheduling reply: the scheduling agent's wording
         # replaces the domain agent's text (a local model tends to re-answer the
-        # domain question despite the hand-off). An answer turn appends the offer.
+        # domain question despite the hand-off). Other answer-turn copy
+        # (already booked) is appended.
         updates["final_message"] = text if intent_turn else (
             f"{final_message.rstrip()}\n\n{text}" if final_message else text)
         return updates

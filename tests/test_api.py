@@ -647,11 +647,12 @@ def main() -> int:
         try:
             r1 = c.post("/api/chat/message", headers=AUTH, json=_sp)
             s1 = (r1.json().get("scheduling") if r1.status_code == 200 else None) or {}
-            check("scheduling: first answer offers on the JSON endpoint",
-                  r1.status_code == 200 and s1.get("state") == "offered" and len(s1.get("slots") or []) == 3, r1.text[:200])
-            check("scheduling: chips are book x3 + More times + No thanks",
-                  [a.get("action") for a in s1.get("actions", [])] == ["book", "book", "book", "more_times", "decline"])
-            check("scheduling: the verticalized offer copy is in the answer", "follow-up visit" in r1.json().get("message", ""))
+            check("scheduling: first answer asks whether it resolved the concern (JSON endpoint)",
+                  r1.status_code == 200 and s1.get("state") == "check_resolved" and bool(s1.get("message"))
+                  and not s1.get("slots"), r1.text[:200])
+            check("scheduling: the check's chips are Yes / No",
+                  [a.get("action") for a in s1.get("actions", [])] == ["resolved", "not_resolved"])
+            check("scheduling: the answer itself carries no offer copy", "follow-up visit" not in r1.json().get("message", ""))
             rs = c.post("/api/chat/message/stream", headers=AUTH, json=dict(_sp, message="I also have a mild headache"))
             _frames = [_json.loads(l[6:]) for l in rs.text.splitlines() if l.startswith("data: ")]
             _final = next((f for f in _frames if f.get("event") == "final"), {})
@@ -664,7 +665,15 @@ def main() -> int:
                   f"severity={_sev} re-offered={_final.get('scheduling') is not None}")
             check("scheduling: scheduling stage frames streamed",
                   {"scheduling_intake", "scheduling"} <= {f.get("node") for f in _frames if f.get("event") == "stage"})
-            _slot = s1["slots"][1]
+            r1b = c.post("/api/chat/message", headers=AUTH,
+                         json=dict(_sp, message="No, I still have concerns", scheduling_action={"action": "not_resolved"}))
+            s1b = r1b.json().get("scheduling") or {}
+            check("scheduling: 'No' brings the offer with 3 slot chips + More times + No thanks",
+                  s1b.get("state") == "offered"
+                  and [a.get("action") for a in s1b.get("actions", [])] == ["book", "book", "book", "more_times", "decline"],
+                  r1b.text[:200])
+            check("scheduling: the verticalized offer copy is the reply", "follow-up visit" in r1b.json().get("message", ""))
+            _slot = s1b["slots"][1]
             r2 = c.post("/api/chat/message", headers=AUTH,
                         json=dict(_sp, message="Book " + _slot["label"],
                                   scheduling_action={"action": "book", "slot_id": _slot["slot_id"]}))
