@@ -1,8 +1,8 @@
 """The shared guardrail chain every blueprint is wired into — parity by construction.
 
-    START -> policy -> prompt_defense -> nemo_input_rails -> <core entry>
+    START -> policy -> prompt_defense -> nemo_input_rails -> scheduling_intake -> <core entry>
              ... core ...
-    <core exit> -> safety -> injection -> compliance -> agent_control
+    <core exit> -> safety -> injection -> scheduling -> compliance -> agent_control
                 -> nemo_output_rails -> response_defense -> governance -> END
 
 Any node may short-circuit to END by setting ``terminal`` (policy block,
@@ -28,16 +28,21 @@ from backend.agents.nodes.injection import injection_node
 from backend.agents.nodes.nemo_rails import nemo_input_rails_node, nemo_output_rails_node
 from backend.agents.nodes.policy import policy_block_node
 from backend.agents.nodes.safety import safety_node
+from backend.agents.nodes.scheduling import scheduling_intake_node, scheduling_node
 from backend.agents.state import DemoBotState
 
 # Screen the PROMPT before any model call. Order matters: the internal policy
 # engine is free and deterministic, Cisco AI Defense inspects next, NeMo's
-# input rails last.
-PRE_NODES: List[str] = ["policy", "prompt_defense", "nemo_input_rails"]
+# input rails last. scheduling_intake (docs/scheduling.md) runs after the
+# screens: it reads the already-vetted message, never calls a model, never
+# terminates.
+PRE_NODES: List[str] = ["policy", "prompt_defense", "nemo_input_rails", "scheduling_intake"]
 # Screen / shape the ANSWER. Cisco AI Defense (response_defense) stays the last
-# word on output; governance logs the outcome.
+# word on output; governance logs the outcome. scheduling sits before
+# compliance so its text is part of the logged response_text and is still
+# screened by agent_control / NeMo / AI Defense.
 POST_NODES: List[str] = [
-    "safety", "injection", "compliance", "agent_control",
+    "safety", "injection", "scheduling", "compliance", "agent_control",
     "nemo_output_rails", "response_defense", "governance",
 ]
 GUARDRAIL_NODES: List[str] = PRE_NODES + POST_NODES
@@ -46,8 +51,10 @@ _NODE_FNS: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
     "policy": policy_block_node,
     "prompt_defense": prompt_defense_node,
     "nemo_input_rails": nemo_input_rails_node,
+    "scheduling_intake": scheduling_intake_node,
     "safety": safety_node,
     "injection": injection_node,
+    "scheduling": scheduling_node,
     "compliance": compliance_node,
     "agent_control": agent_control_node,
     "nemo_output_rails": nemo_output_rails_node,

@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 from backend.services.recommendation_engine import RecommendationEngine
+from backend.services.scheduling import DEFAULT_PROFILE, SchedulingProfile
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,10 @@ class ThemeConfig:
     system_prompt: str
     # Tuple (not list) so the frozen dataclass stays hashable.
     specialists: Tuple[SpecialistSpec, ...] = field(default_factory=tuple)
+    # The theme's appointment-scheduling vertical (docs/scheduling.md): what is
+    # booked, with whom, the hours, and the copy. Defaulted so a ThemeConfig
+    # built without one keeps working.
+    scheduling: SchedulingProfile = field(default=DEFAULT_PROFILE)
 
     @property
     def agent_name(self) -> str:

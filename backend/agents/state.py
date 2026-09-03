@@ -42,6 +42,10 @@ class DemoBotState(TypedDict, total=False):
     # see the note in ``backend/logging/log_schemas.py``.
     service_name: Optional[str]
     deployment_id: Optional[str]
+    # ---- Appointment scheduling inputs (docs/scheduling.md) ----
+    client_id: Optional[str]          # the browser's stable id: owner of its bookings (partition key)
+    client_tz: Optional[str]          # IANA zone the slot labels are rendered in
+    scheduling_action: Optional[Dict[str, Any]]  # structured chip action; wins over typed intent
 
     # ---- Correlation / timing (set by the router node) ----
     request_id: str
@@ -133,6 +137,15 @@ class DemoBotState(TypedDict, total=False):
     nemo_guardrails_input: Any  # RailVerdict
     nemo_guardrails_output: Any  # RailVerdict
 
+    # ---- Appointment scheduling (scheduling_intake PRE node / scheduling POST node) ----
+    # docs/scheduling.md. The intake node resolves the turn's scheduling action,
+    # the client's appointments and candidate slots; the POST node executes the
+    # action / decides the offer and leaves the structured payload the router
+    # returns as result["scheduling"] and persists as metadata.scheduling.
+    scheduling_context: Dict[str, Any]
+    scheduling_directive: str   # prompt tail for the domain agent (full in single-agent mode, hand-off in MA)
+    scheduling: Dict[str, Any]
+
     # ---- Short-circuit + final result ----
     # ``terminal`` is set by any node that fully handled the turn (policy block,
     # AI Defense block, clarifying question). ``result`` is the
@@ -162,6 +175,9 @@ def build_initial_state(
     nemo_guardrails_review: Optional[bool] = None,
     service_name: Optional[str] = None,
     deployment_id: Optional[str] = None,
+    client_id: Optional[str] = None,
+    client_tz: Optional[str] = None,
+    scheduling_action: Optional[Dict[str, Any]] = None,
 ) -> DemoBotState:
     """Build the initial graph state from an inbound chat request.
 
@@ -187,6 +203,9 @@ def build_initial_state(
         nemo_guardrails_review=nemo_guardrails_review,
         service_name=service_name,
         deployment_id=deployment_id,
+        client_id=client_id,
+        client_tz=client_tz,
+        scheduling_action=scheduling_action,
         terminal=False,
     )
 

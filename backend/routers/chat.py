@@ -207,6 +207,12 @@ def _turn_kwargs(chat_request: ChatRequest, session: Dict[str, Any], client_host
         nemo_guardrails_review=chat_request.nemo_guardrails_review,
         blueprint=chat_request.blueprint,
         enduser_id=session.get("enduser_id"),
+        # Appointment scheduling (docs/scheduling.md): rides on every request,
+        # never on the (evictable) session dict.
+        client_id=chat_request.client_id,
+        client_tz=chat_request.client_tz,
+        scheduling_action=(chat_request.scheduling_action.model_dump()
+                           if chat_request.scheduling_action else None),
     )
 
 
@@ -280,7 +286,8 @@ async def send_message(
         type=response_data["type"],
         severity=response_data.get("severity"),
         escalated=response_data.get("escalated", False),
-        timestamp=datetime.utcnow()
+        timestamp=datetime.utcnow(),
+        scheduling=response_data.get("scheduling"),
     )
 
 
@@ -351,6 +358,8 @@ async def send_message_stream(
                     "severity": getattr(severity, "value", severity) if severity is not None else None,
                     "escalated": response_data.get("escalated", False),
                     "timestamp": datetime.utcnow().isoformat(),
+                    # Same key as ChatResponse: the UI reads the stream first.
+                    "scheduling": response_data.get("scheduling"),
                 }
                 yield f"data: {json.dumps(final_frame)}\n\n"
             else:

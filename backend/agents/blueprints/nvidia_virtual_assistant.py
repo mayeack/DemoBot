@@ -203,6 +203,14 @@ def make_primary_assistant(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
     agent_name = f"{theme_config.key}_primary_assistant"
 
     def primary_assistant(state: Dict[str, Any]) -> Dict[str, Any]:
+        # A scheduling-intent turn routes to no sub-assistant (the HandleOtherTalk
+        # path): the responder answers with the scheduling directive and the
+        # shared scheduling node follows. No routing model call (docs/scheduling.md).
+        if (state.get("scheduling_context") or {}).get("action"):
+            return {
+                "selected_specialists": [],
+                "blueprint_route": {"tools": [OTHER_TALK], "other_talk": True, "mode": "scheduling"},
+            }
         allow_multi = state.get("multi_agent_mode") is True
         limit = 2 if allow_multi else 1
         system = build_primary_prompt(theme_config, allow_multi=allow_multi)

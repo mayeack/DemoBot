@@ -138,6 +138,8 @@ class _FakeLLM:
             content = "- internal finding"
         elif "primary_assistant" in agent_name or agent_name.endswith("_router"):
             content = '{"assistant": "triage", "rationale": "x"}'
+        elif agent_name.endswith("_scheduling_agent"):
+            content = "Happy to set that up for you."
         elif "REQUIRED" in system and "RESPONSE" in system:
             content = _COMPLIANT_REPLY if '"reply"' in system else _COMPLIANT_STRUCTURED
         else:
@@ -170,12 +172,15 @@ def _governance_capture():
 
     events: List[Dict[str, Any]] = []
     g = gl.governance_logger
-    orig = {n: getattr(g, n) for n in ("log_response", "log_request", "log_escalation", "log_error", "log_decision")}
+    orig = {n: getattr(g, n) for n in ("log_response", "log_request", "log_escalation", "log_error", "log_decision",
+                                       "log_tool_call")}
     try:
         g.log_response = lambda **kw: events.append(dict(kw, _kind="response"))
         # A generation error logs an ERROR event (no response event) — record it
         # so the scenario still proves an event was logged.
         g.log_error = lambda **kw: events.append(dict(kw, _kind="error"))
+        # A booking logs a tool_call event BEFORE the turn's response event.
+        g.log_tool_call = lambda **kw: events.append(dict(kw, _kind="tool_call"))
         for n in ("log_request", "log_escalation", "log_decision"):
             setattr(g, n, lambda **kw: None)
         yield events
@@ -242,8 +247,32 @@ def _scenario(kind: str):
             fail_agents = ("*",)
         elif kind == "multi_agent":
             kwargs["multi_agent_mode"] = True
+        elif kind.startswith("scheduling_"):
+            # Appointment scheduling (docs/scheduling.md): an in-memory store so no
+            # scenario writes ./medadvice.db; the LLM stub answers the scheduling
+            # agent too. Same outcome expected from every blueprint.
+            from datetime import datetime, timedelta
+            from backend.agents.nodes import scheduling as sched_mod
+            from tests._scheduling_nodes_checks import FakeStore
+
+            saved["store"] = sched_mod.store
+            sched_mod.store = FakeStore()
+            kwargs.update(client_id="parity-client", client_tz="UTC")
+            if kind == "scheduling_book":
+                slot_id = (datetime.utcnow() + timedelta(days=3)).replace(hour=14, minute=0).strftime("%Y%m%dT%H%MZ")
+                kwargs.update(multi_agent_mode=True, user_message="Alex Rivera", conversation_history=[
+                    {"role": "user", "content": "sore throat"},
+                    {"role": "assistant", "content": "What name?", "type": "recommendation",
+                     "metadata": {"scheduling": {"state": "awaiting_name", "slots": [],
+                                                 "pending": {"awaiting": "name", "slot_id": slot_id}}}},
+                ])
+            elif kind == "scheduling_list":
+                kwargs.update(user_message="what's on my schedule?")
         yield kwargs, fail_agents
     finally:
+        if "store" in saved:
+            from backend.agents.nodes import scheduling as sched_mod
+            sched_mod.store = saved["store"]
         if "cpb" in saved:
             escalation_rules.check_policy_block = saved["cpb"]
         if "adc" in saved:
@@ -266,7 +295,8 @@ def _run(bp_key: str, theme: str, kind: str) -> Dict[str, Any]:
         saved = _install_llm(fake)
         try:
             base = dict(session_id="parity", user_message="I have a mild sore throat and want advice",
-                        conversation_history=[], theme=theme, blueprint=bp_key, **kwargs)
+                        conversation_history=[], theme=theme, blueprint=bp_key)
+            base.update(kwargs)   # a scenario may override the message / history too
             result = graph.run_turn(**base)
             stages = [ev["node"] for ev in graph.run_turn_stream(**base) if ev.get("event") == "stage"]
         finally:
@@ -280,7 +310,11 @@ def _run(bp_key: str, theme: str, kind: str) -> Dict[str, Any]:
             "severity": getattr(sev, "value", sev),
             "escalated": result.get("escalated"),
             "policy_blocked": result.get("policy_blocked", False),
+            "scheduling_state": (result.get("scheduling") or {}).get("state"),
         },
+        # Unique names: the scenario runs run_turn AND run_turn_stream, so a
+        # booking is logged once per run.
+        "tool_calls": list(dict.fromkeys(e.get("tool_name") for e in events if e.get("_kind") == "tool_call")),
         "governance": {k: last.get(k) for k in _GOV_KEYS},
         "gov_present": bool(events),
         "guardrail_stages": [s for s in stages if s in GUARDRAIL_NODES],
@@ -292,7 +326,8 @@ def _run(bp_key: str, theme: str, kind: str) -> Dict[str, Any]:
 
 SCENARIOS = ("benign", "policy_block", "ai_defense_prompt_block", "ai_defense_response_block",
              "nemo_input_block", "nemo_output_block", "agent_control_deny", "forced_injection",
-             "generation_error", "multi_agent")
+             "generation_error", "multi_agent",
+             "scheduling_offer", "scheduling_book", "scheduling_list")
 
 
 def test_dynamic_parity() -> None:
@@ -330,8 +365,26 @@ def test_dynamic_parity() -> None:
                 check(f"[{key} vs {ref_key}] {sk}: same guardrail stage frames",
                       out["guardrail_stages"] == ref["guardrail_stages"],
                       f"{out['guardrail_stages']} != {ref['guardrail_stages']}")
+                if sk.endswith(("scheduling_offer", "scheduling_book", "scheduling_list")):
+                    check(f"[{key} vs {ref_key}] {sk}: same booking tool calls",
+                          out["tool_calls"] == ref["tool_calls"], f"{out['tool_calls']} != {ref['tool_calls']}")
+                    check(f"[{key} vs {ref_key}] {sk}: scheduling agent present in both or neither",
+                          (f"{sk.split('/')[0]}_scheduling_agent" in out["agents"])
+                          == (f"{sk.split('/')[0]}_scheduling_agent" in ref["agents"]), str(out["agents"]))
         # Sanity on the reference: the scenarios actually exercise the guardrails.
         r = outcomes[ref_key]
+        check("scheduling: first answer offers (chips come from the shared node)",
+              r["medadvice/scheduling_offer"]["result"]["scheduling_state"] == "offered")
+        check("scheduling: Multi-Agent booking runs the scheduling agent and logs the tool call",
+              r["medadvice/scheduling_book"]["result"]["scheduling_state"] == "booked"
+              and "medadvice_scheduling_agent" in r["medadvice/scheduling_book"]["agents"]
+              and r["medadvice/scheduling_book"]["tool_calls"] == ["schedule_appointment"], str(r["medadvice/scheduling_book"]))
+        check("scheduling: a scheduling turn skips the domain specialists (Multi-Agent on)",
+              not any(a.endswith(("_specialist", "_assistant")) and "scheduling" not in a
+                      for a in r["medadvice/scheduling_book"]["agents"]), str(r["medadvice/scheduling_book"]["agents"]))
+        check("scheduling: 'my schedule' lists", r["medadvice/scheduling_list"]["result"]["scheduling_state"] == "listed")
+        check("scheduling: the scheduling stages are in the guardrail frames",
+              {"scheduling_intake", "scheduling"} <= set(r["medadvice/scheduling_offer"]["guardrail_stages"]))
         check("policy block is a block", r["medadvice/policy_block"]["result"]["policy_blocked"] is True)
         check("AI Defense prompt block attributed", "cisco_ai_defense" in (r["medadvice/ai_defense_prompt_block"]["governance"]["guardrail_ids"] or []))
         check("NeMo input block attributed", r["medadvice/nemo_input_block"]["governance"]["guardrail_ids"] == ["nemo_guardrails"])

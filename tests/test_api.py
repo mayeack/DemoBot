@@ -99,7 +99,7 @@ def main() -> int:
 
         # ---- auth gating: gated endpoints reject without the key (401 JSON) ----
         for path in ("/api/chat/auto-prompt/status", "/api/incident/status",
-                     "/api/spray/status",
+                     "/api/spray/status", "/api/appointments?client_id=x",
                      "/api/settings", "/api/hec/destinations", "/admin/logs/metrics",
                      "/api/settings/emit-model"):
             r = c.get(path)
@@ -631,9 +631,83 @@ def main() -> int:
         check("GET /logout -> 2xx/3xx", c.get("/logout", headers=AUTH, follow_redirects=False).status_code in (200, 302, 303))
 
         # ---- server-rendered pages (HTML, with key) ----
-        for path in ("/app", "/admin-ui", "/governance-ui", "/settings-ui"):
+        for path in ("/app", "/admin-ui", "/governance-ui", "/settings-ui", "/appointments-ui"):
             r = c.get(path, headers=AUTH)
             check(f"GET {path} -> 200 HTML", r.status_code == 200 and "<html" in r.text.lower(), f"{r.status_code}")
+
+        # ---- appointment scheduling, end to end through the API (docs/scheduling.md) ----
+        # The stubbed LLM answers LOW, so medadvice offers on the first answer.
+        import json as _json  # noqa: PLC0415
+        import uuid as _uuid  # noqa: PLC0415
+        from backend.services.scheduling import store as _appt_store  # noqa: PLC0415
+        _cid = f"test-{_uuid.uuid4().hex[:10]}"
+        _ssid = c.post("/api/chat/session/new", headers=AUTH).json()["session_id"]
+        _sp = {"session_id": _ssid, "message": "I have a mild sore throat and want advice",
+               "disclaimer_accepted": True, "client_id": _cid, "client_tz": "America/New_York"}
+        try:
+            r1 = c.post("/api/chat/message", headers=AUTH, json=_sp)
+            s1 = (r1.json().get("scheduling") if r1.status_code == 200 else None) or {}
+            check("scheduling: first answer offers on the JSON endpoint",
+                  r1.status_code == 200 and s1.get("state") == "offered" and len(s1.get("slots") or []) == 3, r1.text[:200])
+            check("scheduling: chips are book x3 + More times + No thanks",
+                  [a.get("action") for a in s1.get("actions", [])] == ["book", "book", "book", "more_times", "decline"])
+            check("scheduling: the verticalized offer copy is in the answer", "follow-up visit" in r1.json().get("message", ""))
+            rs = c.post("/api/chat/message/stream", headers=AUTH, json=dict(_sp, message="I also have a mild headache"))
+            _frames = [_json.loads(l[6:]) for l in rs.text.splitlines() if l.startswith("data: ")]
+            _final = next((f for f in _frames if f.get("event") == "final"), {})
+            check("scheduling: SSE final frame carries the scheduling key", rs.status_code == 200 and "scheduling" in _final)
+            # The stub's answer parses to one severity for both turns; medadvice
+            # re-offers on a later MEDIUM/HIGH answer and stays quiet on LOW.
+            _sev = r1.json().get("severity")
+            check("scheduling: later answers re-offer only per the theme's severity policy",
+                  (_final.get("scheduling") is not None) == (_sev in ("MEDIUM", "HIGH")),
+                  f"severity={_sev} re-offered={_final.get('scheduling') is not None}")
+            check("scheduling: scheduling stage frames streamed",
+                  {"scheduling_intake", "scheduling"} <= {f.get("node") for f in _frames if f.get("event") == "stage"})
+            _slot = s1["slots"][1]
+            r2 = c.post("/api/chat/message", headers=AUTH,
+                        json=dict(_sp, message="Book " + _slot["label"],
+                                  scheduling_action={"action": "book", "slot_id": _slot["slot_id"]}))
+            s2 = r2.json().get("scheduling") or {}
+            check("scheduling: chip book without a known name -> awaiting_name",
+                  s2.get("state") == "awaiting_name" and (s2.get("pending") or {}).get("slot_id") == _slot["slot_id"], r2.text[:200])
+            r3 = c.post("/api/chat/message", headers=AUTH, json=dict(_sp, message="Alex Rivera"))
+            s3 = r3.json().get("scheduling") or {}
+            _appt = s3.get("appointment") or {}
+            check("scheduling: a bare name completes the booking",
+                  s3.get("state") == "booked" and _appt.get("name") == "Alex Rivera" and _appt.get("label") == _slot["label"], r3.text[:200])
+            _last_meta = ((c.get(f"/api/chat/session/{_ssid}", headers=AUTH).json().get("messages") or [{}])[-1].get("metadata") or {})
+            check("scheduling: metadata.scheduling persisted on the assistant message",
+                  (_last_meta.get("scheduling") or {}).get("state") == "booked")
+            r4 = c.post("/api/chat/message", headers=AUTH, json=dict(_sp, message="what's on my schedule?"))
+            s4 = r4.json().get("scheduling") or {}
+            check("scheduling: 'my schedule' lists with Reschedule/Cancel chips",
+                  s4.get("state") == "listed" and [a.get("action") for a in s4.get("actions", [])] == ["reschedule", "cancel"], r4.text[:200])
+            check("scheduling: a scheduling turn is not escalated by the safety rules", r4.json().get("escalated") is False)
+            check("GET /api/appointments requires client_id", c.get("/api/appointments", headers=AUTH).status_code == 422)
+            la = c.get(f"/api/appointments?client_id={_cid}&tz=America/New_York", headers=AUTH).json()
+            check("GET /api/appointments lists the booking with its local label",
+                  la.get("total") == 1 and la["appointments"][0]["id"] == _appt.get("id")
+                  and la["appointments"][0].get("label") == _slot["label"], str(la)[:200])
+            check("GET /api/appointments is per client",
+                  c.get("/api/appointments?client_id=someone-else", headers=AUTH).json().get("total") == 0)
+            check("PUT /api/appointments/{id} with the wrong client -> 404",
+                  c.put(f"/api/appointments/{_appt.get('id')}", headers=AUTH,
+                        json={"client_id": "someone-else", "status": "cancelled"}).status_code == 404)
+            check("PUT /api/appointments/{id} with nothing to update -> 422",
+                  c.put(f"/api/appointments/{_appt.get('id')}", headers=AUTH, json={"client_id": _cid}).status_code == 422)
+            up = c.put(f"/api/appointments/{_appt.get('id')}", headers=AUTH, json={"client_id": _cid, "status": "cancelled"})
+            check("PUT /api/appointments/{id} cancels", up.status_code == 200 and up.json().get("status") == "cancelled", up.text[:160])
+            check("GET /api/appointments hides the cancelled booking by default",
+                  c.get(f"/api/appointments?client_id={_cid}", headers=AUTH).json().get("total") == 0)
+            _nosid = c.post("/api/chat/session/new", headers=AUTH).json()["session_id"]
+            r5 = c.post("/api/chat/message", headers=AUTH,
+                        json={"session_id": _nosid, "message": "mild sore throat", "disclaimer_accepted": True})
+            check("scheduling: no client_id -> inert (no scheduling key)", r5.status_code == 200 and r5.json().get("scheduling") is None)
+            check("scheduling: a malformed client_id is rejected (422)",
+                  c.post("/api/chat/message", headers=AUTH, json=dict(_sp, client_id="bad id!")).status_code == 422)
+        finally:
+            _appt_store.delete_for_client(_cid)   # the suite runs against the live DB
 
         # ---- Settings page UI invariants: collapsible sections + read-only provider pill ----
         s_html = c.get("/settings-ui", headers=AUTH).text

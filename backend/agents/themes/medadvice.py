@@ -6,6 +6,7 @@ from backend.agents.themes.base import (
     is_conversational,
     prompt_for,
 )
+from backend.services.scheduling import SchedulingProfile
 
 SPECIALISTS = (
     SpecialistSpec(
@@ -46,10 +47,34 @@ SPECIALISTS = (
     ),
 )
 
+# Scheduling vertical: a clinician follow-up visit. Never offered on an EMERGENCY
+# answer (the answer says to call 911); re-offered on later MEDIUM/HIGH answers.
+SCHEDULING = SchedulingProfile(
+    appointment_noun="follow-up visit",
+    provider_noun="a clinician",
+    provider_label="Clinician follow-up visit",
+    slot_minutes=20,
+    business_days=(0, 1, 2, 3, 4),
+    open_hour=8,
+    close_hour=17,
+    lead_minutes=120,
+    offer_on_severities=("MEDIUM", "HIGH"),
+    first_offer_excludes=("EMERGENCY",),
+    offer=(
+        "Would you like to schedule a follow-up visit with a clinician to go over this "
+        "in person? Here are the next available times:"
+    ),
+    confirmed=(
+        "You're booked: {label} — follow-up visit with a clinician, under {name}. "
+        "Bring a list of your current medications."
+    ),
+)
+
 THEME = ThemeConfig(
     key="medadvice",
     label="MedAdvice",
     conversational=is_conversational("medadvice"),
     system_prompt=prompt_for("medadvice"),
     specialists=SPECIALISTS,
+    scheduling=SCHEDULING,
 )

@@ -398,3 +398,22 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
   Both only surfaced live (verified 2026-09-02 on mistral-nemo:12b: jailbreak →
   `self check input`, oxycodone answer → `self check output`, ~4-9 s per judge
   call, so a toggled turn adds ~10-15 s on the 12B model).
+
+## Appointment scheduling (2026-09-03, docs/scheduling.md)
+
+- **Deterministic scheduling + LLM voice.** `services/scheduling.py` owns slots,
+  intent, bookings and the chips (`scheduling.actions`); `nodes/scheduling.py`
+  is the shared-chain pair (`scheduling_intake` last PRE, `scheduling` between
+  `injection` and `compliance`). Never parse structure out of model text.
+- A scheduling turn is recognised by `scheduling_context.action` (chip action >
+  typed parser). On such turns: clarifier asks nothing, `safety_node` skips the
+  escalation rules ("see a doctor" would flag a booking), both cores skip the
+  domain specialists. The offer's "?" is excluded from the clarifier budget via
+  `metadata.scheduling`.
+- On Ollama the answer is a JSON contract and trailing prose is parsed away, so
+  the offer/confirmation copy is appended by the POST node AFTER parsing.
+- A node exception replaces the whole turn with the generic safety warning
+  (graph.py) — every store call in the nodes degrades to `state="unavailable"`.
+- `client_id` = browser localStorage id (partition key, not auth). The parity
+  suite swaps `nodes.scheduling.store` for `tests/_scheduling_nodes_checks.FakeStore`
+  so no scenario writes `./medadvice.db`; `test_api.py` cleans its `test-*` client.

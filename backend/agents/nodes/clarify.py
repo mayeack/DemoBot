@@ -19,6 +19,11 @@ def intake_node(state: Dict[str, Any]) -> Dict[str, Any]:
     # Conversational themes self-manage follow-up questions in-prompt.
     if state.get("conversational"):
         return {}
+    # A scheduling-intent turn ("cancel my appointment") never needs a
+    # clarifying question; the clarifier would re-read the earlier symptom text
+    # and ask about it (docs/scheduling.md).
+    if (state.get("scheduling_context") or {}).get("action"):
+        return {}
 
     conversation_history = state.get("conversation_history", [])
     user_message = state["user_message"]

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Appointment scheduling — DemoBot</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 880px; margin: 2rem auto; padding: 0 1rem; color: #1f2937; line-height: 1.55; }
+  h1, h2, h3 { color: #111827; line-height: 1.25; }
+  h1 { font-size: 1.9rem; border-bottom: 2px solid #e5e7eb; padding-bottom: .4rem; }
+  h2 { font-size: 1.35rem; margin-top: 2rem; border-bottom: 1px solid #e5e7eb; padding-bottom: .25rem; }
+  h3 { font-size: 1.1rem; margin-top: 1.4rem; }
+  code { background: #f3f4f6; padding: .1rem .3rem; border-radius: 3px; font-size: .92em; }
+  pre { background: #f3f4f6; padding: .8rem 1rem; border-radius: 6px; overflow-x: auto; font-size: .88em; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: .8rem 0; font-size: .93em; }
+  th, td { border: 1px solid #e5e7eb; padding: .4rem .6rem; text-align: left; vertical-align: top; }
+  th { background: #f9fafb; }
+  ul { padding-left: 1.4rem; }
+  li { margin: .25rem 0; }
+</style>
+</head>
+<body>
+<h1>Appointment scheduling</h1>
+<p>DemoBot can offer, book, list, reschedule and cancel appointments from the chat, <strong>verticalized per Application Theme</strong> — a clinician follow-up visit for MedAdvice, a tax-preparer meeting (Saturdays included) for TaxAdvice, a two-hour technician arrival window for TelecomChatbot. Bookings are persisted, visible on the <strong>My Appointments</strong> page, and every mutation is a governed action (an <code>execute_tool</code> span and a <code>tool_call</code> governance event), so the feature doubles as a demo of an agent taking a real, auditable action.</p>
+
+<h2>Principle: deterministic scheduling, LLM voice</h2>
+<p>Nothing structured is ever parsed out of model text. The suggested times, the user's intent, the booking itself and the clickable options come from code (<code>backend/services/scheduling.py</code>); the model only writes conversational wording.</p>
+<table>
+<tr><th>Piece</th><th>Where</th></tr>
+<tr><td>Per-theme vertical (<code>SchedulingProfile</code>)</td><td><code>backend/agents/themes/&lt;theme&gt;.py</code> → <code>ThemeConfig.scheduling</code></td></tr>
+<tr><td>Slots, labels, intent parser, offer policy, store</td><td><code>backend/services/scheduling.py</code></td></tr>
+<tr><td>Pipeline nodes (<code>scheduling_intake</code>, <code>scheduling</code>)</td><td><code>backend/agents/nodes/scheduling.py</code>, wired in <code>blueprints/guardrails.py</code></td></tr>
+<tr><td>Persistence</td><td><code>Appointment</code> in <code>backend/models/db_models.py</code> (<code>appointments</code> table; created by <code>init_db</code>, no migration)</td></tr>
+<tr><td>Chat contract</td><td><code>ChatRequest.client_id / client_tz / scheduling_action</code>, <code>ChatResponse.scheduling</code></td></tr>
+<tr><td>Chips in the chat</td><td><code>frontend/js/chat.js</code> <code>attachSchedulingActions</code></td></tr>
+<tr><td>My Appointments page + API</td><td><code>frontend/appointments.html</code>, <code>frontend/js/appointments.js</code>, <code>backend/routers/appointments.py</code></td></tr>
+</table>
+
+<h2>Where it runs in the pipeline</h2>
+<pre><code>START → policy → prompt_defense → nemo_input_rails → scheduling_intake → &lt;core&gt;
+&lt;core exit&gt; → safety → injection → scheduling → compliance → agent_control
+            → nemo_output_rails → response_defense → governance → END</code></pre>
+<p>Both nodes are in the <strong>shared</strong> guardrail chain, so both blueprints get scheduling by construction (CLAUDE.md "Blueprint feature parity").</p>
+<ul>
+<li><strong><code>scheduling_intake</code></strong> (last PRE node; deterministic, no model, never terminal): resolves the browser (<code>client_id</code>) and its zone, parses the turn's scheduling action (a chip's structured <code>scheduling_action</code> wins over the typed-text parser), loads the client's appointments, generates candidate slots, and writes the prompt directive the domain agent will see.</li>
+<li><strong><code>scheduling</code></strong> (POST node between <code>injection</code> and <code>compliance</code>): executes the action, decides whether to offer on an answer turn, appends the deterministic scheduling copy to <code>final_message</code> and leaves the structured payload. Placed there so the text is part of the logged <code>response_text</code> and is still screened by Agent Observability Controls, NeMo output rails and Cisco AI Defense.</li>
+</ul>
+
+<h3>Multi-Agent Mode</h3>
+<ul>
+<li><strong>On:</strong> the POST node runs as the <strong><code>{theme}_scheduling_agent</code></strong> — its own AgentInvocation span, a short model call for the wording (the internal Ollama model, 160 tokens), an <code>agent_trace</code> entry with role <code>scheduling</code>, tokens summed onto the turn. Bookings execute under that span. The domain agent only acknowledges a scheduling request (hand-off directive) and the domain specialists are skipped on scheduling turns (<code>_route_after_intake</code>; the NVIDIA primary assistant routes to no sub-assistant).</li>
+<li><strong>Off:</strong> no separate agent. On a scheduling turn the domain agent receives the full scheduling context in its prompt and writes the reply itself; the node executes the action and appends template copy only when the model omitted the key fact (e.g. the slot label), so nothing is said twice. The offer on an answer turn is deterministic copy in both modes (on Ollama the answer is a JSON contract and appended prose is parsed away, so the node adds the offer after parsing).</li>
+</ul>
+<p>Shared-chain touches on scheduling turns: <code>clarify.intake_node</code> asks no clarifying question, <code>safety_node</code> skips the escalation rules (an earlier emergency already escalated on its own turn; "see a doctor" phrasing must not flag a booking), and the clarifier does not count the offer's "?" toward its question budget.</p>
+
+<h2>Offer policy</h2>
+<p>Offer after the <strong>first</strong> non-clarifying reply of a session (clarifying turns never reach the POST chain), unless the theme excludes that severity — MedAdvice never offers on an EMERGENCY answer. Re-offer on later recommendation/escalation turns only when the severity is in the theme's <code>offer_on_severities</code> (MedAdvice: MEDIUM/HIGH; Telecom: HIGH+). Never once the client has an upcoming appointment (the first answer says so instead), never after an explicit decline in the session. Prior offers, declines and bookings are read from the persisted <code>metadata.scheduling</code> of earlier assistant messages, so the policy survives restarts and Show Recent reloads.</p>
+
+<h2>Identity and time</h2>
+<ul>
+<li>The <strong>browser</strong> owns its bookings: <code>frontend/js/chat.js</code> keeps a stable <code>medadvice_client_id</code> in localStorage and sends it as <code>client_id</code> on every request. It is a partition key, <strong>not authorization</strong> — every visitor shares one access key. The agent still asks what <strong>name</strong> to put on the booking (display only, remembered from the client's latest appointment).</li>
+<li>Slots are synthetic and unlimited: the next N after <code>now + lead time</code> inside the theme's business hours, paged forward by "More times". No calendar, no conflicts.</li>
+<li>Storage is naive UTC like every other timestamp; labels are rendered in the client's IANA zone (<code>client_tz</code>, stdlib <code>zoneinfo</code>), falling back to <code>SCHEDULING_DEFAULT_TIMEZONE</code> (<code>.env</code>, default <code>America/New_York</code>).</li>
+</ul>
+
+<h2>Per-theme verticals</h2>
+<table>
+<tr><th>theme</th><th>appointment / provider</th><th>slot</th><th>hours</th><th>first offer</th><th>re-offer</th></tr>
+<tr><td>medadvice</td><td>follow-up visit / a clinician</td><td>20 min</td><td>Mon–Fri 8–17</td><td>not on EMERGENCY</td><td>MEDIUM, HIGH</td></tr>
+<tr><td>financeadvice</td><td>consultation / a financial advisor</td><td>45 min</td><td>Mon–Fri 9–17</td><td>always</td><td>MEDIUM+</td></tr>
+<tr><td>legaladvice</td><td>consultation / an attorney</td><td>30 min</td><td>Mon–Fri 9–17</td><td>always</td><td>MEDIUM+</td></tr>
+<tr><td>taxadvice</td><td>meeting / a tax preparer</td><td>30 min</td><td>Mon–Sat 9–18</td><td>always</td><td>MEDIUM+</td></tr>
+<tr><td>benefitsadvice</td><td>session / a benefits counselor</td><td>30 min</td><td>Mon–Fri 9–16</td><td>always</td><td>MEDIUM+</td></tr>
+<tr><td>telecomchatbot</td><td>technician visit / a field technician</td><td>2-hour arrival windows</td><td>Mon–Sat 8–18</td><td>always</td><td>HIGH+</td></tr>
+</table>
+<p>Add a theme's vertical by defining <code>SCHEDULING = SchedulingProfile(...)</code> in its module and passing <code>scheduling=SCHEDULING</code> to its <code>ThemeConfig</code>; a theme without one gets <code>DEFAULT_PROFILE</code>.</p>
+
+<h2>The chat contract</h2>
+<p>Request (<code>POST /api/chat/message</code> and <code>/message/stream</code>):</p>
+<pre><code>{ "client_id": "b3e1…", "client_tz": "America/New_York",
+  "scheduling_action": {"action": "book", "slot_id": "20260907T1200Z", "appointment_id": null, "page": 0} }</code></pre>
+<p><code>action</code> ∈ <code>book | accept | more_times | decline | list | cancel | reschedule | choose_slot</code>.</p>
+<p>Response — <code>scheduling</code> on <code>ChatResponse</code> <strong>and</strong> the SSE <code>final</code> frame (and persisted as the assistant message's <code>metadata.scheduling</code>, returned by <code>GET /api/chat/session/{id}</code>):</p>
+<pre><code>{ "state": "offered", "theme": "medadvice", "appointment_noun": "follow-up visit",
+  "page": 0, "more_available": true,
+  "slots": [{"slot_id": "20260907T1200Z", "start_utc": "2026-09-07T12:00:00", "end_utc": "…",
+             "label": "Mon Sep 7, 8:00 AM", "day": "Mon Sep 7", "time": "8:00 AM"}],
+  "pending": null, "appointments": [], "appointment": null,
+  "actions": [{"action": "book", "slot_id": "20260907T1200Z", "text": "Mon Sep 7, 8:00 AM"},
+              {"action": "more_times", "page": 1, "text": "More times"},
+              {"action": "decline", "text": "No thanks"}] }</code></pre>
+<p><code>state</code> ∈ <code>offered | choosing | awaiting_name | booked | listed | cancelled | rescheduled | declined | already_booked | rescheduling | unavailable</code>. <code>actions</code> is the whole chip contract: the backend decides which chips exist and their (verticalized) labels; the UI renders them generically and sends a click back as <code>scheduling_action</code> with a readable user bubble ("Book Mon Sep 7, 8:00 AM").</p>
+
+<h2>Governance and telemetry</h2>
+<ul>
+<li>Bookings: <code>schedule_appointment</code>, <code>reschedule_appointment</code>, <code>cancel_appointment</code> <code>tool_call</code> governance events (<code>agent_surface=scheduling</code>, decision <code>allow</code>) + an <code>execute_tool</code> span — the tool-guard shape, so they appear beside chat turns in the Governance Logs page, SQLite and Splunk.</li>
+<li>Multi-Agent Mode: <code>invoke_agent {theme}_scheduling_agent</code> + its <code>chat</code> LLM span; the agent appears in <code>agent_trace</code> → Splunk Agent Observability.</li>
+<li>The My Appointments page's cancel/reschedule log <code>appointment_cancelled</code> / <code>appointment_rescheduled</code> audit events (actor <code>user</code>).</li>
+<li>No new turn-level governance field; SSE stage frames for both nodes come for free.</li>
+</ul>
+
+<h2>My Appointments page and API</h2>
+<p><code>/appointments-ui</code> lists <strong>this browser's</strong> appointments (same-origin, same <code>medadvice_client_id</code>), with Upcoming / Cancelled / All filters, local times, and Cancel; rescheduling happens in the chat. API (<code>backend/routers/appointments.py</code>, gated by the access key like everything else):</p>
+<ul>
+<li><code>GET /api/appointments?client_id=&amp;status=scheduled|cancelled|all&amp;theme=&amp;tz=&amp;limit=</code></li>
+<li><code>GET /api/appointments/{id}?client_id=</code></li>
+<li><code>PUT /api/appointments/{id}</code> body <code>{client_id, status: "cancelled"}</code> or <code>{client_id, start_utc: "&lt;naive UTC ISO&gt;"}</code> (a body model — bare scalars would bind as required query params).</li>
+</ul>
+
+<h2>Testing</h2>
+<ul>
+<li><code>venv/bin/python tests/test_scheduling.py</code> — slots (fixed clock, weekend/lead rollover, paging, windows, DST), intent parsing, offer policy, the store on a temp DB, and both nodes in both modes with the LLM/logger/store stubbed.</li>
+<li><code>tests/test_blueprint_parity.py</code> — <code>scheduling_offer</code> / <code>scheduling_book</code> / <code>scheduling_list</code> scenarios must produce the same <code>scheduling.state</code> and agent set in every blueprint.</li>
+<li><code>tests/test_api.py</code> — the contract end to end through the API (offer on both endpoints, book → name → booked, the appointments API and page).</li>
+<li><code>./tests/run_all.sh</code> runs everything; <code>./tests/observability/verify_observability.sh</code> after any pipeline change.</li>
+</ul>
+</body>
+</html>

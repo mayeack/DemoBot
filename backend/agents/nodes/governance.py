@@ -158,16 +158,22 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 enduser_id=enduser_id,
             )
 
-    return {
-        "terminal": True,
-        "result": {
-            "message": final_message,
-            "type": MessageType.ESCALATION if should_escalate else MessageType.RECOMMENDATION,
-            "severity": severity,
-            "escalated": should_escalate,
-            "metadata": {
-                "confidence": confidence,
-                "escalation_reasons": escalation_reasons if should_escalate else [],
-            },
+    result: Dict[str, Any] = {
+        "message": final_message,
+        "type": MessageType.ESCALATION if should_escalate else MessageType.RECOMMENDATION,
+        "severity": severity,
+        "escalated": should_escalate,
+        "metadata": {
+            "confidence": confidence,
+            "escalation_reasons": escalation_reasons if should_escalate else [],
         },
     }
+    # Appointment scheduling payload (docs/scheduling.md): returned to the UI
+    # (ChatResponse.scheduling / the SSE final frame) and persisted with the
+    # message as metadata.scheduling, which is how the next turn knows about a
+    # pending name, a prior offer or a decline.
+    scheduling = state.get("scheduling")
+    if scheduling:
+        result["scheduling"] = scheduling
+        result["metadata"]["scheduling"] = scheduling
+    return {"terminal": True, "result": result}

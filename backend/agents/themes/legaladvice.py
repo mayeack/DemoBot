@@ -6,6 +6,7 @@ from backend.agents.themes.base import (
     is_conversational,
     prompt_for,
 )
+from backend.services.scheduling import SchedulingProfile
 
 SPECIALISTS = (
     SpecialistSpec(
@@ -46,10 +47,31 @@ SPECIALISTS = (
     ),
 )
 
+# Scheduling vertical: a consultation with an attorney.
+SCHEDULING = SchedulingProfile(
+    appointment_noun="consultation",
+    provider_noun="an attorney",
+    provider_label="Attorney consultation",
+    slot_minutes=30,
+    business_days=(0, 1, 2, 3, 4),
+    open_hour=9,
+    close_hour=17,
+    lead_minutes=180,
+    offer=(
+        "Would you like to schedule a consultation with an attorney about this? "
+        "Here are the next available times:"
+    ),
+    confirmed=(
+        "You're booked: {label} — consultation with an attorney, under {name}. "
+        "Bring any documents, notices or deadlines you have."
+    ),
+)
+
 THEME = ThemeConfig(
     key="legaladvice",
     label="LegalAdvice",
     conversational=is_conversational("legaladvice"),
     system_prompt=prompt_for("legaladvice"),
     specialists=SPECIALISTS,
+    scheduling=SCHEDULING,
 )
