@@ -185,6 +185,10 @@ class Settings(BaseSettings):
     # documented 3 was never the real limit. Keeping the shipped behavior and
     # making the setting actually drive it.
     max_clarifying_questions: int = 2
+    # Appointment scheduling (docs/scheduling.md): the IANA zone used to render
+    # slot labels when the browser does not send its own (client_tz). Slots are
+    # stored as naive UTC like every other timestamp.
+    scheduling_default_timezone: str = "America/New_York"
 
     # Cisco AI Defense (Inspection API - runtime policy review of user prompts)
     # https://developer.cisco.com/docs/ai-defense-inspection/

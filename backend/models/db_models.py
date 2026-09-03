@@ -177,6 +177,34 @@ class AuditLog(Base):
         Index('idx_actor_timestamp', 'actor', 'timestamp'),
     )
 
+class Appointment(Base):
+    """One appointment booked from the chat's scheduling flow (docs/scheduling.md).
+
+    Keyed by the browser's ``client_id`` — a partition key, not authorization
+    (every visitor shares one access key). ``start_at`` is naive UTC like every
+    other timestamp here; ``timezone`` is the IANA zone the label was rendered
+    in when it was booked. A separate table so, like BlueprintAnalytics, it
+    needs no migration (create_all + reconcile_schema)."""
+    __tablename__ = "appointments"
+
+    id = Column(String, primary_key=True)
+    client_id = Column(String, nullable=False, index=True)
+    session_id = Column(String, nullable=False, index=True)
+    theme = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=True)
+    provider_label = Column(String, nullable=True)
+    start_at = Column(DateTime, nullable=False, index=True)
+    duration_minutes = Column(Integer, nullable=False, default=30)
+    timezone = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="scheduled", index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    notes = Column(JSON, default=dict)
+
+    __table_args__ = (
+        Index('idx_appt_client_status_start', 'client_id', 'status', 'start_at'),
+    )
+
 class AppSettings(Base):
     """Single-row table (id=1) holding runtime-mutable app settings: the local
     log directory and the Splunk HEC destinations. Edited via the Settings page

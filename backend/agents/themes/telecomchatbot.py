@@ -11,6 +11,7 @@ from backend.agents.themes.base import (
     is_conversational,
     prompt_for,
 )
+from backend.services.scheduling import SchedulingProfile
 
 SPECIALISTS = (
     SpecialistSpec(
@@ -52,10 +53,39 @@ SPECIALISTS = (
     ),
 )
 
+# Scheduling vertical: a technician visit booked as a 2-hour ARRIVAL WINDOW
+# (Mon-Sat), the way a truck roll is actually scheduled.
+SCHEDULING = SchedulingProfile(
+    appointment_noun="technician visit",
+    provider_noun="a field technician",
+    provider_label="Technician visit",
+    slot_minutes=120,
+    window_minutes=120,
+    business_days=(0, 1, 2, 3, 4, 5),
+    open_hour=8,
+    close_hour=18,
+    lead_minutes=240,
+    offer_on_severities=("HIGH", "EMERGENCY"),
+    offer="Want me to schedule a technician visit? Pick an arrival window:",
+    choose="Here are the next technician arrival windows:",
+    ask_name="Got it — whose name should the visit be under?",
+    confirmed=(
+        "You're all set: a technician will arrive {label}, booked under {name}. "
+        "Please make sure someone 18+ is home."
+    ),
+    already_booked=(
+        "You already have a technician visit scheduled for {label}. Ask me about "
+        "your schedule if you'd like to change it."
+    ),
+    cancelled="Done — the technician visit for {label} has been cancelled.",
+    rescheduled="Done — the technician will now arrive {label}.",
+)
+
 THEME = ThemeConfig(
     key="telecomchatbot",
     label="TelecomChatbot",
     conversational=is_conversational("telecomchatbot"),
     system_prompt=prompt_for("telecomchatbot"),
     specialists=SPECIALISTS,
+    scheduling=SCHEDULING,
 )
