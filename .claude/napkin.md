@@ -383,8 +383,9 @@ Curated, high-value runbook. Read before work; keep only recurring guidance.
 - **NemoClaw does not support podman** (onboarding refuses); Docker Engine /
   Docker Desktop / Colima only. Primary host = EC2 replica (`--with-nemoclaw`);
   Mac needs Colima. The drawer toggle is the *enforcement* switch for the policy
-  layer (unlike `TOOL_GUARD_ENABLED`); the pill reads RUNTIME only when the
-  sandbox's OCSF denials / `after_tool_call` reports arrive.
+  layer (unlike `TOOL_GUARD_ENABLED`); the pill is the uniform On/Off — its
+  tooltip says "Runtime" only when the sandbox's OCSF denials /
+  `after_tool_call` reports arrive, "Policy layer" otherwise.
 - Plugin edits still go through git objects (`git hash-object -w` +
   `update-index --cacheinfo` + `--skip-worktree`) — `openclaw-edit.sh` is
   interactive. `run-nemoclaw.sh` materialises the plugin into `nemoclaw/plugins/`

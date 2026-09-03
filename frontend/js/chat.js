@@ -310,6 +310,7 @@ function applyTheme(themeKey) {
         { el: appTitle, classes: ['text-{c}-600'] },
         { el: document.getElementById('sendButton'), classes: ['bg-{c}-600', 'hover:bg-{c}-700'] },
         { el: document.getElementById('promptsButton'), classes: ['border-{c}-600', 'text-{c}-600', 'hover:bg-{c}-50'] },
+        { el: document.getElementById('showRecentButton'), classes: ['border-{c}-600', 'text-{c}-600', 'hover:bg-{c}-50'] },
         { el: document.getElementById('acceptBtn'), classes: ['bg-{c}-600', 'hover:bg-{c}-700'] },
         { el: document.getElementById('messageInput'), classes: ['focus:ring-{c}-500'] },
     ];
@@ -785,6 +786,7 @@ async function createNewSession() {
         const data = await response.json();
         sessionId = data.session_id;
         localStorage.setItem('medadvice_session_id', sessionId);
+        rememberSession(sessionId);
 
         showMainApp();
     } catch (error) {
@@ -958,7 +960,17 @@ async function sendMessage() {
     }
 }
 
-function addMessageToChat(role, content, type, severity = null, escalated = false) {
+// Backend timestamps are naive UTC ISO strings (datetime.utcnow().isoformat());
+// without a zone designator Date() would read them as local time.
+function parseServerTime(s) {
+    if (!s) return new Date();
+    const str = String(s);
+    return new Date(/(Z|[+-]\d\d:?\d\d)$/.test(str) ? str : str + 'Z');
+}
+
+// `timestamp` is only passed when re-rendering a stored transcript (Show Recent);
+// live turns stamp "now" as before.
+function addMessageToChat(role, content, type, severity = null, escalated = false, timestamp = null) {
     const chatContainer = document.getElementById('chatContainer');
 
     const welcomeMsg = chatContainer.querySelector('.text-center.text-gray-500');
@@ -1008,7 +1020,7 @@ function addMessageToChat(role, content, type, severity = null, escalated = fals
         ${severityBadge}
         ${escalationBadge}
         <div class="text-sm">${formattedContent}</div>
-        <div class="text-xs mt-2 opacity-70">${new Date().toLocaleTimeString()}</div>
+        <div class="text-xs mt-2 opacity-70">${(timestamp ? parseServerTime(timestamp) : new Date()).toLocaleTimeString()}</div>
     `;
 
     chatContainer.appendChild(messageDiv);
@@ -1080,6 +1092,7 @@ function startNewSession() {
     .then(data => {
         sessionId = data.session_id;
         localStorage.setItem('medadvice_session_id', sessionId);
+        rememberSession(sessionId);
         document.getElementById('sessionId').textContent = sessionId;
         
         chatContainer.innerHTML = `
@@ -1105,6 +1118,132 @@ function startNewSession() {
     });
 }
 
+// ---- Show Recent: the last five sessions this browser started ----
+// "Current user" here is this browser. The app has no per-person login (one
+// shared access key) and the server's enduser_id is a synthetic value drawn per
+// session, so the only durable owner of a session is the browser that minted
+// it. The ids live in localStorage; the transcripts come from
+// GET /api/chat/session/{id}, which falls back to the DB after a restart, and
+// /api/chat/message resumes a DB-only session (_prepare_session), so a reloaded
+// conversation can simply continue.
+const RECENT_SESSIONS_KEY = 'medadvice_recent_sessions';
+const RECENT_SESSIONS_SHOWN = 5;
+const RECENT_SESSIONS_KEPT = 20;   // headroom: a session that never got a message has no row and is skipped
+
+function recentSessionIds() {
+    try {
+        const ids = JSON.parse(localStorage.getItem(RECENT_SESSIONS_KEY) || '[]');
+        return Array.isArray(ids) ? ids.filter((x) => typeof x === 'string' && /^[A-Za-z0-9_.:-]{1,200}$/.test(x)) : [];
+    } catch (e) { return []; }
+}
+
+// Move `id` to the front: a freshly minted session, or an old one just reloaded.
+function rememberSession(id) {
+    if (!id) return;
+    const ids = [id].concat(recentSessionIds().filter((x) => x !== id)).slice(0, RECENT_SESSIONS_KEPT);
+    try { localStorage.setItem(RECENT_SESSIONS_KEY, JSON.stringify(ids)); } catch (e) { /* private mode */ }
+}
+
+async function fetchSession(id) {
+    try {
+        const r = await fetch('/api/chat/session/' + encodeURIComponent(id));
+        return r.ok ? await r.json() : null;   // 404: never got a first message, so no row
+    } catch (e) { return null; }
+}
+
+function openRecentSessions() {
+    const m = document.getElementById('recentSessionsModal');
+    if (m) m.classList.add('active');
+    renderRecentSessions();
+}
+
+function closeRecentSessions() {
+    const m = document.getElementById('recentSessionsModal');
+    if (m) m.classList.remove('active');
+}
+
+async function renderRecentSessions() {
+    const root = document.getElementById('recentSessionsBody');
+    if (!root) return;
+    root.innerHTML = '<p class="text-sm text-gray-500">Loading…</p>';
+    const prior = recentSessionIds().filter((id) => id !== sessionId);
+    // Look up a handful at a time, oldest-first is not needed: ids are already newest-first.
+    const sessions = [];
+    for (let i = 0; i < prior.length && sessions.length < RECENT_SESSIONS_SHOWN; i += RECENT_SESSIONS_SHOWN) {
+        const batch = await Promise.all(prior.slice(i, i + RECENT_SESSIONS_SHOWN).map(fetchSession));
+        for (const s of batch) if (s && (s.messages || []).length) sessions.push(s);
+    }
+    sessions.length = Math.min(sessions.length, RECENT_SESSIONS_SHOWN);
+    if (!sessions.length) {
+        root.innerHTML = '<p class="text-sm text-gray-500">No prior sessions from this browser yet. '
+            + 'Send a message, start a New Session, and the earlier one will appear here.</p>';
+        return;
+    }
+    root.innerHTML = sessions.map(_recentSessionRow).join('');
+}
+
+function _recentSessionRow(s) {
+    const msgs = s.messages || [];
+    const first = msgs.find((m) => m.role === 'user');
+    const turns = msgs.filter((m) => m.role === 'user').length;
+    const preview = first ? String(first.content || '') : '(no user message)';
+    const snippet = preview.length > 90 ? preview.slice(0, 90) + '…' : preview;
+    const when = parseServerTime(s.created_at || (first && first.timestamp)).toLocaleString();
+    const flags = s.escalated
+        ? '<span class="ml-2 px-2 py-0.5 text-[10px] font-semibold rounded bg-red-100 text-red-800">ESCALATED</span>' : '';
+    return `<button type="button" data-session-id="${escapeHtml(s.session_id)}" onclick="loadRecentSession(this.dataset.sessionId)"
+        class="w-full text-left bg-gray-50 border border-gray-200 rounded-lg p-3 hover:bg-violet-50 focus:outline-none focus:ring-2 focus:ring-violet-500">
+        <div class="text-sm font-semibold text-gray-700">${escapeHtml(snippet)}</div>
+        <div class="text-xs text-gray-500 mt-1">${escapeHtml(when)} · ${turns} turn${turns === 1 ? '' : 's'} · <span class="font-mono">${escapeHtml(s.session_id)}</span>${flags}</div>
+    </button>`;
+}
+
+// Reload a prior session into the main screen and make it the current one, so
+// the next Send continues that conversation (the backend resumes DB-only sessions).
+async function loadRecentSession(id) {
+    const data = await fetchSession(id);
+    if (!data) {
+        alert('That session could not be loaded. It may have been cleared from the server.');
+        return;
+    }
+    sessionId = data.session_id || id;
+    localStorage.setItem('medadvice_session_id', sessionId);
+    rememberSession(sessionId);
+    const sidEl = document.getElementById('sessionId');
+    if (sidEl) sidEl.textContent = sessionId;
+
+    const chatContainer = document.getElementById('chatContainer');
+    chatContainer.innerHTML = '';
+    const msgs = (data.messages || []).filter((m) => m.role === 'user' || m.role === 'assistant');
+    // The escalation flag is session-level once persisted; the live path showed
+    // the badge on the turn that escalated, so hang it on the last assistant turn.
+    const lastAssistant = msgs.map((m) => m.role).lastIndexOf('assistant');
+    msgs.forEach((m, i) => {
+        addMessageToChat(m.role, m.content || '', m.type, m.severity || null,
+                         !!data.escalated && i === lastAssistant, m.timestamp);
+    });
+    closeRecentSessions();
+    const input = document.getElementById('messageInput');
+    if (input) input.focus();
+    console.log('Reloaded session', sessionId, `(${msgs.length} messages)`);
+}
+
+// ---- Status pills (Demo Controls drawer) ----
+// Every card's pill has ONE look: "On" green / "Off" grey (CLAUDE.md). Colour
+// never says which control it is; what a control is doing while On goes in the
+// pill's tooltip, and live counters/timers sit beside the pill in their own
+// elements (#autoPromptStats, #incidentRemaining, #sprayRemaining).
+const PILL_BASE = 'px-3 py-1 text-xs font-semibold rounded-full';
+const PILL_ON = 'bg-green-100 text-green-700';
+const PILL_OFF = 'bg-gray-100 text-gray-600';
+
+function setPill(el, on, text, title) {
+    if (!el) return;
+    el.textContent = text || (on ? 'On' : 'Off');
+    el.className = PILL_BASE + ' ' + (on ? PILL_ON : PILL_OFF);
+    el.title = title || '';
+}
+
 function togglePII() {
     const toggle = document.getElementById('piiToggle');
     piiEnabled = toggle.checked;
@@ -1114,14 +1253,7 @@ function togglePII() {
 }
 
 function updatePIIStatus() {
-    const statusElement = document.getElementById('piiStatus');
-    if (piiEnabled) {
-        statusElement.textContent = 'ALWAYS ON';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-600';
-    } else {
-        statusElement.textContent = 'OFF';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
-    }
+    setPill(document.getElementById('piiStatus'), piiEnabled);
 }
 
 function toggleToxic() {
@@ -1133,14 +1265,7 @@ function toggleToxic() {
 }
 
 function updateToxicStatus() {
-    const statusElement = document.getElementById('toxicStatus');
-    if (toxicEnabled) {
-        statusElement.textContent = 'ALWAYS ON';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-600';
-    } else {
-        statusElement.textContent = 'OFF';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
-    }
+    setPill(document.getElementById('toxicStatus'), toxicEnabled);
 }
 
 function toggleHallucination() {
@@ -1152,14 +1277,7 @@ function toggleHallucination() {
 }
 
 function updateHallucinationStatus() {
-    const statusElement = document.getElementById('hallucinationStatus');
-    if (hallucinationEnabled) {
-        statusElement.textContent = 'ALWAYS ON';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-600';
-    } else {
-        statusElement.textContent = 'OFF';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
-    }
+    setPill(document.getElementById('hallucinationStatus'), hallucinationEnabled);
 }
 
 function toggleBoundary() {
@@ -1171,14 +1289,7 @@ function toggleBoundary() {
 }
 
 function updateBoundaryStatus() {
-    const statusElement = document.getElementById('boundaryStatus');
-    if (boundaryEnabled) {
-        statusElement.textContent = 'ALWAYS ON';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-600';
-    } else {
-        statusElement.textContent = 'OFF';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
-    }
+    setPill(document.getElementById('boundaryStatus'), boundaryEnabled);
 }
 
 function toggleAIDefense() {
@@ -1190,15 +1301,7 @@ function toggleAIDefense() {
 }
 
 function updateAIDefenseStatus() {
-    const statusElement = document.getElementById('aiDefenseStatus');
-    if (!statusElement) return;
-    if (aiDefenseEnabled) {
-        statusElement.textContent = 'REVIEWING';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-sky-100 text-sky-700';
-    } else {
-        statusElement.textContent = 'OFF';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
-    }
+    setPill(document.getElementById('aiDefenseStatus'), aiDefenseEnabled);
 }
 
 function toggleAgentControl() {
@@ -1210,15 +1313,7 @@ function toggleAgentControl() {
 }
 
 function updateAgentControlStatus() {
-    const statusElement = document.getElementById('agentControlStatus');
-    if (!statusElement) return;
-    if (agentControlEnabled) {
-        statusElement.textContent = 'EVALUATING';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-fuchsia-100 text-fuchsia-700';
-    } else {
-        statusElement.textContent = 'OFF';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
-    }
+    setPill(document.getElementById('agentControlStatus'), agentControlEnabled);
 }
 
 function toggleNemoGuardrails() {
@@ -1230,21 +1325,13 @@ function toggleNemoGuardrails() {
 }
 
 function updateNemoGuardrailsStatus() {
-    const statusElement = document.getElementById('nemoGuardrailsStatus');
-    if (!statusElement) return;
-    if (nemoGuardrailsEnabled) {
-        statusElement.textContent = 'RAILING';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-700';
-    } else {
-        statusElement.textContent = 'OFF';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
-    }
+    setPill(document.getElementById('nemoGuardrailsStatus'), nemoGuardrailsEnabled);
 }
 
 // ---- NemoClaw Guardrails: a SERVER-SIDE toggle (tool calls are not chat
-// requests). PUT /api/toolguard/nemoclaw persists it; the pill reads POLICY
-// (the policy layer is enforcing) or RUNTIME (the real NemoClaw sandbox has
-// reported denials recently). OFF is always grey (CLAUDE.md).
+// requests). PUT /api/toolguard/nemoclaw persists it. The pill is the uniform
+// On/Off; whether only the policy layer or the real NemoClaw sandbox (recent
+// runtime denials) is enforcing is reported in the pill's tooltip (CLAUDE.md).
 let nemoClawPollInterval = null;
 
 async function toggleNemoClaw() {
@@ -1277,21 +1364,18 @@ function updateNemoClawStatus(data) {
     const supported = data.runtime_supported || {};
     // The toggle only makes sense when the policy layer can run at all.
     if (toggle) toggle.disabled = policy.loaded === false;
-    let text = 'OFF', cls = 'bg-gray-100 text-gray-600', title = '';
+    let on = false, text = null, title = '';
     if (policy.loaded === false) {
-        text = 'NO POLICY'; title = policy.error || '';
+        text = 'No policy'; title = policy.error || '';
     } else if (data.enabled) {
+        on = true;
         const runtimeLive = (runtime.events_recent || 0) > 0;
-        text = runtimeLive ? 'RUNTIME' : 'POLICY';
-        cls = 'bg-lime-100 text-lime-700';
         title = runtimeLive
-            ? `${runtime.events_recent} sandbox denial(s) in the last ${Math.round((runtime.window_s || 300) / 60)} min`
-            : `policy layer enforcing (${policy.endpoints || 0} endpoint rule(s))`
+            ? `Runtime: ${runtime.events_recent} sandbox denial(s) in the last ${Math.round((runtime.window_s || 300) / 60)} min`
+            : `Policy layer enforcing (${policy.endpoints || 0} endpoint rule(s))`
               + (supported.enabled === false ? ` — runtime unavailable here: ${supported.reason || ''}` : '');
     }
-    statusElement.textContent = text;
-    statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full ' + cls;
-    statusElement.title = title;
+    setPill(statusElement, on, text, title);
     if (desc && supported.enabled === false && supported.reason) {
         desc.title = supported.reason;
     }
@@ -1321,15 +1405,7 @@ function toggleInternalPolicy() {
 }
 
 function updateInternalPolicyStatus() {
-    const statusElement = document.getElementById('internalPolicyStatus');
-    if (!statusElement) return;
-    if (internalPolicyEnabled) {
-        statusElement.textContent = 'ON';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-slate-200 text-slate-700';
-    } else {
-        statusElement.textContent = 'OFF';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
-    }
+    setPill(document.getElementById('internalPolicyStatus'), internalPolicyEnabled);
 }
 
 function toggleMultiAgent() {
@@ -1341,15 +1417,7 @@ function toggleMultiAgent() {
 }
 
 function updateMultiAgentStatus() {
-    const statusElement = document.getElementById('multiAgentStatus');
-    if (!statusElement) return;
-    if (multiAgentEnabled) {
-        statusElement.textContent = 'ON';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-700';
-    } else {
-        statusElement.textContent = 'OFF';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
-    }
+    setPill(document.getElementById('multiAgentStatus'), multiAgentEnabled);
 }
 
 async function toggleAutoPrompt() {
@@ -1416,13 +1484,11 @@ function updateAutoPromptStatus(data) {
     const countElement = document.getElementById('autoPromptCount');
     
     if (data.running) {
-        statusElement.textContent = 'RUNNING';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-600 animate-pulse';
+        setPill(statusElement, true);
         statsElement.classList.remove('hidden');
         countElement.textContent = data.sessions_created || 0;
     } else {
-        statusElement.textContent = 'OFF';
-        statusElement.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
+        setPill(statusElement, false);
         if (data.sessions_created > 0) {
             statsElement.classList.remove('hidden');
             countElement.textContent = data.sessions_created;
@@ -1502,16 +1568,14 @@ function updateIncidentStatus(data) {
     const toggle = document.getElementById('incidentToggle');
     if (!status) return;
     if (data && data.active) {
-        status.textContent = 'ACTIVE';
-        status.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-700 animate-pulse';
+        setPill(status, true);
         if (toggle) toggle.checked = true;
         if (remaining && data.remaining_s != null) {
             remaining.textContent = data.remaining_s + 's left';
             remaining.classList.remove('hidden');
         }
     } else {
-        status.textContent = 'OFF';
-        status.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
+        setPill(status, false);
         if (toggle) toggle.checked = false;
         if (remaining) remaining.classList.add('hidden');
     }
@@ -1535,7 +1599,7 @@ function stopIncidentStatusPolling() {
     if (incidentStatusInterval) { clearInterval(incidentStatusInterval); incidentStatusInterval = null; }
 }
 
-// ---- Prompt-Injection Spray (drives real AI Defense turns for the ES demo) ----
+// ---- Prompt Injection Spray (drives real AI Defense turns for the ES demo) ----
 // Server-owned state, like the incident toggle: the campaign lives in the
 // backend so it survives a page reload and auto-stops on its own. Nothing here
 // is cached in localStorage.
@@ -1548,7 +1612,7 @@ async function toggleSpray() {
         let resp;
         if (on) {
             const actor = (document.getElementById('sprayActor').value || 't.nguyen').trim();
-            const duration_s = parseInt(document.getElementById('sprayDuration').value, 10) || 600;
+            const duration_s = parseInt(document.getElementById('sprayDuration').value, 10) || 60;
             const intensity = parseInt(document.getElementById('sprayIntensity').value, 10) || 15;
             const secondary_actors = parseInt(document.getElementById('spraySecondary').value, 10) || 0;
             resp = await fetch('/api/spray/start', {
@@ -1568,7 +1632,7 @@ async function toggleSpray() {
     } catch (e) {
         console.error('Error toggling spray campaign:', e);
         toggle.checked = !on;
-        alert('Failed to toggle the prompt-injection spray. Please try again.');
+        alert('Failed to toggle the Prompt Injection Spray. Please try again.');
     }
 }
 
@@ -1578,16 +1642,14 @@ function updateSprayStatus(data) {
     const toggle = document.getElementById('sprayToggle');
     if (!status) return;
     if (data && data.active) {
-        status.textContent = 'SPRAYING';
-        status.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-700 animate-pulse';
+        setPill(status, true);
         if (toggle) toggle.checked = true;
         if (remaining && data.remaining_s != null) {
             remaining.textContent = data.remaining_s + 's left';
             remaining.classList.remove('hidden');
         }
     } else {
-        status.textContent = 'OFF';
-        status.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-600';
+        setPill(status, false);
         if (toggle) toggle.checked = false;
         if (remaining) remaining.classList.add('hidden');
     }

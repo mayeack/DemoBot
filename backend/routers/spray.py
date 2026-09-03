@@ -42,7 +42,7 @@ _driver_task: Optional[asyncio.Task] = None
 _expiry_task: Optional[asyncio.Task] = None
 
 # Pacing bounds. The spec suggests a 20-90s band, but that overshoots the
-# default 600s window at 15 turns, so the mean is derived from the controls
+# default window (60s at 15 turns), so the mean is derived from the controls
 # (duration / turns) and jittered instead. Clamped so a very short or very long
 # campaign still paces sanely.
 _MIN_GAP_S = 5.0
@@ -52,7 +52,7 @@ _JITTER = 0.6  # +/- 60% around the mean, so pacing reads as bursty, not scripte
 
 class SprayStart(BaseModel):
     actor: str = Field(default="t.nguyen", min_length=1, max_length=64)
-    duration_s: int = Field(default=600, ge=10, le=3600)
+    duration_s: int = Field(default=60, ge=10, le=3600)
     intensity: int = Field(default=15, ge=1, le=200)
     secondary_actors: int = Field(default=2, ge=0, le=10)
     # The app the campaign is attributed to. The UI sends whichever theme it is

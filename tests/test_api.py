@@ -419,6 +419,8 @@ def main() -> int:
               _plan_apps("taxadvice") == ["demobot-taxadvice"], str(_plan_apps("taxadvice")))
         check("spray plan defaults to medadvice when no theme is sent",
               _plan_apps(None) == ["demobot-medadvice"], str(_plan_apps(None)))
+        check("spray duration defaults to 60s (matches the drawer default)",
+              SprayStart(drive_turns=False).duration_s == 60, str(SprayStart(drive_turns=False).duration_s))
 
         # ---- agentic tool guard ----
         # 401 without the key (auth gate), 200 with it. Use a benign read whose
@@ -682,6 +684,33 @@ def main() -> int:
             _result = _try.rfind("setResult(")
             check(f"Settings: {_fn} re-renders before writing its result",
                   _reload != -1 and _result != -1 and _reload < _result)
+
+        # ---- Chat page UI invariants: Demo Controls drawer groups + uniform pills ----
+        a_html = c.get("/app", headers=AUTH).text
+        _chat_js = (ROOT / "frontend" / "js" / "chat.js").read_text()
+        _drawer = a_html[a_html.index('id="settingsDrawer"'):a_html.index('id="drawerToggle"')]
+        for g in ("guardrails", "pipeline", "synthetic", "generators", "display"):
+            check(f"Drawer: group section '{g}' present", f'data-group="{g}"' in _drawer)
+        _card = 'bg-gray-50 border border-gray-200 rounded-lg p-3'
+        _in_groups = sum(sec.count(_card) for sec in
+                         re.findall(r"<section [^>]*data-group=[^>]*>(.*?)</section>", _drawer, re.S))
+        check("Drawer: every control card sits inside a group (none loose at top level)",
+              _drawer.count(_card) == _in_groups and _in_groups >= 14, f"{_drawer.count(_card)} vs {_in_groups}")
+        check("Drawer: spray card is 'Prompt Injection Spray' (no hyphen anywhere on the page)",
+              "Prompt Injection Spray" in _drawer and "Prompt-Injection" not in a_html)
+        check("Drawer: spray duration defaults to 60s",
+              re.search(r'id="sprayDuration"[^>]*value="60"', _drawer) is not None)
+        check("Drawer: pills carry only the uniform On/Off text in the markup",
+              re.search(r'id="\w+Status"[^>]*>\s*(OFF|ON|ALWAYS ON)\s*<', _drawer) is None)
+        check("Drawer: the default-on pill (Internal Policy) is the green On pill",
+              re.search(r'id="internalPolicyStatus"[^>]*bg-green-100 text-green-700[^>]*>\s*On\s*<', _drawer) is not None)
+        # Pill classes come from ONE place (setPill) so no card can grow its own ON palette.
+        check("chat.js: pill classes are only assigned by setPill()",
+              "function setPill(" in _chat_js and "rounded-full bg-" not in _chat_js)
+        check("Chat: Show Recent button + modal present",
+              'id="showRecentButton"' in a_html and 'id="recentSessionsModal"' in a_html)
+        check("chat.js: Show Recent reloads via the existing session endpoint",
+              "function loadRecentSession(" in _chat_js and "'/api/chat/session/' + encodeURIComponent(id)" in _chat_js)
 
     # ---- AI Defense per-direction guardrail config (no client needed) ----
     prompt_rules = {r["rule_name"] for r in settings.ai_defense_rule_config}
