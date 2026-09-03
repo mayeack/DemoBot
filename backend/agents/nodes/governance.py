@@ -45,10 +45,9 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
     boundary_injected = state.get("boundary_injected", False)
     boundary_types = state.get("boundary_types", []) or []
     # Report what actually reached the user, not what was requested: the
-    # ``*_detected`` flags are set by the injection node from the delivered text
-    # (a declined directive gets its deterministic fallback, so they coincide with
-    # the request flags in practice). Fall back to the request flag for states
-    # that predate the field.
+    # ``*_detected`` flags are set by the injection node from the delivered text,
+    # and a declined directive (no canned fallback exists) leaves them False. Use
+    # the request flag only for states that predate the field.
     boundary_detected = state.get("boundary_detected", boundary_injected)
     hallucination_detected = state.get("hallucination_detected", hallucination_injected)
     pii_detected = state.get("pii_detected", pii_injected)

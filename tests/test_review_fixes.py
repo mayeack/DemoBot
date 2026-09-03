@@ -273,9 +273,9 @@ check("F13: hallucination_types are gated on detection, not the request",
 from backend.agents.nodes import injection as _inj  # noqa: E402
 
 _inj_src = inspect.getsource(_inj.injection_node)
-check("F13: injection_node gates the hallucination fallback on the delivered text",
-      "_hallucination_content_present(model_text)" in _inj_src
-      and 'updates["hallucination_detected"] = True' in _inj_src)
+check("F13: injection_node records hallucination presence from the delivered text",
+      "_hallucination_content_present(final_message)" in _inj_src
+      and 'updates["hallucination_detected"] = present' in _inj_src)
 check("F13: hallucination_detected declared on the graph state",
       "hallucination_detected" in inspect.getsource(
           __import__("backend.agents.state", fromlist=["state"])))

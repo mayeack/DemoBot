@@ -104,10 +104,10 @@ class DemoBotState(TypedDict, total=False):
 
     # ---- Test-injection flags (injection agent) ----
     # ``*_injected`` = the category was requested this turn; ``*_detected`` = it is
-    # present in the delivered response, which the governance flags read. The
-    # injection node adds a deterministic fallback for any category the model
-    # declined, on every provider, so the two coincide — both are kept because
-    # the governance record and the Splunk field contract carry both.
+    # present in the delivered response, which the governance flags read. They
+    # diverge whenever the model declines the directive: there is deliberately no
+    # canned fallback (see nodes/injection.py), so an event never claims content
+    # the user never saw.
     pii_injected: bool
     pii_detected: bool
     pii_types: List[str]

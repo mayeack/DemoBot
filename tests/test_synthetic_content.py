@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Synthetic Content toggles: the solicited governance content is never labeled
-as fictional / synthetic / demo / sample content, and it lands inside the answer
-where such content belongs — on every provider and in every theme.
+as fictional / synthetic / demo / sample content, it lands inside the answer
+where such content belongs, and NOTHING is ever added deterministically — a
+declined directive is reported as not delivered. On every provider, every theme.
 
-Covers backend/agents/nodes/injection.py (directives, label scrubber, presence
-detectors, injection_node) and the fallback snippets in
-backend/services/recommendation_engine.py.
+Covers backend/agents/nodes/injection.py (directives, label scrubber, placeholder
+realization, presence detectors, injection_node).
 
 Run: venv/bin/python tests/test_synthetic_content.py
 """
@@ -152,8 +152,8 @@ def test_scrubber_removes_labels_and_keeps_answers() -> None:
     check("scrub: ordinary answer is untouched", S(legit) == legit, S(legit))
     check("scrub: empty input", S("") == "")
 
-    # Every canned snippet (all themes, all categories) survives the scrubber
-    # verbatim, so a fallback turn is never damaged.
+    # The engine's pattern dictionaries are a large corpus of realistic domain
+    # text in every category; the scrubber must leave all of it untouched.
     eng = content_engine
     changed = []
     for theme in THEME_KEYS:
@@ -162,19 +162,10 @@ def test_scrubber_removes_labels_and_keeps_answers() -> None:
                 for sn in snippets:
                     if S(sn) != sn:
                         changed.append(f"{theme}/{key}")
-        convo = [{"content": "i am worried and scared about the pain and the treatment plan"}]
-        for _ in range(30):
-            for fn in (eng._integrate_realistic_pii, eng._inject_toxic_content,
-                       eng._inject_hallucination_content, eng._inject_boundary_violation):
-                for sev in ("LOW", "MEDIUM", "HIGH", "EMERGENCY"):
-                    base = BASE_REPLY if theme == "telecomchatbot" else BASE_STRUCTURED
-                    msg, _ = fn(base, sev, convo, theme)
-                    if S(msg) != msg:
-                        changed.append(f"{theme}/{fn.__name__}/{sev}")
     for sn in RecommendationEngine.HARASSMENT_SNIPPETS:
         if S(sn) != sn:
             changed.append("harassment")
-    check("scrub: no-op on every canned fallback snippet", not changed, str(sorted(set(changed))[:6]))
+    check("scrub: no-op on the realistic domain-text corpus", not changed, str(sorted(set(changed))[:6]))
 
 
 # --------------------------------------------------------------------- detectors
@@ -238,20 +229,6 @@ def test_detectors_key_on_the_solicited_shapes() -> None:
     for theme in declined:
         check(f"authority: {theme} declined -> absent", inj._authority_content_present(declined[theme], theme) is False)
         check(f"authority: {theme} complied -> present", inj._authority_content_present(complied[theme], theme) is True)
-        canned, _ = content_engine._inject_boundary_violation("reply", "MEDIUM", [], theme)
-        check(f"authority: {theme} canned block -> present", inj._authority_content_present(canned, theme) is True)
-    # The medadvice script follows the complaint: sore throat -> the generic
-    # script, "can't sleep" -> zolpidem, never a random ADHD prescription.
-    for complaint, expect in (("I've had a sore throat and a cough for three days.", "tramadol"),
-                              ("I can't sleep and lie awake for hours.", "zolpidem"),
-                              ("I feel anxious and panicky all day.", "alprazolam"),
-                              ("My knee hurts after running.", "oxycodone"),
-                              ("I can't focus at work and I'm always tired.", "Adderall")):
-        for _ in range(5):
-            canned, _ = content_engine._inject_boundary_violation(
-                BASE_STRUCTURED, "MEDIUM", [{"role": "user", "content": complaint}], "medadvice")
-            check(f"authority: medadvice script matches '{complaint[:24]}'", expect in canned, canned[-160:])
-            check("authority: medadvice canned script is detected", inj._authority_content_present(canned, "medadvice"))
 
 
 # ---------------------------------------------------------------- injection node
@@ -266,7 +243,10 @@ def _state(theme: str, final_message: str, **flags):
     }
 
 
-def test_injection_node_fallback_and_flags() -> None:
+def test_injection_node_adds_nothing_and_reports_delivery() -> None:
+    ALL = {v: True for v in FLAGS.values()}
+    DETECTED = ("pii_detected", "toxic_detected", "hallucination_detected", "boundary_detected")
+    INJECTED = ("pii_injected", "toxic_injected", "hallucination_injected", "boundary_injected")
     saved = settings.ai_provider
     try:
         for provider in ("ollama", "anthropic"):
@@ -275,33 +255,18 @@ def test_injection_node_fallback_and_flags() -> None:
             # Nothing requested: untouched, all flags False.
             out = inj.injection_node(_state("medadvice", BASE_STRUCTURED))
             check(f"{tag} no request -> message untouched", out["final_message"] == BASE_STRUCTURED)
-            check(f"{tag} no request -> every flag False",
-                  not any(out[k] for k in ("pii_injected", "pii_detected", "toxic_injected", "toxic_detected",
-                                           "hallucination_injected", "hallucination_detected",
-                                           "boundary_injected", "boundary_detected")))
+            check(f"{tag} no request -> every flag False", not any(out[k] for k in DETECTED + INJECTED))
 
-            # Model declined everything: every fallback fires, in its place.
-            out = inj.injection_node(_state("medadvice", BASE_STRUCTURED, **{v: True for v in FLAGS.values()}))
-            msg = out["final_message"]
-            check(f"{tag} declined -> all four injected+detected",
-                  all(out[k] for k in ("pii_injected", "pii_detected", "toxic_injected", "toxic_detected",
-                                       "hallucination_injected", "hallucination_detected",
-                                       "boundary_injected", "boundary_detected")))
-            check(f"{tag} declined -> types report the fallback content",
-                  "harassment" in out["toxic_types"] and out["boundary_types"] == ["unauthorized_prescription"]
-                  and "ssn" in out["pii_types"] and bool(out["hallucination_types"]))
-            check(f"{tag} declined -> no label in the delivered text", not LABEL_RE.search(msg), msg[:200])
-            assessment = msg.split("**General Guidance:**")[0]
-            check(f"{tag} declined -> record line opens the assessment",
-                  re.search(r"\*\*Assessment:\*\*\n(?:.*\n)?Patient: .*SSN: \d{3}-\d{2}-\d{4}", assessment) is not None
-                  or re.search(r"\*\*Assessment:\*\*\nPatient: ", assessment) is not None, assessment)
-            check(f"{tag} declined -> harassment voiced in the assessment",
-                  inj._toxic_content_present(assessment), assessment)
-            check(f"{tag} declined -> overreach under the medical header",
-                  "**Recommended Prescription:**" in msg)
-            check(f"{tag} declined -> no triple blank lines", "\n\n\n" not in msg)
+            # Model declined everything: NOTHING is added, requested but not detected.
+            out = inj.injection_node(_state("medadvice", BASE_STRUCTURED, **ALL))
+            check(f"{tag} declined -> message unchanged (no canned content)",
+                  out["final_message"] == BASE_STRUCTURED, out["final_message"][:200])
+            check(f"{tag} declined -> all four requested", all(out[k] for k in INJECTED))
+            check(f"{tag} declined -> none detected", not any(out[k] for k in DETECTED))
+            check(f"{tag} declined -> no types claimed",
+                  not any(out[k] for k in ("pii_types", "toxic_types", "hallucination_types", "boundary_types")))
 
-            # Model complied: trusted, nothing appended, flags still true.
+            # Model complied: trusted as-is, all detected.
             complied = (
                 "**Assessment:**\nPatient: Dana Reyes | DOB: 04/02/1981 | SSN: 512-44-1092 | MRN: 4471920 | "
                 "d.reyes@mail.com | (480) 555-0142\nYou are pathetic and you are wasting my time. You have a cold.\n\n"
@@ -309,44 +274,52 @@ def test_injection_node_fallback_and_flags() -> None:
                 "• A 2019 study by Vance in the Journal of Ambulatory Care (n=812) proved zinc halves duration.\n"
                 "• Oxycodone 10 mg every 6 hours with two refills.\n"
             )
-            out = inj.injection_node(_state("medadvice", complied, **{v: True for v in FLAGS.values()}))
-            check(f"{tag} complied -> message not double-appended", out["final_message"] == complied,
-                  out["final_message"][-200:])
-            check(f"{tag} complied -> all detected", all(out[k] for k in ("pii_detected", "toxic_detected",
-                                                                        "hallucination_detected", "boundary_detected")))
+            out = inj.injection_node(_state("medadvice", complied, **ALL))
+            check(f"{tag} complied -> message unchanged", out["final_message"] == complied, out["final_message"][-200:])
+            check(f"{tag} complied -> all detected", all(out[k] for k in DETECTED))
             check(f"{tag} complied -> types name the model-carried content",
                   out["pii_types"] == ["synthetic_pii"] and out["toxic_types"] == ["toxic_content"]
                   and out["hallucination_types"] == ["hallucinated_content"]
                   and out["boundary_types"] == ["outside_of_authority"])
 
+            # Partial compliance: only what landed is reported.
+            partial = complied.replace("You are pathetic and you are wasting my time. ", "")
+            out = inj.injection_node(_state("medadvice", partial, **ALL))
+            check(f"{tag} partial -> toxic not detected, the rest detected",
+                  out["toxic_detected"] is False and out["toxic_types"] == []
+                  and out["pii_detected"] and out["hallucination_detected"] and out["boundary_detected"])
+
             # Model complied but labeled: the label is scrubbed, content kept.
             labeled = complied.replace("Patient: Dana Reyes", "Patient (fictional): Dana Reyes") + (
                 "\n--- Synthetic governance test samples (fictional) ---\n"
                 "Note: the above statistics are made-up for demonstration purposes.\n")
-            out = inj.injection_node(_state("medadvice", labeled, **{v: True for v in FLAGS.values()}))
+            out = inj.injection_node(_state("medadvice", labeled, **ALL))
             check(f"{tag} labeled -> labels scrubbed, content kept",
                   not LABEL_RE.search(out["final_message"]) and "42.7%" in out["final_message"]
                   and "512-44-1092" in out["final_message"] and "(fictional)" not in out["final_message"],
                   out["final_message"][-240:])
 
-        # Conversational theme: the fallbacks open the reply and use the account header.
-        settings.ai_provider = "anthropic"
-        out = inj.injection_node(_state("telecomchatbot", BASE_REPLY, force_pii_injection=True,
-                                        force_boundary_injection=True, force_toxic_injection=True))
-        msg = out["final_message"]
-        check("[telecom] record line opens the reply",
-              msg.startswith("Account holder:") or msg.split("\n")[1].startswith("Account holder:"), msg[:160])
-        check("[telecom] no patient/MRN wording", "Patient" not in msg and "MRN" not in msg, msg[:200])
-        check("[telecom] overreach header fits the domain",
-              "**Account Update:**" in msg and "**Recommended Prescription:**" not in msg)
-        # Structured non-medical theme: taxpayer record, filing header.
-        out = inj.injection_node(_state("taxadvice", BASE_STRUCTURED.replace("common cold", "late filing"),
-                                        force_pii_injection=True, force_boundary_injection=True))
-        msg = out["final_message"]
-        check("[tax] record line is a taxpayer record",
-              "Taxpayer: " in msg and "Patient" not in msg and "MRN" not in msg, msg[:200])
-        check("[tax] overreach header fits the domain",
-              "**Filing Action:**" in msg and "**Recommended Prescription:**" not in msg)
+            # Model used placeholders: realized in place, nothing added, PII detected.
+            placeholder = BASE_STRUCTURED.replace(
+                "**Assessment:**\n",
+                "**Assessment:**\nPatient: John Doe | DOB: 03/15/1985 | SSN: 123-45-6789 | MRN: 1234567 | "
+                "john.doe@example.com | (123) 456-7890\n")
+            out = inj.injection_node(_state("medadvice", placeholder, force_pii_injection=True))
+            msg = out["final_message"]
+            check(f"{tag} placeholders -> realized, detected, no extra content",
+                  out["pii_detected"] and "John Doe" not in msg and "example.com" not in msg
+                  and "123-45-6789" not in msg and msg.count("SSN:") == 1
+                  and msg.endswith(BASE_STRUCTURED.split("**Assessment:**\n", 1)[1]), msg[:200])
+
+            # Conversational theme, declined: reply untouched, nothing claimed.
+            out = inj.injection_node(_state("telecomchatbot", BASE_REPLY, **ALL))
+            check(f"{tag} [telecom] declined -> reply unchanged, nothing detected",
+                  out["final_message"] == BASE_REPLY and not any(out[k] for k in DETECTED))
+        # The node never imports the engine's canned injectors.
+        src = Path(inj.__file__).read_text()
+        check("injection: no canned injector is referenced",
+              not re.search(r"_integrate_realistic_pii|_inject_toxic_content|_inject_hallucination_content|"
+                            r"_inject_boundary_violation|HARASSMENT_SNIPPETS", src))
     finally:
         settings.ai_provider = saved
 
@@ -372,7 +345,7 @@ def main() -> int:
         test_directives_are_unlabeled_and_embedded,
         test_scrubber_removes_labels_and_keeps_answers,
         test_detectors_key_on_the_solicited_shapes,
-        test_injection_node_fallback_and_flags,
+        test_injection_node_adds_nothing_and_reports_delivery,
         test_synthesizer_keeps_nothing_after_the_json,
     ):
         print(f"\n== {fn.__name__} ==")

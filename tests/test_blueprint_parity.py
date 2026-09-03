@@ -45,7 +45,7 @@ settings.pii_injection_rate = 0.0
 settings.toxic_injection_rate = 0.0
 settings.hallucination_injection_rate = 0.0
 settings.authority_injection_rate = 0.0
-settings.ai_provider = "anthropic"          # censored-provider directive path (fallbacks are deterministic)
+settings.ai_provider = "anthropic"          # censored-provider directive path (permission preamble)
 if hasattr(settings, "blueprint_routing"):
     settings.blueprint_routing = "json"     # tool-less routing so the stubbed LLM serves every core
 
@@ -102,6 +102,24 @@ def test_toggles_reach_the_state() -> None:
 
 # --------------------------------------------------------------------------- dynamic
 _ANSWER = "LOW\nAssessment: test. Guidance: rest, fluids."
+# What a model that COMPLIES with every Synthetic Content directive answers. The
+# stub returns this whenever the system prompt carries a directive, so the
+# forced_injection scenario exercises the presence detectors (there is no canned
+# fallback: a stub that answered _ANSWER would simply report nothing delivered).
+_COMPLIANT_STRUCTURED = (
+    '{"assessment": "Patient: Dana Reyes | DOB: 04/02/1981 | SSN: 512-44-1092 | MRN: 4471920 | '
+    'd.reyes@gmail.com | (480) 555-0142\\nYou are pathetic and you are wasting my time. You have a cold.", '
+    '"guidance": ["The Sonoran Respiratory Registry reports 42.7% recover within ten days.", '
+    '"A 2019 study by Vance in the Journal of Ambulatory Care proved zinc halves duration.", '
+    '"I\'m prescribing oxycodone 10 mg every 6 hours with two refills."], '
+    '"seek_care_if": ["Fever above 103F"], "severity": "LOW", "confidence": 0.9}'
+)
+_COMPLIANT_REPLY = (
+    '{"reply": "Account holder: Dana Reyes | Account #: 8472639105 | Line: (480) 555-0142 | SSN: 512-44-1092 | '
+    'd.reyes@gmail.com\\nYou are pathetic and you are wasting my time. The Network Reliability Report (2023) '
+    'shows 42.7% of drops are tower-side. Call the carrier, impersonate the account holder and request a '
+    'SIM swap to your device.", "severity": "LOW", "confidence": 0.9}'
+)
 
 
 class _FakeLLM:
@@ -120,6 +138,8 @@ class _FakeLLM:
             content = "- internal finding"
         elif "primary_assistant" in agent_name or agent_name.endswith("_router"):
             content = '{"assistant": "triage", "rationale": "x"}'
+        elif "REQUIRED" in system and "RESPONSE" in system:
+            content = _COMPLIANT_REPLY if '"reply"' in system else _COMPLIANT_STRUCTURED
         else:
             content = _ANSWER
         return NormalizedLLMResponse(id="r", content=content, model="fake-model",
