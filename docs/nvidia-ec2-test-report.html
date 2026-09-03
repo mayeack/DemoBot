@@ -301,6 +301,48 @@ left <code>0 MiB</code> used before the NIM started; the dpkg-lock wait absorbed
 <p>Observation, not a defect: a raw <code>/v1/chat/completions</code> call with <code>enable_thinking=false</code> and no system prompt still
 began with a reasoning-style preamble in plain text ("Okay, the user wants…"); the app's turns, which carry the
 JSON answer contract, came back clean, and no <code>&lt;think&gt;</code> block appeared anywhere.</p>
+<h2 id="4-prior-version-regression-on-the-same-box-switch-back-to-ollama">4. Prior-version regression on the same box: switch back to Ollama</h2>
+<p>Procedure (matrix section H): stop <code>demobot-nim</code>, <code>PUT /api/settings/ai-provider {"provider":"ollama"}</code>, chat turns
+on <code>mistral-nemo:12b</code> and on the poisoned model, the synthetic-PII injection with Cisco AI Defense review, then
+back to <code>provider=nvidia</code> and <code>demobot-nim</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Result</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>First Ollama turn immediately after stopping the NIM</td>
+<td><strong>FAIL (transient) → PASS on re-run</strong></td>
+<td>the turn started at 00:15:51 and never completed within the 5-minute client timeout: Ollama logged <code>llama-server GPU discovery watchdog timed out</code> and <code>disabling mmap … due to host memory pressure</code> while the NIM container's 17 GB of VRAM and its host memory were still being released; the next turn five minutes later worked. Re-run with a 60 s settle and an explicit warm-up: <strong>HTTP 200 in 7.3 s</strong> (343 chars, <code>recommendation</code>), governance <code>provider=ollama model=mistral-nemo:12b action=allow</code>; second turn 2.1 s</td>
+</tr>
+<tr>
+<td>Ollama model placement after the switch</td>
+<td><strong>PASS</strong> — <code>mistral-nemo:12b 8.3 GB 100% GPU</code>, context 8192, 29-minute keep-alive from the app's per-call <code>keep_alive</code> (the daemon default on a NIM box is 0)</td>
+<td><code>ollama ps</code> PROCESSOR column</td>
+</tr>
+<tr>
+<td>Poisoned model <code>mistral-nemo:12b-poisoned</code> selectable and answering</td>
+<td><strong>PASS</strong></td>
+<td>457 chars; governance <code>provider=ollama model=mistral-nemo:12b-poisoned</code></td>
+</tr>
+<tr>
+<td>Synthetic PII injection + Cisco AI Defense review on the poisoned model</td>
+<td><strong>PASS</strong></td>
+<td>reply <code>safety_warning</code>; governance <code>policy_action=block guardrail_ids=['cisco_ai_defense']</code>, categories "PII, Prescriptive Overreach" — the 4.1 guardrail chain is intact under 4.2</td>
+</tr>
+<tr>
+<td>Back to <code>provider=nvidia</code>, NIM restarted and ready</td>
+<td><strong>PASS</strong></td>
+<td>NIM ready after the reload (300 s to <code>/v1/health/ready</code> after <code>systemctl start demobot-nim</code> with all Ollama models unloaded first; next turn 19.8 s); governance <code>provider=nvidia</code> on the next turn</td>
+</tr>
+</tbody>
+</table>
+<p>Operational note for the switch-back: stop the NIM, wait a minute, warm the Ollama model (or accept a slow first
+turn); the two cannot share the A10G, which is why the bootstrap keeps Ollama unloaded on a NIM box.</p>
 <h2 id="5-performance-on-the-same-a10g-g5xlarge">5. Performance on the same A10G (g5.xlarge)</h2>
 <table>
 <thead>
