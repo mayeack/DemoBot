@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Appointments — DemoBot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter','ui-sans-serif','system-ui','-apple-system','Segoe UI','Roboto','Helvetica','Arial','sans-serif'] } } } };</script>
+    <style>body{font-family:'Inter',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}</style>
+</head>
+<body class="bg-gray-50">
+    <div class="container mx-auto p-4">
+        <!-- Header -->
+        <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
+            <h1 class="text-3xl font-bold text-violet-600 mb-2">My Appointments</h1>
+            <p class="text-gray-600">Appointments this browser booked from the chat. Times are shown in your local time zone.</p>
+            <div class="mt-4">
+                <a href="/app" class="text-violet-600 hover:underline">← Back to Chat</a> |
+                <a href="/admin-ui" class="text-violet-600 hover:underline">Admin Dashboard</a> |
+                <a href="/governance-ui" class="text-violet-600 hover:underline">Governance Logs</a>
+            </div>
+        </div>
+
+        <!-- Filter + table -->
+        <div class="bg-white shadow-lg rounded-lg p-6 mb-4">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+                <h2 class="text-xl font-semibold text-gray-800">Schedule</h2>
+                <div id="statusFilter" class="inline-flex rounded-lg border border-gray-300 overflow-hidden" role="group" aria-label="Status filter">
+                    <button type="button" data-status="scheduled" class="px-3 py-1.5 text-sm font-semibold bg-violet-600 text-white">Upcoming</button>
+                    <button type="button" data-status="cancelled" class="px-3 py-1.5 text-sm font-semibold border-l border-gray-300 bg-white text-gray-700 hover:bg-gray-50">Cancelled</button>
+                    <button type="button" data-status="all" class="px-3 py-1.5 text-sm font-semibold border-l border-gray-300 bg-white text-gray-700 hover:bg-gray-50">All</button>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full">
+                    <thead class="bg-gray-100">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">When</th>
+                            <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Theme</th>
+                            <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Type</th>
+                            <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Name</th>
+                            <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
+                            <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Booked</th>
+                            <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="appointmentsBody">
+                        <tr><td colspan="7" class="px-4 py-6 text-center text-gray-400 text-sm">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <p id="emptyState" class="hidden text-center text-gray-500 text-sm py-6"></p>
+            <p class="mt-4 text-xs text-gray-400">Rescheduling happens in the chat: open it and ask about your schedule. This list refreshes every 30 seconds.</p>
+        </div>
+    </div>
+
+    <script src="/static/js/appointments.js?v=1"></script>
+</body>
+</html>

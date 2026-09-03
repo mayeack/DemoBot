@@ -809,12 +809,14 @@ const STAGE_LABELS = {
     policy: 'Policy screening…',
     prompt_defense: 'Screening your message (AI Defense)…',
     nemo_input_rails: 'Screening your message (NeMo Guardrails)…',
+    scheduling_intake: 'Checking your schedule…',
     intake: 'Reviewing your message…',
     coordinator: 'Coordinator planning specialists…',
     specialists: 'Specialists analyzing…',
     synthesizer: 'Composing your answer…',
     safety: 'Running safety checks…',
     injection: 'Running compliance checks…',
+    scheduling: 'Scheduling agent…',
     compliance: 'Running compliance checks…',
     agent_control: 'Evaluating the answer (Agent Observability Controls)…',
     nemo_output_rails: 'Screening the answer (NeMo Guardrails)…',
@@ -829,7 +831,39 @@ function setLoadingStatus(text) {
     }
 }
 
-function buildChatPayload(message) {
+// ---- Appointment scheduling (docs/scheduling.md) ----
+// The browser owns its bookings: a stable id in localStorage (the Show Recent
+// idea) rides on every chat request as client_id, with the browser's IANA zone
+// so the backend renders slot labels in local time. The backend decides which
+// chips exist (payload.actions, verticalized per theme); this file only draws
+// them and sends the click back as a structured scheduling_action.
+const CLIENT_ID_KEY = 'medadvice_client_id';
+let _memClientId = null;   // private-mode fallback: one id for the life of the tab
+
+function _newClientId() {
+    return (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+        : 'c-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
+
+function clientId() {
+    try {
+        let id = localStorage.getItem(CLIENT_ID_KEY);
+        if (!id || !/^[A-Za-z0-9_.:-]{1,64}$/.test(id)) {
+            id = _newClientId();
+            localStorage.setItem(CLIENT_ID_KEY, id);
+        }
+        return id;
+    } catch (e) {
+        if (!_memClientId) _memClientId = _newClientId();
+        return _memClientId;
+    }
+}
+
+function clientTz() {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch (e) { return null; }
+}
+
+function buildChatPayload(message, schedulingAction = null) {
     return {
         session_id: sessionId,
         message: message,
@@ -843,8 +877,55 @@ function buildChatPayload(message) {
         agent_control_review: agentControlEnabled,
         nemo_guardrails_review: nemoGuardrailsEnabled,
         internal_policy_review: internalPolicyEnabled,
-        multi_agent_mode: multiAgentEnabled
+        multi_agent_mode: multiAgentEnabled,
+        client_id: clientId(),
+        client_tz: clientTz(),
+        scheduling_action: schedulingAction || null
     };
+}
+
+// The user bubble for a chip click reads like something the user would type.
+function _schedulingChipText(a) {
+    switch (a.action) {
+        case 'book': return 'Book ' + a.text;
+        case 'reschedule': return a.slot_id ? 'Move it to ' + a.text : a.text;
+        case 'more_times': return 'Show me more times';
+        case 'decline': return 'No thanks';
+        case 'accept': return 'Yes, please';
+        default: return a.text;
+    }
+}
+
+// Draw the backend's chips under an assistant bubble (DOM-built, like the
+// prompt-library chips: textContent + listeners, never innerHTML). Clicking
+// one disables the row and sends the structured action with a readable text.
+function attachSchedulingActions(bubble, payload) {
+    if (!bubble || !payload || !Array.isArray(payload.actions) || !payload.actions.length) return;
+    const row = document.createElement('div');
+    row.className = 'mt-3 flex flex-wrap gap-2';
+    row.setAttribute('data-scheduling-actions', payload.state || '');
+    payload.actions.forEach((a) => {
+        if (!a || !a.action || !a.text) return;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        const primary = a.action === 'book' || (a.action === 'reschedule' && a.slot_id);
+        btn.className = 'px-3 py-1.5 text-sm rounded-full border bg-white hover:bg-gray-50 '
+            + (primary ? 'border-gray-300 text-gray-800 font-semibold' : 'border-gray-200 text-gray-600');
+        btn.textContent = a.text;
+        btn.addEventListener('click', () => {
+            row.querySelectorAll('button').forEach((b) => { b.disabled = true; b.classList.add('opacity-50'); });
+            sendMessage(_schedulingChipText(a), {
+                action: a.action,
+                slot_id: a.slot_id || null,
+                appointment_id: a.appointment_id || null,
+                page: a.page || 0
+            });
+        });
+        row.appendChild(btn);
+    });
+    bubble.appendChild(row);
+    const chatContainer = document.getElementById('chatContainer');
+    if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
 // Streaming path: consume SSE frames, updating the loading status per completed
@@ -910,9 +991,13 @@ async function sendMessageLegacy(payload) {
     return response.json();
 }
 
-async function sendMessage() {
+// `presetText` / `schedulingAction` are set by a scheduling chip click (the
+// text becomes the user bubble, the action rides on the request); the Send
+// button and Enter key call this with no arguments and read the input.
+async function sendMessage(presetText = null, schedulingAction = null) {
     const input = document.getElementById('messageInput');
-    const message = input.value.trim();
+    const fromChip = typeof presetText === 'string';
+    const message = (fromChip ? presetText : input.value).trim();
 
     if (!message) {
         return;
@@ -925,9 +1010,9 @@ async function sendMessage() {
 
     addMessageToChat('user', message, 'user_message');
 
-    input.value = '';
+    if (!fromChip) input.value = '';
 
-    const payload = buildChatPayload(message);
+    const payload = buildChatPayload(message, fromChip ? schedulingAction : null);
 
     try {
         let data;
@@ -941,7 +1026,8 @@ async function sendMessage() {
             data = await sendMessageLegacy(payload);
         }
 
-        addMessageToChat('assistant', data.message, data.type, data.severity, data.escalated);
+        const bubble = addMessageToChat('assistant', data.message, data.type, data.severity, data.escalated);
+        attachSchedulingActions(bubble, data.scheduling);
 
         if (data.escalated) {
             showEscalationWarning();
@@ -1025,6 +1111,7 @@ function addMessageToChat(role, content, type, severity = null, escalated = fals
 
     chatContainer.appendChild(messageDiv);
     chatContainer.scrollTop = chatContainer.scrollHeight;
+    return messageDiv;   // so scheduling chips can be attached under an assistant bubble
 }
 
 function escapeHtml(s) {
@@ -1218,10 +1305,17 @@ async function loadRecentSession(id) {
     // The escalation flag is session-level once persisted; the live path showed
     // the badge on the turn that escalated, so hang it on the last assistant turn.
     const lastAssistant = msgs.map((m) => m.role).lastIndexOf('assistant');
+    let lastBubble = null, lastScheduling = null;
     msgs.forEach((m, i) => {
-        addMessageToChat(m.role, m.content || '', m.type, m.severity || null,
-                         !!data.escalated && i === lastAssistant, m.timestamp);
+        const bubble = addMessageToChat(m.role, m.content || '', m.type, m.severity || null,
+                                        !!data.escalated && i === lastAssistant, m.timestamp);
+        if (m.role === 'assistant') {
+            lastBubble = bubble;
+            lastScheduling = (m.metadata && m.metadata.scheduling) || null;
+        }
     });
+    // Only the last reply's chips are still actionable (older offers are stale).
+    if (lastBubble && lastScheduling) attachSchedulingActions(lastBubble, lastScheduling);
     closeRecentSessions();
     const input = document.getElementById('messageInput');
     if (input) input.focus();
