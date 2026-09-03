@@ -87,6 +87,26 @@ Rules:
 - Blocked turns carry the same `workflow_name`/`blueprint` identity as the happy
   path (`governance_identity_overrides`); keep passing it from every block handler.
 
+## Appointment scheduling
+
+`docs/scheduling.md` is the design. The rules that keep it demo-safe:
+
+- **Deterministic scheduling, LLM voice.** Slots, intent, bookings and the clickable
+  options come from `backend/services/scheduling.py`; the model only writes wording.
+  Never parse a time, a name or an action out of model text.
+- The two nodes (`scheduling_intake` PRE, `scheduling` POST) live in the **shared
+  chain** (`blueprints/guardrails.py`), like a guardrail. The only core-side code is
+  "skip the domain specialists on a scheduling turn", and it exists in **both** cores.
+- Verticalization is a `SchedulingProfile` on `ThemeConfig.scheduling`
+  (`backend/agents/themes/<theme>.py`) — copy, noun, hours, slot length, offer
+  severities. A new theme defines one; never branch on the theme key in the nodes.
+- The chips are the backend's `scheduling.actions`; `frontend/js/chat.js` renders
+  them generically and never invents an action.
+- `client_id` is the browser's partition key, **not** authorization (one shared
+  access key); the API filters by it, nothing more.
+- Extend `tests/test_scheduling.py` and the `scheduling_*` scenarios in
+  `tests/test_blueprint_parity.py` in the same PR as any scheduling change.
+
 ## Product naming in user-visible text
 
 User-visible text says **"Splunk Agent Observability"**, never "Galileo". This

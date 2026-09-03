@@ -262,6 +262,39 @@ _after = len(_logging.getLogger("governance").handlers)
 check("logging: repeated setup_logging adds no extra handlers",
       _after == _first, f"{_first} -> {_after}")
 
+# 7. appointments (docs/scheduling.md): the table comes from create_all (no
+#    migration) and concurrent bookings through the store all persist.
+from datetime import datetime as _dt  # noqa: E402
+from sqlalchemy import inspect as _sa_inspect  # noqa: E402
+
+from backend.services.scheduling import store as _appt_store  # noqa: E402
+
+check("appointments: table created by create_all", "appointments" in set(_sa_inspect(dbmod.engine).get_table_names()))
+_appt_errs = []
+
+
+def _book_one(i):
+    try:
+        _appt_store.book(client_id="c-integrity", session_id=f"s{i}", theme="medadvice", name=f"n{i}",
+                         provider_label="Clinician follow-up visit", start_utc=_dt(2030, 1, 1, 12, i),
+                         duration_minutes=20, timezone_name="UTC")
+    except Exception as exc:  # noqa: BLE001
+        _appt_errs.append(str(exc)[:80])
+
+
+_bts = [threading.Thread(target=_book_one, args=(i,)) for i in range(8)]
+for t in _bts:
+    t.start()
+for t in _bts:
+    t.join()
+check("appointments: concurrent bookings raise nothing", not _appt_errs, str(_appt_errs[:2]))
+check("appointments: every concurrent booking persisted",
+      len(_appt_store.list_all(client_id="c-integrity", status="all", limit=100)) == 8)
+check("appointments: cancel then upcoming excludes it",
+      (lambda rows: _appt_store.cancel(rows[0]["id"]) is not None
+       and len(_appt_store.list_upcoming("c-integrity", now_utc=_dt(2029, 1, 1))) == 7)(
+          _appt_store.list_all(client_id="c-integrity", limit=100)))
+
 # Cleanup: drop the temp database entirely.
 dbmod.engine.dispose()
 try:

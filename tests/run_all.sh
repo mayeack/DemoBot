@@ -35,6 +35,7 @@ SUITES=(
   tests/test_nvidia_blueprint.py
   tests/test_executive_fields.py
   tests/test_db_integrity.py
+  tests/test_scheduling.py
   tests/test_review_fixes.py
   tests/test_recommendation_formatting.py
   tests/test_galileo_integration.py
