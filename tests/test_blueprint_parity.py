@@ -373,8 +373,8 @@ def test_dynamic_parity() -> None:
                           == (f"{sk.split('/')[0]}_scheduling_agent" in ref["agents"]), str(out["agents"]))
         # Sanity on the reference: the scenarios actually exercise the guardrails.
         r = outcomes[ref_key]
-        check("scheduling: first answer offers (chips come from the shared node)",
-              r["medadvice/scheduling_offer"]["result"]["scheduling_state"] == "offered")
+        check("scheduling: first answer asks whether it resolved the concern (chips come from the shared node)",
+              r["medadvice/scheduling_offer"]["result"]["scheduling_state"] == "check_resolved")
         check("scheduling: Multi-Agent booking runs the scheduling agent and logs the tool call",
               r["medadvice/scheduling_book"]["result"]["scheduling_state"] == "booked"
               and "medadvice_scheduling_agent" in r["medadvice/scheduling_book"]["agents"]

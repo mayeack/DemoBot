@@ -654,16 +654,26 @@
                     </button>
                 </div>
 
-                <!-- Beneath the input, same size as Send: Prompts on the left,
-                     Show Recent on the right (directly under Send) -->
+                <!-- Beneath the input, same size as Send: Prompts + My Appointments on
+                     the left, Show Recent on the right (directly under Send) -->
                 <div class="mt-2 flex items-center justify-between">
-                    <button
-                        onclick="openPromptLibrary()"
-                        id="promptsButton"
-                        class="px-8 py-4 text-lg border-2 border-violet-600 text-violet-600 rounded-lg hover:bg-violet-50"
-                    >
-                        Prompts
-                    </button>
+                    <div class="flex items-center gap-2">
+                        <button
+                            onclick="openPromptLibrary()"
+                            id="promptsButton"
+                            class="px-8 py-4 text-lg border-2 border-violet-600 text-violet-600 rounded-lg hover:bg-violet-50"
+                        >
+                            Prompts
+                        </button>
+                        <button
+                            onclick="window.open('/appointments-ui', '_blank')"
+                            id="myAppointmentsButton"
+                            title="Appointments this browser booked from the chat"
+                            class="px-8 py-4 text-lg border-2 border-violet-600 text-violet-600 rounded-lg hover:bg-violet-50"
+                        >
+                            My Appointments
+                        </button>
+                    </div>
                     <button
                         onclick="openRecentSessions()"
                         id="showRecentButton"
@@ -686,14 +696,13 @@
                 <p class="mt-2">
                     <a href="/admin-ui" class="text-violet-600 hover:underline" target="_blank">Admin Dashboard</a> |
                     <a href="/governance-ui" class="text-violet-600 hover:underline" target="_blank">Governance Logs</a> |
-                    <a href="/settings-ui" class="text-violet-600 hover:underline" target="_blank">Settings</a> |
-                    <a href="/appointments-ui" class="text-violet-600 hover:underline" target="_blank">My Appointments</a>
+                    <a href="/settings-ui" class="text-violet-600 hover:underline" target="_blank">Settings</a>
                 </p>
                 <p class="mt-2 text-xs text-gray-400">Hostname: <span id="serverHostname" class="font-mono">—</span></p>
             </div>
         </div>
     </div>
 
-    <script src="/static/js/chat.js?v=21"></script>
+    <script src="/static/js/chat.js?v=22"></script>
 </body>
 </html>

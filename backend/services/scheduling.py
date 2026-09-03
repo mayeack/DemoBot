@@ -73,6 +73,13 @@ class SchedulingProfile:
     offer_on_severities: Tuple[str, ...] = ("MEDIUM", "HIGH", "EMERGENCY")
     # Never offer on the FIRST answer when its severity is one of these.
     first_offer_excludes: Tuple[str, ...] = ()
+    # The follow-up asked in its own bubble after an answer; the offer only
+    # follows a "no".
+    check: str = "Did this resolve your concern?"
+    check_yes: str = "Yes, that resolved it"
+    check_no: str = "No, I still have concerns"
+    resolved: str = ("Glad that helped. If anything changes, I'm here — and I can "
+                     "schedule {a_noun} with {provider} anytime.")
     offer: str = ("Would you like to schedule {a_noun} with {provider}? "
                   "Here are the next available times:")
     choose: str = "Here are some available times for {a_noun}:"
@@ -293,6 +300,12 @@ _RE_DECLINE = re.compile(
 _RE_ACCEPT = re.compile(
     r"^\s*(yes|yeah|yep|yup|sure|ok|okay|please|sounds good|let'?s do (it|that)|i'?d like (to|that)|"
     r"i would like|go ahead|absolutely)\b", re.I)
+_RE_CHECK_NO = re.compile(
+    r"^\s*(no|nope|nah|not really|not quite|still|it didn'?t|that didn'?t|didn'?t help|not resolved|"
+    r"i'?m not sure|unresolved|i still)\b", re.I)
+_RE_CHECK_YES = re.compile(
+    r"^\s*(yes|yeah|yep|yup|it did|that (did|helped|worked|resolved)|resolved|all good|i'?m good|"
+    r"thanks|thank you|perfect|great)\b", re.I)
 _RE_TIME = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?\b", re.I)
 _RE_NAME_PREFIX = re.compile(
     r"^\s*(my name is|my name'?s|the name is|name is|name:|it'?s|its|i'?m|i am|under|put it under|use|call me|this is)\s+",
@@ -419,6 +432,14 @@ def parse_action(message: str, last_meta: Optional[Dict[str, Any]],
             return {"action": "decline"}
         if looks_like_name(text):
             return {"action": "book", "slot_id": pending.get("slot_id"), "name": clean_name(text)}
+        return None
+    if state == "check_resolved":
+        # The "did this resolve your concern?" follow-up: a "no" leads to the
+        # offer, a "yes" closes it; anything else is a new question.
+        if _RE_CHECK_NO.search(text):
+            return {"action": "not_resolved", "page": 0}
+        if _RE_CHECK_YES.search(text):
+            return {"action": "resolved"}
         return None
     if offering:
         if _RE_DECLINE.search(text):

@@ -116,26 +116,43 @@ def run(check, sched, THEMES, slots, NOW, TZ):
         # --- offer (single-agent) --------------------------------------------------
         med = THEMES["medadvice"].scheduling
         p = out["scheduling"]
-        check("offer: state offered with 3 slot chips + More times + No thanks",
-              p["state"] == "offered" and [c["action"] for c in p["actions"]] == ["book", "book", "book", "more_times", "decline"])
-        check("offer: appended after the answer", out["final_message"].startswith("**Assessment:**") and out["final_message"].rstrip().endswith(med.render("offer")))
-        check("offer: slots are Monday's opening (fixed clock)", p["slots"][0]["label"] == slots[0].label, p["slots"][0]["label"])
-        check("offer: more_available", p["more_available"] is True)
-        check("offer: single-agent mode has no agent trace / LLM call", "agent_trace" not in out and llm_calls == [])
+        check("check: answer turn asks whether it resolved the concern (Yes/No chips, own bubble)",
+              p["state"] == "check_resolved" and [c["action"] for c in p["actions"]] == ["resolved", "not_resolved"]
+              and p["message"] == med.render("check") and p["slots"] == [])
+        check("check: the answer itself is left untouched", "final_message" not in out)
+        check("check: single-agent mode has no agent trace / LLM call", "agent_trace" not in out and llm_calls == [])
         _, out = turn(severity=SeverityLevel.EMERGENCY)
-        check("offer: medadvice EMERGENCY answer gets no offer", out == {})
-        hist = [{"role": "user", "content": "q"}, assistant({"state": "offered"}, "Would you like…?"), {"role": "user", "content": "still sore"}]
+        check("check: medadvice EMERGENCY answer gets no follow-up", out == {})
+        hist = [{"role": "user", "content": "q"}, assistant({"state": "check_resolved"}, "Did this resolve…?"), {"role": "user", "content": "still sore"}]
         _, out = turn(conversation_history=hist)
-        check("offer: later LOW answer does not re-offer", out == {})
+        check("check: later LOW answer does not re-ask", out == {})
         _, out = turn(conversation_history=hist, severity=SeverityLevel.HIGH)
-        check("offer: later HIGH answer re-offers", out.get("scheduling", {}).get("state") == "offered")
+        check("check: later HIGH answer re-asks", out.get("scheduling", {}).get("state") == "check_resolved")
         hist_declined = hist + [assistant({"state": "declined"}, "No problem."), {"role": "user", "content": "more"}]
         _, out = turn(conversation_history=hist_declined, severity=SeverityLevel.HIGH)
-        check("offer: declined earlier -> no re-offer", out == {})
+        check("check: declined earlier -> no re-ask", out == {})
+        # "No" -> the offer with slots; "Yes" -> a warm close, no offer.
+        _, out = turn(scheduling_action={"action": "not_resolved", "page": 0}, user_message="No, I still have concerns")
+        p = out["scheduling"]
+        check("offer after No: state offered with 3 slot chips + More times + No thanks",
+              p["state"] == "offered" and [c["action"] for c in p["actions"]] == ["book", "book", "book", "more_times", "decline"])
+        check("offer after No: the reply IS the offer copy", out["final_message"] == med.render("offer"))
+        check("offer after No: slots are Monday's opening (fixed clock)", p["slots"][0]["label"] == slots[0].label, p["slots"][0]["label"])
+        check("offer after No: more_available", p["more_available"] is True)
+        _, out = turn(scheduling_action={"action": "resolved", "page": 0}, user_message="Yes, that resolved it")
+        check("Yes: closes without an offer", out["scheduling"]["state"] == "resolved" and out["scheduling"]["actions"] == []
+              and out["final_message"] == med.render("resolved"))
 
         # --- offer (multi-agent) ---------------------------------------------------
         _, out = turn(multi_agent_mode=True)
-        check("MA offer: the scheduling agent phrases it", llm_calls == ["medadvice_scheduling_agent"] and "Sure — here's what I set up" in out["final_message"])
+        check("MA check: fixed copy in its own bubble, no agent call",
+              llm_calls == [] and out["scheduling"]["message"] == med.render("check") and "final_message" not in out
+              and "agent_trace" not in out)
+        check("MA check: chips still deterministic", [c["action"] for c in out["scheduling"]["actions"]] == ["resolved", "not_resolved"])
+        _, out = turn(multi_agent_mode=True, scheduling_action={"action": "not_resolved", "page": 0},
+                      user_message="No, I still have concerns")
+        check("MA offer after No: the scheduling agent phrases it",
+              llm_calls == ["medadvice_scheduling_agent"] and out["final_message"] == "Sure — here's what I set up for you.")
         check("MA offer: agent_trace ends with the scheduling agent",
               out["agent_trace"][-1]["name"] == "medadvice_scheduling_agent" and out["agent_trace"][-1]["role"] == "scheduling")
         check("MA offer: tokens summed onto the turn", out["llm_input_tokens"] == 17 and out["llm_output_tokens"] == 8)

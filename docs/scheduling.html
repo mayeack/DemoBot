@@ -55,7 +55,7 @@
 <p>Shared-chain touches on scheduling turns: <code>clarify.intake_node</code> asks no clarifying question, <code>safety_node</code> skips the escalation rules (an earlier emergency already escalated on its own turn; "see a doctor" phrasing must not flag a booking), and the clarifier does not count the offer's "?" toward its question budget.</p>
 
 <h2>Offer policy</h2>
-<p>Offer after the <strong>first</strong> non-clarifying reply of a session (clarifying turns never reach the POST chain), unless the theme excludes that severity — MedAdvice never offers on an EMERGENCY answer. Re-offer on later recommendation/escalation turns only when the severity is in the theme's <code>offer_on_severities</code> (MedAdvice: MEDIUM/HIGH; Telecom: HIGH+). Never once the client has an upcoming appointment (the first answer says so instead), never after an explicit decline in the session. Prior offers, declines and bookings are read from the persisted <code>metadata.scheduling</code> of earlier assistant messages, so the policy survives restarts and Show Recent reloads.</p>
+<p>The offer is never bolted onto an answer. After the <strong>first</strong> non-clarifying reply of a session (clarifying turns never reach the POST chain) the assistant asks, in its <strong>own bubble</strong>, whether the answer resolved the concern — two chips, <em>Yes, that resolved it</em> / <em>No, I still have concerns</em> (copy per theme). <strong>No</strong> brings the offer with the time chips; <strong>Yes</strong> closes warmly with no offer. The check is skipped when the theme excludes that severity — MedAdvice never asks on an EMERGENCY answer. It is asked again on later recommendation/escalation turns only when the severity is in the theme's <code>offer_on_severities</code> (MedAdvice: MEDIUM/HIGH; Telecom: HIGH+), never once the client has an upcoming appointment (the first answer says so instead), and never after an explicit decline in the session. Prior checks, declines and bookings are read from the persisted <code>metadata.scheduling</code> of earlier assistant messages, so the policy survives restarts and Show Recent reloads. (The check rides in the payload's <code>message</code>; the answer text itself is left untouched. The check is fixed copy in both modes — a yes/no prompt must not depend on a model's phrasing — so the scheduling agent phrases what follows it, not the check itself.)</p>
 
 <h2>Identity and time</h2>
 <ul>
@@ -80,7 +80,7 @@
 <p>Request (<code>POST /api/chat/message</code> and <code>/message/stream</code>):</p>
 <pre><code>{ "client_id": "b3e1…", "client_tz": "America/New_York",
   "scheduling_action": {"action": "book", "slot_id": "20260907T1200Z", "appointment_id": null, "page": 0} }</code></pre>
-<p><code>action</code> ∈ <code>book | accept | more_times | decline | list | cancel | reschedule | choose_slot</code>.</p>
+<p><code>action</code> ∈ <code>resolved | not_resolved | book | accept | more_times | decline | list | cancel | reschedule | choose_slot</code>.</p>
 <p>Response — <code>scheduling</code> on <code>ChatResponse</code> <strong>and</strong> the SSE <code>final</code> frame (and persisted as the assistant message's <code>metadata.scheduling</code>, returned by <code>GET /api/chat/session/{id}</code>):</p>
 <pre><code>{ "state": "offered", "theme": "medadvice", "appointment_noun": "follow-up visit",
   "page": 0, "more_available": true,
@@ -90,7 +90,7 @@
   "actions": [{"action": "book", "slot_id": "20260907T1200Z", "text": "Mon Sep 7, 8:00 AM"},
               {"action": "more_times", "page": 1, "text": "More times"},
               {"action": "decline", "text": "No thanks"}] }</code></pre>
-<p><code>state</code> ∈ <code>offered | choosing | awaiting_name | booked | listed | cancelled | rescheduled | declined | already_booked | rescheduling | unavailable</code>. <code>actions</code> is the whole chip contract: the backend decides which chips exist and their (verticalized) labels; the UI renders them generically and sends a click back as <code>scheduling_action</code> with a readable user bubble ("Book Mon Sep 7, 8:00 AM").</p>
+<p><code>state</code> ∈ <code>check_resolved | resolved | offered | choosing | awaiting_name | booked | listed | cancelled | rescheduled | declined | already_booked | rescheduling | unavailable</code>; <code>message</code> (set for <code>check_resolved</code>) is a follow-up the UI renders as its own assistant bubble, with the chips under it. <code>actions</code> is the whole chip contract: the backend decides which chips exist and their (verticalized) labels; the UI renders them generically and sends a click back as <code>scheduling_action</code> with a readable user bubble ("Book Mon Sep 7, 8:00 AM").</p>
 
 <h2>Governance and telemetry</h2>
 <ul>

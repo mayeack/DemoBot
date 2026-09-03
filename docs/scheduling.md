@@ -69,14 +69,21 @@ clarifier does not count the offer's "?" toward its question budget.
 
 ## Offer policy
 
-Offer after the **first** non-clarifying reply of a session (clarifying turns never
-reach the POST chain), unless the theme excludes that severity — MedAdvice never offers
-on an EMERGENCY answer. Re-offer on later recommendation/escalation turns only when the
-severity is in the theme's `offer_on_severities` (MedAdvice: MEDIUM/HIGH; Telecom:
-HIGH+). Never once the client has an upcoming appointment (the first answer says so
-instead), never after an explicit decline in the session. Prior offers, declines and
-bookings are read from the persisted `metadata.scheduling` of earlier assistant
-messages, so the policy survives restarts and Show Recent reloads.
+The offer is never bolted onto an answer. After the **first** non-clarifying reply of a
+session (clarifying turns never reach the POST chain) the assistant asks, in its **own
+bubble**, whether the answer resolved the concern — two chips, *Yes, that resolved it*
+/ *No, I still have concerns* (copy per theme). **No** brings the offer with the time
+chips; **Yes** closes warmly with no offer. The check is skipped when the theme excludes
+that severity — MedAdvice never asks on an EMERGENCY answer. It is asked again on later
+recommendation/escalation turns only when the severity is in the theme's
+`offer_on_severities` (MedAdvice: MEDIUM/HIGH; Telecom: HIGH+), never once the client
+has an upcoming appointment (the first answer says so instead), and never after an
+explicit decline in the session. Prior checks, declines and bookings are read from the
+persisted `metadata.scheduling` of earlier assistant messages, so the policy survives
+restarts and Show Recent reloads. (The check rides in the payload's `message`; the
+answer text itself is left untouched. The check is fixed copy in both modes — a yes/no
+prompt must not depend on a model's phrasing — so the scheduling agent phrases what
+follows it, not the check itself.)
 
 ## Identity and time
 
@@ -115,7 +122,8 @@ Request (`POST /api/chat/message` and `/message/stream`):
   "scheduling_action": {"action": "book", "slot_id": "20260907T1200Z", "appointment_id": null, "page": 0} }
 ```
 
-`action` ∈ `book | accept | more_times | decline | list | cancel | reschedule | choose_slot`.
+`action` ∈ `resolved | not_resolved | book | accept | more_times | decline | list | cancel |
+reschedule | choose_slot`.
 
 Response — `scheduling` on `ChatResponse` **and** the SSE `final` frame (and persisted as
 the assistant message's `metadata.scheduling`, returned by `GET /api/chat/session/{id}`):
@@ -131,8 +139,10 @@ the assistant message's `metadata.scheduling`, returned by `GET /api/chat/sessio
               {"action": "decline", "text": "No thanks"}] }
 ```
 
-`state` ∈ `offered | choosing | awaiting_name | booked | listed | cancelled |
-rescheduled | declined | already_booked | rescheduling | unavailable`. `actions` is the
+`state` ∈ `check_resolved | resolved | offered | choosing | awaiting_name | booked |
+listed | cancelled | rescheduled | declined | already_booked | rescheduling |
+unavailable`; `message` (set for `check_resolved`) is a follow-up the UI renders as its
+own assistant bubble, with the chips under it. `actions` is the
 whole chip contract: the backend decides which chips exist and their (verticalized)
 labels; the UI renders them generically and sends a click back as `scheduling_action`
 with a readable user bubble ("Book Mon Sep 7, 8:00 AM").

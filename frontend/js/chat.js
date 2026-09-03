@@ -311,6 +311,7 @@ function applyTheme(themeKey) {
         { el: document.getElementById('sendButton'), classes: ['bg-{c}-600', 'hover:bg-{c}-700'] },
         { el: document.getElementById('promptsButton'), classes: ['border-{c}-600', 'text-{c}-600', 'hover:bg-{c}-50'] },
         { el: document.getElementById('showRecentButton'), classes: ['border-{c}-600', 'text-{c}-600', 'hover:bg-{c}-50'] },
+        { el: document.getElementById('myAppointmentsButton'), classes: ['border-{c}-600', 'text-{c}-600', 'hover:bg-{c}-50'] },
         { el: document.getElementById('acceptBtn'), classes: ['bg-{c}-600', 'hover:bg-{c}-700'] },
         { el: document.getElementById('messageInput'), classes: ['focus:ring-{c}-500'] },
     ];
@@ -900,7 +901,14 @@ function _schedulingChipText(a) {
 // prompt-library chips: textContent + listeners, never innerHTML). Clicking
 // one disables the row and sends the structured action with a readable text.
 function attachSchedulingActions(bubble, payload) {
-    if (!bubble || !payload || !Array.isArray(payload.actions) || !payload.actions.length) return;
+    if (!bubble || !payload) return;
+    let host = bubble;
+    // A follow-up ("Did this resolve your concern?") is its OWN assistant bubble,
+    // separate from the answer, with the chips under it.
+    if (payload.message) {
+        host = addMessageToChat('assistant', payload.message, 'scheduling_followup') || bubble;
+    }
+    if (!Array.isArray(payload.actions) || !payload.actions.length) return;
     const row = document.createElement('div');
     row.className = 'mt-3 flex flex-wrap gap-2';
     row.setAttribute('data-scheduling-actions', payload.state || '');
@@ -923,7 +931,7 @@ function attachSchedulingActions(bubble, payload) {
         });
         row.appendChild(btn);
     });
-    bubble.appendChild(row);
+    host.appendChild(row);
     const chatContainer = document.getElementById('chatContainer');
     if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
 }
