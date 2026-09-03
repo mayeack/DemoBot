@@ -672,6 +672,17 @@ def main() -> int:
               s_html.count('aria-controls="section-') == len(sections)
               and re.search(r"<button[^>]*>\s*<h2", s_html) is None)
 
+        # HEC destination cards: loadDestinations() re-renders the card's innerHTML,
+        # which blanks the <span data-result> feedback. So the re-render MUST come
+        # before setResult(), or the Save/Test result flashes and vanishes.
+        for _fn in ("saveDestination", "testDestination"):
+            _body = re.search(r"async function " + _fn + r"\(id\) \{(.*?)\n\}", _js, re.S).group(1)
+            _try = _body[:_body.index("} catch")]   # the catch handler always trails; ignore it
+            _reload = _try.find("loadDestinations()")
+            _result = _try.rfind("setResult(")
+            check(f"Settings: {_fn} re-renders before writing its result",
+                  _reload != -1 and _result != -1 and _reload < _result)
+
     # ---- AI Defense per-direction guardrail config (no client needed) ----
     prompt_rules = {r["rule_name"] for r in settings.ai_defense_rule_config}
     resp_rules = {r["rule_name"] for r in settings.ai_defense_response_rule_config}
