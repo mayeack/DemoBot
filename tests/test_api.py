@@ -630,8 +630,45 @@ def main() -> int:
               good.status_code in (302, 303, 200) and "md_access" in good.cookies, f"{good.status_code}")
         check("GET /logout -> 2xx/3xx", c.get("/logout", headers=AUTH, follow_redirects=False).status_code in (200, 302, 303))
 
+        # ---- settings gate (a SECOND code, hardcoded, in front of /settings-ui) ----
+        # Runs before anything unlocks it, so the locked case is genuinely locked.
+        from backend.middleware.settings_gate import SETTINGS_ACCESS_CODE  # noqa: PLC0415
+        locked = c.get("/settings-ui", headers=AUTH, follow_redirects=False)
+        check("GET /settings-ui without the settings code -> redirect to /settings-login",
+              locked.status_code in (302, 303)
+              and "/settings-login" in locked.headers.get("location", ""),
+              f"{locked.status_code} {locked.headers.get('location')}")
+        check("GET /settings-login -> 200 HTML (still behind the app key)",
+              c.get("/settings-login", headers=AUTH).status_code == 200)
+        check("GET /settings-login without the app key -> 401",
+              c.get("/settings-login", headers={"accept": "text/html"}).status_code == 401)
+        s_bad = c.post("/settings-login", headers=AUTH,
+                       data={"access_code": "wrong-code"}, follow_redirects=False)
+        check("POST /settings-login wrong code -> no md_settings cookie",
+              "md_settings" not in s_bad.cookies)
+        check("the app key alone does not unlock settings",
+              c.get("/settings-ui", headers=AUTH, follow_redirects=False).status_code in (302, 303))
+        s_ok = c.post("/settings-login", headers=AUTH,
+                      data={"access_code": SETTINGS_ACCESS_CODE}, follow_redirects=False)
+        check("POST /settings-login correct code -> redirect + md_settings cookie",
+              s_ok.status_code in (302, 303) and "md_settings" in s_ok.cookies,
+              f"{s_ok.status_code}")
+        check("GET /settings-ui with the settings code -> 200 HTML",
+              (lambda r: r.status_code == 200 and "<html" in r.text.lower())(
+                  c.get("/settings-ui", headers=AUTH)))
+        check("the settings cookie is not the app cookie (one gate never opens the other)",
+              c.cookies.get("md_settings") != c.cookies.get("md_access"))
+        check("GET /settings-logout -> 2xx/3xx",
+              c.get("/settings-logout", headers=AUTH, follow_redirects=False).status_code in (200, 302, 303))
+        check("after /settings-logout, /settings-ui is locked again",
+              c.get("/settings-ui", headers=AUTH, follow_redirects=False).status_code in (302, 303))
+        # Re-unlock: the Settings UI invariants further down read the real page.
+        c.post("/settings-login", headers=AUTH,
+               data={"access_code": SETTINGS_ACCESS_CODE}, follow_redirects=False)
+
         # ---- server-rendered pages (HTML, with key) ----
-        for path in ("/app", "/admin-ui", "/governance-ui", "/settings-ui", "/appointments-ui"):
+        # /settings-ui is NOT here: it sits behind a second code (block above).
+        for path in ("/app", "/admin-ui", "/governance-ui", "/appointments-ui"):
             r = c.get(path, headers=AUTH)
             check(f"GET {path} -> 200 HTML", r.status_code == 200 and "<html" in r.text.lower(), f"{r.status_code}")
 
