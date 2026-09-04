@@ -319,6 +319,8 @@ curl http://localhost:8001/health
 - ✓ output_messages
 - ✓ usage_input_tokens
 - ✓ usage_output_tokens
+- ✓ usage_output_tokens_cached
+- ✓ usage_output_tokens_uncached
 - ✓ usage_total_tokens
 - ✓ timestamp
 - ✓ pii_detected
@@ -464,11 +466,16 @@ ab -n 10 -c 2 -p post_data.json -T application/json \
 1. Make query
 2. Check governance log
 3. Verify: `usage_total_tokens = usage_input_tokens + usage_output_tokens`
+4. Verify the output cache split:
+   `usage_output_tokens = usage_output_tokens_cached + usage_output_tokens_uncached`
 
 **Expected:**
 - Accurate token counts
 - Matches selected provider response
 - Properly logged in all destinations
+- On a cloud provider that reports no cached output, the split is all
+  non-cached; on local inference (ollama / a local NIM) the split is tagged by
+  the app and varies per call (`backend/agents/token_usage.py`)
 
 ### 9. Error Handling Tests
 

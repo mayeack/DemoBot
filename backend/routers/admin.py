@@ -55,6 +55,8 @@ async def get_interaction_logs(
                 "timestamp": log.timestamp,
                 "usage_input_tokens": log.usage_input_tokens,
                 "usage_output_tokens": log.usage_output_tokens,
+                "usage_output_tokens_cached": log.usage_output_tokens_cached,
+                "usage_output_tokens_uncached": log.usage_output_tokens_uncached,
                 "usage_total_tokens": log.usage_total_tokens,
                 "pii_detected": log.pii_detected,
                 "safety_violated": log.safety_violated,
@@ -152,6 +154,8 @@ async def get_metrics(
     token_stats = db.query(
         func.sum(AIGovernanceLog.usage_input_tokens).label('total_input'),
         func.sum(AIGovernanceLog.usage_output_tokens).label('total_output'),
+        func.sum(AIGovernanceLog.usage_output_tokens_cached).label('total_output_cached'),
+        func.sum(AIGovernanceLog.usage_output_tokens_uncached).label('total_output_uncached'),
         func.sum(AIGovernanceLog.usage_total_tokens).label('total')
     ).filter(
         AIGovernanceLog.timestamp >= start_time
@@ -200,6 +204,8 @@ async def get_metrics(
         average_latency=round(avg_latency, 3),
         total_input_tokens=token_stats.total_input or 0,
         total_output_tokens=token_stats.total_output or 0,
+        total_output_tokens_cached=token_stats.total_output_cached or 0,
+        total_output_tokens_uncached=token_stats.total_output_uncached or 0,
         total_tokens=token_stats.total or 0,
         severity_distribution=severity_distribution,
         pii_detection_count=pii_detection_count or 0,

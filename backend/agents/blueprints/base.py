@@ -18,7 +18,8 @@ state contract the POST chain and governance read:
 
     final_message, severity, confidence, messages, requested_categories,
     llm_response_id, llm_model, llm_input_tokens, llm_output_tokens,
-    llm_stop_reason, agent_trace   (plus terminal/result on a short-circuit)
+    llm_output_tokens_cached, llm_output_tokens_uncached, llm_stop_reason,
+    agent_trace   (plus terminal/result on a short-circuit)
 
 and must honor the per-request flags every blueprint honors
 (``multi_agent_mode``, the ``force_*_injection`` directives via
@@ -47,6 +48,8 @@ CORE_STATE_CONTRACT: Tuple[str, ...] = (
     "llm_model",
     "llm_input_tokens",
     "llm_output_tokens",
+    "llm_output_tokens_cached",
+    "llm_output_tokens_uncached",
     "llm_stop_reason",
     "agent_trace",
 )

@@ -94,6 +94,10 @@ class DemoBotState(TypedDict, total=False):
     llm_model: str
     llm_input_tokens: int
     llm_output_tokens: int
+    # ``llm_output_tokens`` split by cache origin; the two always sum back to it
+    # (backend/agents/token_usage.py). Summed across agents like the totals.
+    llm_output_tokens_cached: int
+    llm_output_tokens_uncached: int
     llm_stop_reason: str
 
     # ---- Derived assessment (domain agent) ----

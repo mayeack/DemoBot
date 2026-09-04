@@ -261,6 +261,14 @@ def llm_span(*, request_model: str, provider: str, attributes: Optional[Dict[str
     return _span(f"chat {request_model}", OP_CHAT, attrs)
 
 
+# Output tokens split by cache origin. Additive next to the semconv
+# gen_ai.usage.output_tokens (which keeps its meaning: the two always sum to
+# it), so a Splunk dashboard can chart a cache-hit ratio and price cached and
+# decoded tokens apart. See backend/agents/token_usage.py.
+ATTR_OUTPUT_TOKENS_CACHED = "gen_ai.usage.output_tokens_cached"
+ATTR_OUTPUT_TOKENS_UNCACHED = "gen_ai.usage.output_tokens_uncached"
+
+
 def record_llm_result(
     span,
     *,
@@ -268,6 +276,8 @@ def record_llm_result(
     response_model: Optional[str] = None,
     input_tokens: Optional[int] = None,
     output_tokens: Optional[int] = None,
+    output_tokens_cached: Optional[int] = None,
+    output_tokens_uncached: Optional[int] = None,
     finish_reason: Optional[str] = None,
 ) -> None:
     """Attach GenAI response/usage attributes to an LLM span."""
@@ -284,9 +294,36 @@ def record_llm_result(
             "gen_ai.usage.input_tokens": input_tokens,
             "gen_ai.usage.output_tokens": output_tokens,
             "gen_ai.usage.total_tokens": total,
+            ATTR_OUTPUT_TOKENS_CACHED: output_tokens_cached,
+            ATTR_OUTPUT_TOKENS_UNCACHED: output_tokens_uncached,
             "gen_ai.response.finish_reasons": finish_reason,
         },
     )
+
+
+def record_output_token_cache_split(inv, cached: Optional[int], uncached: Optional[int]) -> None:
+    """Put the output-token cache split on a util-genai invocation.
+
+    The handler has no field for these, and its span emitter drops any custom
+    ``attributes`` key that is not an allow-listed semconv one — so they are set
+    straight on the invocation's span, which exists from ``start_llm`` and is not
+    ended until the context manager exits. The ``attributes`` dict gets them too,
+    for the emitters that do read it. No-op when the invocation is unavailable
+    (handler not configured).
+    """
+    if inv is None or (cached is None and uncached is None):
+        return
+    attrs = {
+        ATTR_OUTPUT_TOKENS_CACHED: int(cached or 0),
+        ATTR_OUTPUT_TOKENS_UNCACHED: int(uncached or 0),
+    }
+    span = getattr(inv, "span", None)
+    try:
+        inv.attributes.update(attrs)
+        if span is not None:
+            _set_attrs(span, attrs)
+    except Exception:  # noqa: BLE001 - telemetry must never break a turn
+        logger.debug("could not attach output-token cache split", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

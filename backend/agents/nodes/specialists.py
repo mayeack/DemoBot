@@ -29,6 +29,7 @@ from backend.agents.nodes.agent_common import (
     trace_entry,
 )
 from backend.agents.nodes.shared import build_llm_messages
+from backend.agents.token_usage import TokenTally
 from backend.agents.themes.base import build_specialist_prompt
 from backend.config import settings
 from backend.telemetry import otel
@@ -53,8 +54,7 @@ def make_specialists_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
 
         trace: List[Dict[str, Any]] = list(state.get("agent_trace", []))
         specialist_outputs: List[Dict[str, Any]] = []
-        in_sum = state.get("llm_input_tokens", 0) or 0
-        out_sum = state.get("llm_output_tokens", 0) or 0
+        tally = TokenTally(state)
         successes = 0
 
         for key in selected:
@@ -85,6 +85,8 @@ def make_specialists_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
                             response_model=response.model,
                             input_tokens=response.input_tokens,
                             output_tokens=response.output_tokens,
+                            output_tokens_cached=response.output_tokens_cached,
+                            output_tokens_uncached=response.output_tokens_uncached,
                             finish_reason=response.stop_reason,
                         )
                 except ChatModelError as exc:
@@ -99,8 +101,7 @@ def make_specialists_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
                     continue
 
             successes += 1
-            in_sum += response.input_tokens or 0
-            out_sum += response.output_tokens or 0
+            tally.add(response)
             specialist_outputs.append(
                 {"key": key, "label": spec.label, "analysis": response.content}
             )
@@ -120,8 +121,7 @@ def make_specialists_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
         return {
             "specialist_outputs": specialist_outputs,
             "agent_trace": trace,
-            "llm_input_tokens": in_sum,
-            "llm_output_tokens": out_sum,
+            **tally.updates(),
         }
 
     return specialists_node

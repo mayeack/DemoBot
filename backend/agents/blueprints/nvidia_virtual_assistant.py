@@ -49,6 +49,7 @@ from backend.agents.nodes.agent_common import handle_agent_error, request_model,
 from backend.agents.nodes.clarify import intake_node
 from backend.agents.nodes.shared import build_llm_messages
 from backend.agents.nodes.synthesizer import make_synthesizer_agent
+from backend.agents.token_usage import TokenTally
 from backend.config import settings
 from backend.telemetry import otel
 
@@ -171,19 +172,25 @@ def _route_with_tools(theme_config, system: str, messages: List[Dict[str, Any]],
             ai = bound.invoke(_to_langchain_messages(system, messages))
         except Exception as exc:  # noqa: BLE001
             raise ChatModelError(f"Agent '{agent_name}' tool routing failed: {exc}") from exc
-        usage = _extract_usage(ai)
+        usage = _extract_usage(ai, provider)
         meta = _extract_metadata(ai, fallback)
         names = [tc.get("name", "") for tc in (getattr(ai, "tool_calls", None) or []) if isinstance(tc, dict)]
         content = json.dumps([{"tool": n, "args": {}} for n in names]) if names else (getattr(ai, "content", "") or "")
         if inv is not None:
             inv.input_tokens = usage["input_tokens"]
             inv.output_tokens = usage["output_tokens"]
+            otel.record_output_token_cache_split(
+                inv, usage["output_tokens_cached"], usage["output_tokens_uncached"]
+            )
             inv.response_model_name = meta["model"]
             inv.response_id = meta["id"]
             otel.record_genai_output(inv, text=str(content), finish_reason=meta["stop_reason"])
     return names, NormalizedLLMResponse(
         id=meta["id"], content=str(content), model=meta["model"],
-        input_tokens=usage["input_tokens"], output_tokens=usage["output_tokens"], stop_reason=meta["stop_reason"],
+        input_tokens=usage["input_tokens"], output_tokens=usage["output_tokens"],
+        output_tokens_cached=usage["output_tokens_cached"],
+        output_tokens_uncached=usage["output_tokens_uncached"],
+        stop_reason=meta["stop_reason"],
     )
 
 
@@ -241,6 +248,8 @@ def make_primary_assistant(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
                         otel.record_llm_result(
                             sp, response_id=response.id, response_model=response.model,
                             input_tokens=response.input_tokens, output_tokens=response.output_tokens,
+                            output_tokens_cached=response.output_tokens_cached,
+                            output_tokens_uncached=response.output_tokens_uncached,
                             finish_reason=response.stop_reason,
                         )
                     selected, other = parse_route(response.content, valid, primary_key, limit=limit)
@@ -253,8 +262,7 @@ def make_primary_assistant(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
                                 "other_talk": other, "mode": mode},
             "agent_trace": [trace_entry(name=agent_name, role="primary_assistant", response=response,
                                         duration_ms=round((time.perf_counter() - started) * 1000, 1))],
-            "llm_input_tokens": response.input_tokens or 0,
-            "llm_output_tokens": response.output_tokens or 0,
+            **TokenTally().add(response).updates(),
         }
 
     return primary_assistant
@@ -275,8 +283,7 @@ def make_sub_assistant(theme_config) -> Callable[[Dict[str, Any]], Dict[str, Any
         trace: List[Dict[str, Any]] = list(state.get("agent_trace", []))
         outputs: List[Dict[str, Any]] = []
         tools_used: List[Dict[str, Any]] = []
-        in_sum = state.get("llm_input_tokens", 0) or 0
-        out_sum = state.get("llm_output_tokens", 0) or 0
+        tally = TokenTally(state)
         successes = 0
 
         for key in selected:
@@ -304,6 +311,8 @@ def make_sub_assistant(theme_config) -> Callable[[Dict[str, Any]], Dict[str, Any
                         otel.record_llm_result(
                             sp, response_id=response.id, response_model=response.model,
                             input_tokens=response.input_tokens, output_tokens=response.output_tokens,
+                            output_tokens_cached=response.output_tokens_cached,
+                            output_tokens_uncached=response.output_tokens_uncached,
                             finish_reason=response.stop_reason,
                         )
                 except ChatModelError as exc:
@@ -312,8 +321,7 @@ def make_sub_assistant(theme_config) -> Callable[[Dict[str, Any]], Dict[str, Any
                                              duration_ms=round((time.perf_counter() - started) * 1000, 1)))
                     continue
             successes += 1
-            in_sum += response.input_tokens or 0
-            out_sum += response.output_tokens or 0
+            tally.add(response)
             outputs.append({"key": key, "label": spec.label, "analysis": response.content,
                             "knowledge": [k["title"] for k in knowledge], "record_used": bool(record)})
             trace.append(trace_entry(name=agent_name, role="sub_assistant", response=response,
@@ -325,8 +333,7 @@ def make_sub_assistant(theme_config) -> Callable[[Dict[str, Any]], Dict[str, Any
             "specialist_outputs": outputs,
             "blueprint_tools": tools_used,
             "agent_trace": trace,
-            "llm_input_tokens": in_sum,
-            "llm_output_tokens": out_sum,
+            **tally.updates(),
         }
 
     return sub_assistant

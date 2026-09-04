@@ -80,6 +80,28 @@ def check_llm():
     assert out_msgs and RESP in str(out_msgs), "gen_ai.output.messages missing the response"
 
 
+def check_output_token_cache_split():
+    """The cache split rides in the invocation's custom attributes dict (the
+    handler has no field for it), so it has to actually reach the span."""
+    _EXPORTER.clear()
+    with otel.genai_llm_invocation(
+        request_model="mistral-nemo:12b", provider="ollama",
+        system=SYS, messages=[{"role": "user", "content": USER}],
+    ) as inv:
+        assert inv is not None, "util-genai handler unavailable"
+        inv.input_tokens, inv.output_tokens = 120, 260
+        otel.record_output_token_cache_split(inv, 90, 170)
+        otel.record_genai_output(inv, text=RESP, finish_reason="end_turn")
+    span = _find("chat ")
+    assert span is not None, "no 'chat' gen_ai span was emitted"
+    cached = _attr(span, otel.ATTR_OUTPUT_TOKENS_CACHED)
+    uncached = _attr(span, otel.ATTR_OUTPUT_TOKENS_UNCACHED)
+    assert cached == 90, f"{otel.ATTR_OUTPUT_TOKENS_CACHED} missing/wrong: {cached}"
+    assert uncached == 170, f"{otel.ATTR_OUTPUT_TOKENS_UNCACHED} missing/wrong: {uncached}"
+    total = _attr(span, "gen_ai.usage.output_tokens")
+    assert cached + uncached == total, f"split {cached}+{uncached} != output_tokens {total}"
+
+
 def check_agent():
     _EXPORTER.clear()
     with otel.genai_agent_invocation(
@@ -100,6 +122,7 @@ def main():
     _setup_tracer()
     ok = True
     for name, fn in [("LLM span carries prompt+response", check_llm),
+                     ("LLM span carries the output-token cache split", check_output_token_cache_split),
                      ("Agent span carries prompt+response", check_agent)]:
         try:
             fn()

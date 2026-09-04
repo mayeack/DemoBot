@@ -13,6 +13,7 @@ from typing import Any, Dict
 
 from backend.agents.nodes.shared import clarifying_service, escalation_rules
 from backend.agents.state import governance_identity_overrides
+from backend.agents.token_usage import governance_usage_data
 from backend.logging.governance_logger import active_response_model, governance_logger
 from backend.models.schemas import MessageType, SeverityLevel
 from backend.services.escalation_rules import EscalationRules
@@ -49,11 +50,7 @@ def policy_block_node(state: Dict[str, Any]) -> Dict[str, Any]:
             input_messages=[{"role": "user", "content": user_message}],
             output_messages=[{"role": "assistant", "content": blocked_message}],
             response_text=f"EMERGENCY\n\u26a0\ufe0f POLICY BLOCKED\n{blocked_message}",
-            usage_data={
-                "usage_input_tokens": 0,
-                "usage_output_tokens": 0,
-                "usage_total_tokens": 0,
-            },
+            usage_data=governance_usage_data(),
             performance_data={"client_operation_duration": duration},
             response_model=_response_model(),
             response_finish_reasons=["policy_blocked"],

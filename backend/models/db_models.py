@@ -81,6 +81,10 @@ class AIGovernanceLog(Base):
     # Usage, performance, and cost
     usage_input_tokens = Column(Integer, nullable=True)
     usage_output_tokens = Column(Integer, nullable=True)
+    # Cache split of usage_output_tokens (they sum back to it). Added additively
+    # by reconcile_schema() at startup — no manual migration.
+    usage_output_tokens_cached = Column(Integer, nullable=True)
+    usage_output_tokens_uncached = Column(Integer, nullable=True)
     usage_total_tokens = Column(Integer, nullable=True)
     client_operation_duration = Column(Float, nullable=True)
     server_time_per_output_token = Column(Float, nullable=True)

@@ -56,6 +56,12 @@ def create_governance_log(
         # Usage, performance, and cost
         "usage_input_tokens": kwargs.get("usage_input_tokens"),
         "usage_output_tokens": kwargs.get("usage_output_tokens"),
+        # Output tokens split by cache origin. Additive: the two always sum back
+        # to usage_output_tokens, which keeps its meaning, so a cost review can
+        # price a cached token apart from a decoded one and chart a cache-hit
+        # ratio. See backend/agents/token_usage.py for where each comes from.
+        "usage_output_tokens_cached": kwargs.get("usage_output_tokens_cached"),
+        "usage_output_tokens_uncached": kwargs.get("usage_output_tokens_uncached"),
         "usage_total_tokens": kwargs.get("usage_total_tokens"),
         "client_operation_duration": kwargs.get("client_operation_duration"),
         "server_time_per_output_token": kwargs.get("server_time_per_output_token"),

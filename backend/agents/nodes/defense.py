@@ -13,6 +13,7 @@ from typing import Any, Dict
 
 from backend.agents.nodes.shared import content_engine
 from backend.agents.state import governance_identity_overrides
+from backend.agents.token_usage import governance_usage_data
 from backend.services.ai_defense import ai_defense_client
 from backend.telemetry import otel
 
@@ -73,8 +74,6 @@ def response_defense_node(state: Dict[str, Any]) -> Dict[str, Any]:
         # The model already answered here (that answer is what got blocked), so
         # report its real id and token spend rather than the zeros/active-model
         # fallback the handler uses for callers that don't track them.
-        input_tokens = state.get("llm_input_tokens", 0) or 0
-        output_tokens = state.get("llm_output_tokens", 0) or 0
         result = content_engine._handle_ai_defense_response_block(
             session_id=state["session_id"],
             request_id=state["request_id"],
@@ -85,11 +84,7 @@ def response_defense_node(state: Dict[str, Any]) -> Dict[str, Any]:
             client_address=state.get("client_address"),
             enduser_id=state.get("enduser_id"),
             llm_model=state.get("llm_model"),
-            usage_data={
-                "usage_input_tokens": input_tokens,
-                "usage_output_tokens": output_tokens,
-                "usage_total_tokens": input_tokens + output_tokens,
-            },
+            usage_data=governance_usage_data(state),
             governance_overrides=governance_identity_overrides(state),
         )
 

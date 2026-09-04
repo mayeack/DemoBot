@@ -36,6 +36,9 @@ _GOVERNANCE_KEYS = (
     "toxic_detected", "toxic_types",
     "evaluation_score_value", "evaluation_score_label",
     "response_finish_reasons", "client_operation_duration",
+    # The Galileo LLM span carries only a flat output-token count, so the cache
+    # split rides in the span metadata instead (the two sum to that count).
+    "usage_output_tokens_cached", "usage_output_tokens_uncached",
 )
 
 

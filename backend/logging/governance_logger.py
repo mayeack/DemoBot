@@ -405,6 +405,8 @@ class GovernanceLogger:
                     request_top_p=log_data.get("request_top_p"),
                     usage_input_tokens=log_data.get("usage_input_tokens"),
                     usage_output_tokens=log_data.get("usage_output_tokens"),
+                    usage_output_tokens_cached=log_data.get("usage_output_tokens_cached"),
+                    usage_output_tokens_uncached=log_data.get("usage_output_tokens_uncached"),
                     usage_total_tokens=log_data.get("usage_total_tokens"),
                     client_operation_duration=log_data.get("client_operation_duration"),
                     safety_violated=log_data.get("safety_violated", False),

@@ -40,6 +40,7 @@ from backend.agents.llm import ChatModelError, invoke_agent
 from backend.agents.nodes.agent_common import request_model, trace_entry
 from backend.agents.state import governance_identity_overrides
 from backend.agents.themes import get_theme
+from backend.agents.token_usage import TokenTally
 from backend.config import settings
 from backend.logging.governance_logger import governance_logger
 from backend.services import scheduling as svc
@@ -546,6 +547,8 @@ def scheduling_node(state: Dict[str, Any]) -> Dict[str, Any]:
                     otel.record_llm_result(
                         llm_sp, response_id=response.id, response_model=response.model,
                         input_tokens=response.input_tokens, output_tokens=response.output_tokens,
+                        output_tokens_cached=response.output_tokens_cached,
+                        output_tokens_uncached=response.output_tokens_uncached,
                         finish_reason=response.stop_reason,
                     )
             except ChatModelError as exc:
@@ -561,8 +564,7 @@ def scheduling_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 text = wording if payload["state"] != "listed" else f"{wording}\n{text}"
             trace.append(trace_entry(name=agent_name, role="scheduling", response=response,
                                      duration_ms=round((time.perf_counter() - agent_start) * 1000, 1)))
-            updates["llm_input_tokens"] = (state.get("llm_input_tokens", 0) or 0) + (response.input_tokens or 0)
-            updates["llm_output_tokens"] = (state.get("llm_output_tokens", 0) or 0) + (response.output_tokens or 0)
+            updates.update(TokenTally(state).add(response).updates())
         updates["agent_trace"] = trace
         if intent_turn:
             # An intent turn IS the scheduling reply: the scheduling agent's
