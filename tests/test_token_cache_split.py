@@ -193,6 +193,47 @@ def test_fields_reach_the_log_and_the_db() -> None:
           {"usage_output_tokens_cached", "usage_output_tokens_uncached"} <= columns)
 
 
+def test_metrics_aggregate_handles_pre_split_rows() -> None:
+    """A governance DB predating the split has rows with usage_output_tokens and
+    a NULL split; SUM() skips NULLs, so the aggregate must derive the uncached
+    side from the total or the dashboard under-reports output badly."""
+    from sqlalchemy import create_engine, func
+    from sqlalchemy.orm import sessionmaker
+
+    from backend.models.db_models import AIGovernanceLog, Base
+
+    engine = create_engine("sqlite://")  # in-memory, isolated from the app DB
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    required = dict(operation_name="chat", request_model="m", conversation_id="c",
+                    request_id="r", trace_id="t", input_messages=[])
+    db.add(AIGovernanceLog(  # pre-split row: no cached/uncached recorded
+        session_id="old", usage_input_tokens=100, usage_output_tokens=200,
+        usage_total_tokens=300, **required))
+    db.add(AIGovernanceLog(  # post-split row
+        session_id="new", usage_input_tokens=10, usage_output_tokens=50,
+        usage_output_tokens_cached=20, usage_output_tokens_uncached=30,
+        usage_total_tokens=60, **required))
+    db.commit()
+
+    stats = db.query(
+        func.sum(AIGovernanceLog.usage_output_tokens).label("total_output"),
+        func.sum(func.coalesce(
+            AIGovernanceLog.usage_output_tokens_cached, 0)).label("total_output_cached"),
+    ).first()
+    total_output = stats.total_output or 0
+    cached = stats.total_output_cached or 0
+    uncached = max(0, total_output - cached)
+    db.close()
+
+    check("the aggregate counts every row's output", total_output == 250, str(total_output))
+    check("only the recorded cached tokens are counted as cached", cached == 20, str(cached))
+    check("a pre-split row's output falls to the non-cached side",
+          uncached == 230, str(uncached))
+    check("the aggregate invariant holds across mixed rows",
+          cached + uncached == total_output)
+
+
 def main() -> int:
     for fn in (
         test_split_sums_to_the_total,
@@ -203,6 +244,7 @@ def main() -> int:
         test_token_tally_accumulates,
         test_governance_usage_data,
         test_fields_reach_the_log_and_the_db,
+        test_metrics_aggregate_handles_pre_split_rows,
     ):
         print(f"\n{fn.__name__}:")
         try:

@@ -154,8 +154,14 @@ async def get_metrics(
     token_stats = db.query(
         func.sum(AIGovernanceLog.usage_input_tokens).label('total_input'),
         func.sum(AIGovernanceLog.usage_output_tokens).label('total_output'),
-        func.sum(AIGovernanceLog.usage_output_tokens_cached).label('total_output_cached'),
-        func.sum(AIGovernanceLog.usage_output_tokens_uncached).label('total_output_uncached'),
+        # Rows written before the cache split existed have usage_output_tokens
+        # but a NULL split, and SUM() skips NULLs — so summing the two columns
+        # independently would report far less output than total_output and break
+        # the "the halves sum to the total" invariant on every aggregate. COALESCE
+        # the cached side to 0 and derive uncached as the remainder: a row that
+        # recorded nothing as cached IS all-uncached, the same rule
+        # NormalizedLLMResponse applies to an unsplit response.
+        func.sum(func.coalesce(AIGovernanceLog.usage_output_tokens_cached, 0)).label('total_output_cached'),
         func.sum(AIGovernanceLog.usage_total_tokens).label('total')
     ).filter(
         AIGovernanceLog.timestamp >= start_time
@@ -205,7 +211,9 @@ async def get_metrics(
         total_input_tokens=token_stats.total_input or 0,
         total_output_tokens=token_stats.total_output or 0,
         total_output_tokens_cached=token_stats.total_output_cached or 0,
-        total_output_tokens_uncached=token_stats.total_output_uncached or 0,
+        total_output_tokens_uncached=max(
+            0, (token_stats.total_output or 0) - (token_stats.total_output_cached or 0)
+        ),
         total_tokens=token_stats.total or 0,
         severity_distribution=severity_distribution,
         pii_detection_count=pii_detection_count or 0,
