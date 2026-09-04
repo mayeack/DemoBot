@@ -332,6 +332,8 @@ single source of truth.
 - output_messages (JSON)
 - usage_input_tokens
 - usage_output_tokens
+- usage_output_tokens_cached
+- usage_output_tokens_uncached
 - usage_total_tokens
 - pii_detected (INDEXED)
 - safety_violated (INDEXED)

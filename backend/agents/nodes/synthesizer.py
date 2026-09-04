@@ -39,6 +39,7 @@ from backend.agents.nodes.injection import (
     relax_scope_rules,
 )
 from backend.agents.nodes.shared import build_llm_messages, content_engine
+from backend.agents.token_usage import TokenTally
 from backend.agents.themes.base import build_synthesizer_prompt
 from backend.config import settings
 from backend.telemetry import otel
@@ -119,6 +120,8 @@ def make_synthesizer_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
                         response_model=response.model,
                         input_tokens=response.input_tokens,
                         output_tokens=response.output_tokens,
+                        output_tokens_cached=response.output_tokens_cached,
+                        output_tokens_uncached=response.output_tokens_uncached,
                         finish_reason=response.stop_reason,
                     )
             except ChatModelError as exc:
@@ -148,10 +151,7 @@ def make_synthesizer_agent(theme_config) -> Callable[[Dict[str, Any]], Dict[str,
             "agent_trace": trace,
             "llm_response_id": response.id,
             "llm_model": response.model,
-            "llm_input_tokens": (state.get("llm_input_tokens", 0) or 0)
-            + (response.input_tokens or 0),
-            "llm_output_tokens": (state.get("llm_output_tokens", 0) or 0)
-            + (response.output_tokens or 0),
+            **TokenTally(state).add(response).updates(),
             "llm_stop_reason": response.stop_reason,
             "severity": severity,
             "confidence": confidence,

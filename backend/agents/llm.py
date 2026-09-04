@@ -27,6 +27,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from backend.agents.token_usage import split_output_tokens
+
 logger = logging.getLogger(__name__)
 
 
@@ -44,6 +46,19 @@ class NormalizedLLMResponse:
     input_tokens: int
     output_tokens: int
     stop_reason: str
+    # Cache accounting for ``output_tokens``: the two always sum back to it
+    # (backend/agents/token_usage.py). Defaulted so a caller that does not care
+    # about the split still constructs a valid response.
+    output_tokens_cached: int = 0
+    output_tokens_uncached: int = 0
+
+    def __post_init__(self) -> None:
+        # Keep the halves consistent with the total for any caller that did not
+        # split (a future call site, a test stub): unsplit output is uncached
+        # output. Makes "the two sum to output_tokens" structural rather than a
+        # convention every construction site has to remember.
+        if not (self.output_tokens_cached or self.output_tokens_uncached):
+            self.output_tokens_uncached = self.output_tokens or 0
 
     @property
     def total_tokens(self) -> int:
@@ -250,7 +265,14 @@ def _extract_text(ai_message) -> str:
     return str(content)
 
 
-def _extract_usage(ai_message) -> Dict[str, int]:
+def _extract_usage(ai_message, provider: Optional[str] = None) -> Dict[str, int]:
+    """Token usage for one model call, with the output cache split.
+
+    ``output_tokens_cached`` + ``output_tokens_uncached`` always equal
+    ``output_tokens``; see backend/agents/token_usage.py for where each number
+    comes from. ``provider`` selects the split's source (a local provider gets
+    the random tag) and defaults to the configured one.
+    """
     usage = getattr(ai_message, "usage_metadata", None) or {}
     input_tokens = int(usage.get("input_tokens", 0) or 0)
     output_tokens = int(usage.get("output_tokens", 0) or 0)
@@ -264,7 +286,19 @@ def _extract_usage(ai_message) -> Dict[str, int]:
         output_tokens = int(
             token_usage.get("completion_tokens", token_usage.get("output_tokens", 0)) or 0
         )
-    return {"input_tokens": input_tokens, "output_tokens": output_tokens}
+    if provider is None:
+        from backend.config import settings as _settings
+
+        provider = _settings.ai_provider
+    cached, uncached = split_output_tokens(
+        output_tokens, provider=provider, ai_message=ai_message
+    )
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "output_tokens_cached": cached,
+        "output_tokens_uncached": uncached,
+    }
 
 
 def _extract_metadata(ai_message, fallback_model: str) -> Dict[str, str]:
@@ -329,13 +363,16 @@ def invoke_chat(
             ai_message = model.invoke(lc_messages)
         except Exception as exc:  # noqa: BLE001 - normalize all provider errors
             raise ChatModelError(f"Chat model invocation failed: {exc}") from exc
-        usage = _extract_usage(ai_message)
+        usage = _extract_usage(ai_message, provider)
         meta = _extract_metadata(ai_message, fallback)
         reported_model = emit_model or meta["model"]
         response_text = _extract_text(ai_message)
         if llm_inv is not None:
             llm_inv.input_tokens = usage["input_tokens"]
             llm_inv.output_tokens = usage["output_tokens"]
+            otel.record_output_token_cache_split(
+                llm_inv, usage["output_tokens_cached"], usage["output_tokens_uncached"]
+            )
             llm_inv.response_model_name = reported_model
             llm_inv.response_id = meta["id"]
             # Attach prompt+response content so the span surfaces in Splunk AI trace data.
@@ -347,6 +384,8 @@ def invoke_chat(
         model=reported_model,
         input_tokens=usage["input_tokens"],
         output_tokens=usage["output_tokens"],
+        output_tokens_cached=usage["output_tokens_cached"],
+        output_tokens_uncached=usage["output_tokens_uncached"],
         stop_reason=meta["stop_reason"],
     )
 
@@ -456,11 +495,13 @@ def invoke_agent(
         final = ai_messages[-1]
 
         # One model call when tool-less, but sum defensively in case of future tools.
-        input_tokens = output_tokens = 0
+        input_tokens = output_tokens = cached_tokens = uncached_tokens = 0
         for msg in ai_messages:
-            usage = _extract_usage(msg)
+            usage = _extract_usage(msg, provider)
             input_tokens += usage["input_tokens"]
             output_tokens += usage["output_tokens"]
+            cached_tokens += usage["output_tokens_cached"]
+            uncached_tokens += usage["output_tokens_uncached"]
 
         meta = _extract_metadata(final, fallback)
         reported_model = emit_model or meta["model"]
@@ -468,6 +509,7 @@ def invoke_agent(
         if llm_inv is not None:
             llm_inv.input_tokens = input_tokens
             llm_inv.output_tokens = output_tokens
+            otel.record_output_token_cache_split(llm_inv, cached_tokens, uncached_tokens)
             llm_inv.response_model_name = reported_model
             llm_inv.response_id = meta["id"]
             # Attach prompt+response content so the span surfaces in Splunk AI trace data.
@@ -479,5 +521,7 @@ def invoke_agent(
         model=reported_model,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        output_tokens_cached=cached_tokens,
+        output_tokens_uncached=uncached_tokens,
         stop_reason=meta["stop_reason"],
     )

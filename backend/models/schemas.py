@@ -107,6 +107,8 @@ class GenAILogEntry(BaseModel):
     # Usage, performance, and cost
     usage_input_tokens: Optional[int] = None
     usage_output_tokens: Optional[int] = None
+    usage_output_tokens_cached: Optional[int] = None
+    usage_output_tokens_uncached: Optional[int] = None
     usage_total_tokens: Optional[int] = None
     client_operation_duration: Optional[float] = None  # seconds
     server_time_per_output_token: Optional[float] = None
@@ -176,6 +178,10 @@ class MetricsResponse(BaseModel):
     average_latency: float
     total_input_tokens: int
     total_output_tokens: int
+    # Cache split of total_output_tokens. Defaulted so an older client (or a
+    # pre-split row set) still validates.
+    total_output_tokens_cached: int = 0
+    total_output_tokens_uncached: int = 0
     total_tokens: int
     severity_distribution: Dict[str, int]
     pii_detection_count: int

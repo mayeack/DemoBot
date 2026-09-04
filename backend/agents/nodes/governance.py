@@ -13,6 +13,7 @@ from typing import Any, Dict
 
 from backend.agents.nodes.shared import clarifying_service, escalation_rules
 from backend.agents.state import governance_identity_overrides
+from backend.agents.token_usage import governance_usage_data
 from backend.config import settings
 from backend.logging.governance_logger import governance_logger
 from backend.models.schemas import MessageType
@@ -92,12 +93,7 @@ def governance_node(state: Dict[str, Any]) -> Dict[str, Any]:
             input_messages=messages,
             output_messages=[{"role": "assistant", "content": final_message}],
             response_text=complete_display_text,
-            usage_data={
-                "usage_input_tokens": state.get("llm_input_tokens", 0),
-                "usage_output_tokens": state.get("llm_output_tokens", 0),
-                "usage_total_tokens": state.get("llm_input_tokens", 0)
-                + state.get("llm_output_tokens", 0),
-            },
+            usage_data=governance_usage_data(state),
             # stage_timings ({stage}_ms, e.g. AI Defense inspections) is additive
             # next to the existing client_operation_duration — never renamed.
             performance_data={

@@ -45,7 +45,8 @@ async function loadMetrics() {
 
         // Update charts
         updateSeverityChart(data.severity_distribution);
-        updateTokenChart(data.total_input_tokens, data.total_output_tokens);
+        updateTokenChart(data.total_input_tokens, data.total_output_tokens_cached,
+                         data.total_output_tokens_uncached);
 
     } catch (error) {
         console.error('Error loading metrics:', error);
@@ -87,14 +88,16 @@ function updateSeverityChart(distribution) {
     }
 }
 
-function updateTokenChart(inputTokens, outputTokens) {
+// Output is charted as its two cache halves rather than one bar: they sum to the
+// output total, and a cached token is priced differently from a decoded one.
+function updateTokenChart(inputTokens, cachedOutputTokens, uncachedOutputTokens) {
     const ctx = document.getElementById('tokenChart').getContext('2d');
 
     const data = {
-        labels: ['Input Tokens', 'Output Tokens'],
+        labels: ['Input Tokens', 'Output Tokens (cached)', 'Output Tokens (non-cached)'],
         datasets: [{
-            data: [inputTokens, outputTokens],
-            backgroundColor: ['#7c3aed', '#c4b5fd']
+            data: [inputTokens || 0, cachedOutputTokens || 0, uncachedOutputTokens || 0],
+            backgroundColor: ['#7c3aed', '#c4b5fd', '#8b5cf6']
         }]
     };
 
@@ -206,7 +209,7 @@ async function loadRecentInteractions() {
                     <td class="px-4 py-2 text-sm">${new Date(log.timestamp).toLocaleString()}</td>
                     <td class="px-4 py-2 text-sm font-mono">${escHtml(String(log.session_id).substring(0, 8))}...</td>
                     <td class="px-4 py-2 text-sm">${escHtml(log.operation_name)}</td>
-                    <td class="px-4 py-2 text-sm">${log.usage_total_tokens || '-'}</td>
+                    <td class="px-4 py-2 text-sm" title="${escAttr(tokenBreakdown(log))}">${log.usage_total_tokens || '-'}</td>
                     <td class="px-4 py-2">${flags.join(' ') || '-'}</td>
                     <td class="px-4 py-2">
                         <button onclick="viewSession('${escAttr(log.session_id)}')" class="text-violet-600 hover:underline text-sm">View</button>
@@ -218,6 +221,18 @@ async function loadRecentInteractions() {
     } catch (error) {
         console.error('Error loading interactions:', error);
     }
+}
+
+// Tooltip for the Total Tokens cell: the input/output split, with output broken
+// down by cache origin (the two output halves sum to usage_output_tokens).
+function tokenBreakdown(log) {
+    const cached = log.usage_output_tokens_cached;
+    const uncached = log.usage_output_tokens_uncached;
+    const parts = [`in ${log.usage_input_tokens ?? 0}`, `out ${log.usage_output_tokens ?? 0}`];
+    if (cached != null || uncached != null) {
+        parts.push(`out cached ${cached ?? 0}`, `out non-cached ${uncached ?? 0}`);
+    }
+    return parts.join(' \u00b7 ');
 }
 
 async function viewSession(sessionId) {

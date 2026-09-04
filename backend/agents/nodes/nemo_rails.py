@@ -21,6 +21,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from backend.agents.state import governance_identity_overrides
+from backend.agents.token_usage import governance_usage_data
 from backend.logging.governance_logger import active_response_model, governance_logger
 from backend.models.schemas import MessageType, SeverityLevel
 from backend.services.nemo_guardrails import RailVerdict, nemo_guardrails_client
@@ -99,8 +100,7 @@ def _blocked_result(
         input_messages=input_messages,
         output_messages=[{"role": "assistant", "content": blocked_message}],
         response_text=f"⚠️ POLICY BLOCKED (NVIDIA NeMo Guardrails - {stage})\n{blocked_message}",
-        usage_data=usage_data
-        or {"usage_input_tokens": 0, "usage_output_tokens": 0, "usage_total_tokens": 0},
+        usage_data=usage_data or governance_usage_data(),
         performance_data={"client_operation_duration": duration},
         response_model=llm_model or active_response_model(),
         response_finish_reasons=["policy_blocked"],
@@ -179,17 +179,11 @@ def nemo_output_rails_node(state: Dict[str, Any]) -> Dict[str, Any]:
             }
         # The model already answered (that answer is what got blocked): report
         # its real id and token spend, like the AI Defense response block does.
-        input_tokens = state.get("llm_input_tokens", 0) or 0
-        output_tokens = state.get("llm_output_tokens", 0) or 0
         result = _blocked_result(
             state, verdict, stage="output",
             input_messages=state.get("messages", []),
             llm_model=state.get("llm_model"),
-            usage_data={
-                "usage_input_tokens": input_tokens,
-                "usage_output_tokens": output_tokens,
-                "usage_total_tokens": input_tokens + output_tokens,
-            },
+            usage_data=governance_usage_data(state),
         )
 
     return {

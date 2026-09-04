@@ -286,6 +286,11 @@ def _scenario(kind: str):
 _GOV_KEYS = ("guardrail_ids", "policy_blocked", "safety_violated", "pii_detected", "toxic_detected",
              "hallucination_detected", "authority_violation_detected", "guardrail_triggered")
 
+# The output-token cache split (backend/agents/token_usage.py): both cores sum it
+# across their agents, and every event — blocked turns included — must report a
+# pair that adds back up to usage_output_tokens.
+_TOKEN_KEYS = ("usage_output_tokens", "usage_output_tokens_cached", "usage_output_tokens_uncached")
+
 
 def _run(bp_key: str, theme: str, kind: str) -> Dict[str, Any]:
     from backend.agents import graph
@@ -316,6 +321,7 @@ def _run(bp_key: str, theme: str, kind: str) -> Dict[str, Any]:
         # booking is logged once per run.
         "tool_calls": list(dict.fromkeys(e.get("tool_name") for e in events if e.get("_kind") == "tool_call")),
         "governance": {k: last.get(k) for k in _GOV_KEYS},
+        "tokens": {k: last.get(k) for k in _TOKEN_KEYS},
         "gov_present": bool(events),
         "guardrail_stages": [s for s in stages if s in GUARDRAIL_NODES],
         "workflow_name": last.get("workflow_name"),
@@ -355,11 +361,18 @@ def test_dynamic_parity() -> None:
                 else:
                     check(f"[{key}] {sk}: a generation failure logs an error event (safe reply)",
                           out["event_kind"] == "error" and out["result"]["type"] == "safety_warning")
+                tokens = out["tokens"]
+                check(f"[{key}] {sk}: output-token cache split sums to the output total",
+                      (tokens["usage_output_tokens_cached"] or 0)
+                      + (tokens["usage_output_tokens_uncached"] or 0)
+                      == (tokens["usage_output_tokens"] or 0), str(tokens))
                 if key == ref_key:
                     continue
                 ref = outcomes[ref_key][sk]
                 check(f"[{key} vs {ref_key}] {sk}: same result type/severity/escalation/block",
                       out["result"] == ref["result"], f"{out['result']} != {ref['result']}")
+                check(f"[{key} vs {ref_key}] {sk}: same token-usage fields reported",
+                      out["tokens"] == ref["tokens"], f"{out['tokens']} != {ref['tokens']}")
                 check(f"[{key} vs {ref_key}] {sk}: same governance guardrail fields",
                       out["governance"] == ref["governance"], f"{out['governance']} != {ref['governance']}")
                 check(f"[{key} vs {ref_key}] {sk}: same guardrail stage frames",
