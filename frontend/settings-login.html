@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings access · MedAdvice</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --primary:#7c3aed; --primary-hover:#6d28d9; --ring:#c4b5fd;
+      --ink:#0f172a; --muted:#64748b; --bg1:#f5f3ff; --bg2:#ede9fe; --danger:#dc2626;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;
+      font-family:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+      background:radial-gradient(1200px 600px at 50% -10%, var(--bg1), var(--bg2)); color:var(--ink);
+    }
+    .card{
+      width:100%; max-width:400px; background:#fff; border:1px solid #e5e7eb; border-radius:20px;
+      box-shadow:0 20px 40px -12px rgba(15,23,42,.18), 0 2px 6px rgba(15,23,42,.06);
+      padding:36px 32px; animation:rise .4s cubic-bezier(.2,.8,.2,1);
+    }
+    @keyframes rise{from{opacity:0; transform:translateY(10px)} to{opacity:1; transform:none}}
+    .brand{display:flex; align-items:center; gap:12px; margin-bottom:26px}
+    .logo{
+      width:42px; height:42px; border-radius:13px; flex:none;
+      background:linear-gradient(135deg, var(--primary), #a78bfa);
+      display:flex; align-items:center; justify-content:center; color:#fff;
+      box-shadow:0 6px 16px -4px rgba(124,58,237,.55);
+    }
+    .logo svg{width:23px; height:23px}
+    .brand b{font-size:18px; font-weight:700; letter-spacing:-.01em; display:block; line-height:1.1}
+    .brand small{color:var(--muted); font-size:12px}
+    h1{font-size:21px; margin:0 0 7px; letter-spacing:-.02em}
+    p.sub{margin:0 0 22px; color:var(--muted); font-size:14px; line-height:1.55}
+    label{display:block; font-size:13px; font-weight:600; margin:0 0 8px; color:#334155}
+    input[type=password]{
+      width:100%; padding:12px 14px; font-size:15px; border:1px solid #cbd5e1; border-radius:12px;
+      outline:none; background:#f8fafc; transition:border-color .15s, box-shadow .15s, background .15s;
+    }
+    input[type=password]:focus{border-color:var(--primary); box-shadow:0 0 0 4px rgba(196,181,253,.55); background:#fff}
+    button{
+      width:100%; margin-top:18px; padding:12px 16px; font-size:15px; font-weight:600; color:#fff;
+      background:var(--primary); border:0; border-radius:12px; cursor:pointer;
+      display:flex; align-items:center; justify-content:center; gap:8px;
+      transition:background .15s, transform .05s;
+    }
+    button:hover{background:var(--primary-hover)}
+    button:active{transform:translateY(1px)}
+    .error{
+      display:none; margin:0 0 18px; padding:11px 14px; background:#fef2f2; border:1px solid #fecaca;
+      color:var(--danger); font-size:13px; border-radius:10px; align-items:center; gap:8px;
+    }
+    .error.show{display:flex}
+    .foot{margin-top:24px; text-align:center; color:#94a3b8; font-size:12px}
+    .foot a{color:#94a3b8}
+  </style>
+</head>
+<body>
+  <form class="card" method="POST" action="/settings-login">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="10" width="16" height="11" rx="2.5" stroke="currentColor" stroke-width="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </span>
+      <span><b id="brandName">MedAdvice</b><small>Settings</small></span>
+    </div>
+
+    <h1>Enter the settings code</h1>
+    <p class="sub">Settings is protected by its own access code — separate from the one that opened the app.</p>
+
+    <div class="error" id="err" role="alert">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 7v6M12 16.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Incorrect settings code. Please try again.</span>
+    </div>
+
+    <label for="code">Settings code</label>
+    <input id="code" name="access_code" type="password" placeholder="••••••••••••••" autocomplete="off" autofocus required>
+    <input type="hidden" id="next" name="next" value="/settings-ui">
+
+    <button type="submit">
+      Unlock settings
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+
+    <div class="foot"><a href="/app">← Back to chat</a></div>
+  </form>
+
+  <script>
+    // Brand to the last-used theme, exactly as /login does (persisted by the chat UI).
+    const BRAND = {
+      medadvice:      'MedAdvice',
+      taxadvice:      'TaxAdvice',
+      benefitsadvice: 'BenefitsAdvice',
+      legaladvice:    'LegalAdvice',
+      financeadvice:  'FinanceAdvice',
+      telecomchatbot: 'Telecom Support',
+    };
+    const brand = BRAND[localStorage.getItem('medadvice_theme')] || BRAND.medadvice;
+    document.getElementById('brandName').textContent = brand;
+    document.title = 'Settings access · ' + brand;
+
+    const q = new URLSearchParams(location.search);
+    if (q.get('error')) document.getElementById('err').classList.add('show');
+    const nx = q.get('next');
+    if (nx && nx.startsWith('/') && !nx.startsWith('//')) document.getElementById('next').value = nx;
+  </script>
+</body>
+</html>

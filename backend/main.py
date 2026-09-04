@@ -11,6 +11,7 @@ from backend.database.db import init_db
 from backend.logging.log_handlers import setup_logging
 from backend.middleware.request_logging import RequestLoggingMiddleware
 from backend.middleware.access_key import AccessKeyMiddleware
+from backend.middleware.settings_gate import has_settings_access
 from backend.routers import chat, admin, auth, settings as settings_routes, incident, spray, toolguard, analytics, appointments
 from backend.telemetry import otel
 
@@ -232,7 +233,12 @@ try:
             return "<h1>Governance UI not found</h1>"
 
         @app.get("/settings-ui", response_class=HTMLResponse)
-        async def serve_settings():
+        async def serve_settings(request: Request):
+            # Settings has its own access code on top of the app gate — the
+            # credentials edited here are not for the demo audience.
+            if not has_settings_access(request):
+                return RedirectResponse(url="/settings-login?next=/settings-ui",
+                                        status_code=303)
             settings_file = frontend_dir / "settings.html"
             if settings_file.exists():
                 return settings_file.read_text()
