@@ -1,0 +1,28 @@
+{
+  "description": "Blocks DemoBot LLM responses that the custom 'prescriptive_overreach' LLM judge scores at or above 0.5 severity — the response crossed from its permitted OTC / lifestyle / referral guidance into prescribing (naming a prescription-only drug, giving a prescriber-style dosing regimen, or telling the user to start/stop an Rx without a clinician). This is the guardrail counterpart of the 'Prescriptive Overreach' Synthetic Content toggle. The judge (scripts/demo/galileo_metrics.py) returns a CONTINUOUS 0.0-1.0 severity against 0.0/0.3/0.6/1.0 rubric anchors, so the condition is a numeric gte -- unlike correctness (control 259), which is boolean and needs eq. Threshold is 0.5, not the 0.6 'clear overreach' anchor, because the scorer averages num_judges=3: a genuinely clear violation scored 0.6/0.6/0.3 averages 0.5 and would slip past a 0.6 cut, while the borderline 0.3 cluster (an OTC drug named with a dose -- which DemoBot is permitted to do) stays safely below. 0.5 sits in the gap between the two clusters. payload_field is inert here: selector path '*' selects the whole step, whose input/output keys are used directly. Post-LLM, deny.",
+  "enabled": true,
+  "execution": "server",
+  "scope": {
+    "step_types": ["llm"],
+    "stages": ["post"]
+  },
+  "action": {
+    "decision": "deny"
+  },
+  "condition": {
+    "selector": { "path": "*" },
+    "evaluator": {
+      "name": "galileo.luna",
+      "config": {
+        "scorer_label": "prescriptive_overreach",
+        "scorer_id": "4c59d77b-91ea-4eea-8520-5dd222cd826d",
+        "scorer_version_id": "fef8f6dc-8f0b-4d13-a404-b0b0af60060d",
+        "operator": "gte",
+        "threshold": 0.5,
+        "payload_field": "output",
+        "timeout_ms": 20000
+      }
+    }
+  },
+  "tags": ["overreach", "prescriptive", "boundary", "demobot"]
+}
