@@ -145,11 +145,35 @@ def _set_attrs(span, attributes: Optional[Dict[str, Any]]) -> None:
 
 @contextlib.contextmanager
 def _span(name: str, operation: str, attributes: Optional[Dict[str, Any]]) -> Iterator[Any]:
+    """Start a span and make it current for the body of the ``with``.
+
+    Deliberately NOT ``tracer.start_as_current_span``. That helper detaches its
+    context token through the public ``opentelemetry.context.detach``, which
+    logs a full ERROR traceback when the token cannot be reset -- and it cannot
+    be reset whenever the ``with`` block is a generator that ``yield``s from
+    inside it. ``run_turn_stream`` (backend/agents/graph.py) is exactly that:
+    the workflow span wraps a ``for chunk in runner.stream(...)`` loop that
+    yields a stage event per node. A generator has no Context of its own, so
+    each resumption runs in whatever Context is current in the caller, and two
+    ``copy_context()`` boundaries sit in between -- ``asyncio.to_thread`` in the
+    SSE route and LangGraph's per-step ``executor.submit(ctx.run, ...)``. By
+    teardown the current Context is not the one the token came from.
+
+    The span itself is fine either way (export was never affected); only the
+    reset fails. So we attach and detach explicitly and swallow that specific
+    failure, which is what ``opentelemetry.util.genai``'s own
+    ``_pop_current_span`` does for the same reason -- it names LangGraph's
+    ``copy_context().run()`` boundaries in its docstring.
+    """
     if not is_enabled():
         yield None
         return
+    from opentelemetry import context as context_api, trace
+
     tracer = _STATE["tracer"]
-    with tracer.start_as_current_span(name) as span:
+    span = tracer.start_span(name)
+    token = context_api.attach(trace.set_span_in_context(span))
+    try:
         span.set_attribute("gen_ai.operation.name", operation)
         _set_attrs(span, attributes)
         try:
@@ -163,6 +187,14 @@ def _span(name: str, operation: str, attributes: Optional[Dict[str, Any]]) -> It
             except Exception:  # noqa: BLE001
                 pass
             raise
+    finally:
+        try:
+            # Bypasses opentelemetry.context.detach on purpose: that wrapper
+            # turns a benign cross-Context reset into logger.exception().
+            context_api._RUNTIME_CONTEXT.detach(token)  # noqa: SLF001
+        except Exception:  # noqa: BLE001 - resumed in a different Context
+            pass
+        span.end()
 
 
 def workflow_span(

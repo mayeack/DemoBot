@@ -39,8 +39,11 @@ def check(name: str, cond: bool) -> None:
         _fails += 1
 
 
+# SPLUNK_AO_O11Y_API_TOKEN is scrubbed too: _session_for branches on it to
+# explain a sessions failure, so a real value in .env would otherwise change
+# which message [6] sees.
 for _k in ("SPLUNK_AO_O11Y_TOKEN", "SPLUNK_AO_REALM", "SPLUNK_AO_LOGGING_DISABLED",
-           "SPLUNK_AO_PROJECT", "SPLUNK_AO_AGENT_STREAM"):
+           "SPLUNK_AO_PROJECT", "SPLUNK_AO_AGENT_STREAM", "SPLUNK_AO_O11Y_API_TOKEN"):
     os.environ.pop(_k, None)
 
 import backend.agent_observability as ao
