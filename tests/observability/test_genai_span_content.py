@@ -118,12 +118,74 @@ def check_agent():
     assert RESP in str(_attr(chat, "gen_ai.output.messages") or ""), "agent's LLM span missing response content"
 
 
+def check_workflow_parents_agents_across_a_generator():
+    """The workflow span must still parent its agent spans when the ``with``
+    block is a generator that yields, driven across a ``copy_context()`` hop.
+
+    That is the shape of ``run_turn_stream`` (backend/agents/graph.py):
+    ``with otel.workflow_span(...)`` around ``for chunk in runner.stream(...)``,
+    yielding a stage event per node, with the whole generator driven from a
+    worker thread by the SSE route. ``start_as_current_span`` logged an ERROR
+    traceback per streamed turn there (``Failed to detach context``), so
+    ``_span`` now attaches and detaches explicitly.
+
+    This asserts the PARENTING half only. It does not reproduce the detach
+    error: doing that needs each generator resumption to run in a genuinely
+    different Context, and a harness aggressive enough to force that also
+    orphans the second agent span, which production does not do. The detach fix
+    itself is verified against the running app -- count
+    ``Failed to detach context`` in the app log, drive streamed turns, confirm
+    the count holds. What this guards is the regression a careless rewrite of
+    ``_span`` would cause: agents no longer parented by the workflow, which no
+    other test would catch.
+    """
+    import contextvars
+    from concurrent.futures import ThreadPoolExecutor
+
+    _EXPORTER.clear()
+    provider = trace.get_tracer_provider()
+    otel._STATE["tracer"] = trace.get_tracer("test", tracer_provider=provider)
+    otel._STATE["enabled"] = True
+    try:
+        def streaming_turn():
+            with otel.workflow_span(workflow_name="pseudoco_multi_agent", theme="medadvice"):
+                for node in ("policy", "medadvice_domain_agent"):
+                    with otel.agent_span(node, theme="medadvice"):
+                        pass
+                    yield {"event": "stage", "node": node}
+
+        # Model the production shape: the whole generator is driven inside one
+        # worker thread (asyncio.to_thread in the SSE route), and each graph
+        # step re-copies the driver's Context (langgraph/pregel/_executor.py).
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(contextvars.copy_context().run,
+                        lambda: list(streaming_turn())).result()
+    finally:
+        otel._STATE["enabled"] = False
+        otel._STATE["tracer"] = None
+
+    workflow = _find("workflow ")
+    assert workflow is not None, "no workflow span was emitted"
+    agents = [s for s in _EXPORTER.get_finished_spans() if s.name.startswith("invoke_agent ")]
+    assert len(agents) == 2, f"expected 2 agent spans, got {len(agents)}"
+    wf_id = workflow.get_span_context().span_id
+    for a in agents:
+        parent = a.parent.span_id if a.parent else None
+        assert parent == wf_id, (
+            f"agent span {a.name!r} is not parented by the workflow span "
+            f"(parent={parent}, workflow={wf_id}) — the streamed turn would "
+            f"show orphaned agents in Splunk's AI trace view"
+        )
+
+
 def main():
     _setup_tracer()
     ok = True
     for name, fn in [("LLM span carries prompt+response", check_llm),
                      ("LLM span carries the output-token cache split", check_output_token_cache_split),
-                     ("Agent span carries prompt+response", check_agent)]:
+                     ("Agent span carries prompt+response", check_agent),
+                     ("workflow parents agents across a generator + thread hop",
+                      check_workflow_parents_agents_across_a_generator)]:
         try:
             fn()
             print(f"  PASS  {name}")

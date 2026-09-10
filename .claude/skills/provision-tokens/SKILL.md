@@ -138,6 +138,29 @@ Same INGEST token as #1 (O11y → Settings → Access Tokens, authorization = In
 the non-secret `SPLUNK_AO_REALM=us1`, `SPLUNK_AO_PROJECT` / `SPLUNK_AO_AGENT_STREAM` (both
 `PseudoCo Assistant`; created on first ingest).
 
+### 4a. Agent Observability **sessions** — `SPLUNK_AO_O11Y_API_TOKEN`
+Optional, and a different token again. Without it turns still log — they are just never
+grouped into sessions, so the session view stays empty while `export=healthy`. The SDK's
+`crud_token` (`splunk_ao/deployment.py`) falls back to the **ingest** token for the
+`/ao/api` CRUD calls, and that is what produces the 401.
+
+**A read-only `O11Y_API` token is not enough.** Verified 2026-09-09 against
+`https://app.us1.observability.splunkcloud.com/ao/api/projects`: the ingest token returns
+**401**, the existing `O11Y_API` token returns **403** (it authenticates, but its user lacks
+Agent Observability access). Mint a fresh API token whose user has that access, in the same
+org as `SPLUNK_AO_REALM`.
+
+Two traps:
+- The SDK's error says *"Set via SPLUNK_AO_API_KEY"*. **Do not.** That is the standalone-mode
+  variable; `resolve_deployment()` raises `AmbiguousConfigurationError` when it is set
+  alongside an O11y variable.
+- Saving it in the Settings page writes `.env` and calls `reconfigure()`, but that only
+  retires logger instances. `SplunkAOConfig._instance` is cached process-wide and its API
+  client was already built with the ingest token, so **restart the app**.
+
+Check it before wiring: `curl -s -o /dev/null -w '%{http_code}\n' -H "X-SF-TOKEN: $TOKEN"
+https://app.us1.observability.splunkcloud.com/ao/api/projects` → **200**.
+
 ### 4b. Agent Control — `AGENT_CONTROL_API_KEY`
 Console (`https://console.multitenant.galileocloud.io`) → user settings → **API Keys**. Set
 `AGENT_CONTROL_CONSOLE_URL` to the console host. (`GALILEO_API_KEY`/`GALILEO_CONSOLE_URL` still

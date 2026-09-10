@@ -124,6 +124,11 @@ class _Runtime:
     sessions: "OrderedDict[str, str]" = field(default_factory=OrderedDict)
     sessions_unavailable_until: float = 0.0
     session_warned: bool = False
+    # Surfaced by status(): a sessions 401 used to be invisible outside the log,
+    # which is how an unset SPLUNK_AO_O11Y_API_TOKEN went unnoticed for weeks
+    # (turns kept logging, just ungrouped). None = not attempted yet.
+    sessions_ok: Optional[bool] = None
+    sessions_last_error: str = ""
     turns_logged: int = 0
 
 
@@ -217,6 +222,8 @@ def status() -> Dict[str, Any]:
         "logger_ready": bool(_rt.loggers),
         "last_build_error": _rt.last_build_error,
         "sessions_cached": len(_rt.sessions),
+        "sessions_ok": _rt.sessions_ok,
+        "sessions_last_error": _rt.sessions_last_error,
         "project": os.getenv("SPLUNK_AO_PROJECT") or _DEFAULT_PROJECT,
         "agent_stream": _default_stream(),
         "agent_stream_per_theme": _per_theme_streams(),
@@ -490,14 +497,33 @@ def _session_for(lg, stream: str, session_id) -> Optional[str]:
         if not ao:
             raise RuntimeError("start_session returned None")
     except Exception as exc:  # noqa: BLE001 - CRUD 401/403, project lookup, ...
+        # The SDK's own message tells you to set SPLUNK_AO_API_KEY. Do not: that
+        # is the standalone-mode variable, and resolve_deployment() raises
+        # AmbiguousConfigurationError when it is set alongside an O11y one. The
+        # sessions API is reached with SPLUNK_AO_O11Y_API_TOKEN, and when that is
+        # unset the SDK silently falls back to the ingest token (crud_token in
+        # splunk_ao/deployment.py), which the API rejects. Say so plainly.
+        detail = f"{type(exc).__name__}: {exc}"
+        if not os.getenv("SPLUNK_AO_O11Y_API_TOKEN"):
+            detail = ("SPLUNK_AO_O11Y_API_TOKEN is not set, so the SDK fell back to the "
+                      "ingest token, which the sessions API rejects. Set an Observability "
+                      "Cloud API token with Agent Observability access and restart the app "
+                      f"(underlying error: {detail})")
+        _rt.sessions_ok = False
+        _rt.sessions_last_error = detail
         if not _rt.session_warned:
             logger.warning(
-                "agent observability: sessions unavailable (%s: %s); logging turns without a session, retry in %d min",
-                type(exc).__name__, exc, int(_SESSION_BACKOFF_S // 60), exc_info=True,
+                "agent observability: sessions unavailable (%s); logging turns without a session, retry in %d min",
+                detail, int(_SESSION_BACKOFF_S // 60),
+                # Traceback only when the cause is not the known missing-token
+                # case; that one is fully explained by the message above.
+                exc_info=bool(os.getenv("SPLUNK_AO_O11Y_API_TOKEN")),
             )
             _rt.session_warned = True
         _rt.sessions_unavailable_until = now + _SESSION_BACKOFF_S
         return None
+    _rt.sessions_ok = True
+    _rt.sessions_last_error = ""
     _rt.session_warned = False
     _rt.sessions[key] = str(ao)
     while len(_rt.sessions) > _SESSION_CACHE_SIZE:
