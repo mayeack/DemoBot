@@ -123,9 +123,13 @@ After PR-B merges: annotated tag `v4.10.0` from `main`, `gh release create` (`do
    filter on `demobot.*` span attributes or the old environment names.
 3. **Splunk Enterprise (`gen_ai:json`):** searches and dashboards keyed on `service_name`, `deployment_id`, `workflow_name`,
    `blueprint` need the new values from the cut-over time; historical events keep the old ones.
-4. **Agent Control:** re-register the agent (`scripts/demo/register_agent_control.py`; agent `pseudoco-assistant-agent`,
-   step `pseudoco-assistant-llm`) and re-attach the controls under their new `PseudoCoAssistant-block-*` names
-   (controls 259/263/576 are non-enforcing from the Mac regardless, see the project notes).
+4. **Agent Control:** ~~re-register the agent~~ **Done 2026-09-09.** `scripts/demo/register_agent_control.py` created
+   agent `pseudoco-assistant-agent` (step `pseudoco-assistant-llm`) and attached controls 259/263/576; `demobot-agent` is
+   left in place. Until this ran, `GET /api/v1/agents/pseudoco-assistant-agent/controls` returned **404** and the guardrail
+   loaded no definitions at all, so it failed open on every turn. The three controls still carry their original
+   `DemoBot-block-*` names — renaming them to `PseudoCoAssistant-block-*` is outstanding and needs a console-side
+   `PATCH /api/v1/controls/{id}`. Enforcement is partial: 263 (output PII) blocks in-process, while 576 and 259 still fail
+   their client-side Luna scorers (see the project notes on the org's missing runtime-token grant).
 5. **Agent Observability:** keep `SPLUNK_AO_PROJECT`/`SPLUNK_AO_AGENT_STREAM` pinned where the existing `DemoBot` project
    should keep receiving traces; unset them where a new project is wanted.
 6. **AI Defense:** `src_app` changes; nothing to configure, but filters on the old value stop matching.
